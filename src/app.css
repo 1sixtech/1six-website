@@ -1,0 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Besley:ital,wght@0,400..900;1,400..900&display=swap');
+@import 'tailwindcss';
+
+@theme {
+	--font-besley: 'Besley', serif;
+}
