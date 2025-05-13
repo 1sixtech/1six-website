@@ -31,12 +31,16 @@
 			<p class="text-gray-700 font-sans mb-8">
 				The foundational infrastructure for building applications for Web3.
 			</p>
-			<a
+			<button
+				class="px-6 py-2 !bg-black text-lg text-white border border-black rounded-md bg-transparent font-sans"
+				>SOON</button
+			>
+			<!--a
 				type="button"
 				class="px-6 py-2 !bg-black text-lg text-white border border-black rounded-md bg-transparent font-sans"
 				href="https://dos.1six.tech/"
 				target="_blank">Explore dOS</a
-			>
+			-->
 		</div>
 		<div>
 			<div class="flex justify-center mb-4">
@@ -60,12 +64,16 @@
 			<p class="text-gray-700 font-sans mb-8">
 				A spatial, consumer-facing interface for navigating and interacting in Web3.
 			</p>
-			<a
+			<button class="px-6 py-2 text-lg border border-black rounded-md bg-transparent font-sans"
+				>SOON</button
+			>
+
+			<!--a
 				type="button"
 				class="px-6 py-2 text-lg border border-black rounded-md bg-transparent font-sans"
 				href="https://springvalley.fun/"
 				target="_blank">Discover Spring Valley</a
-			>
+			-->
 		</div>
 	</section>
 
