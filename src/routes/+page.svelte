@@ -10,7 +10,7 @@
 			accessible for everyone on the planet.
 		</h1>
 		<p class="text-lg text-gray-700 mb-6 font-sans">
-			Leading the web3 industry to cross the chasm with dOS and Spring Valley.
+			Leading the web3 industry to cross the chasm.
 		</p>
 	</header>
 
@@ -21,13 +21,9 @@
 	>
 		<div>
 			<div class="flex justify-center mb-4">
-				<div
-					class="w-16 h-16 font-sans text-2xl border-2 border-black rounded-xl flex items-center justify-center"
-				>
-					dOS
-				</div>
+				<img class="w-16 h-16" alt="mojave logo" src="mojave.png" />
 			</div>
-			<div class="text-2xl font-bold mb-2">dOS</div>
+			<div class="text-2xl font-bold mb-2">Mojave Protocol</div>
 			<p class="text-gray-700 font-sans mb-8">
 				The foundational infrastructure for building applications for Web3.
 			</p>
