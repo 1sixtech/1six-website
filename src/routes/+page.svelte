@@ -17,7 +17,7 @@
 	<!-- Products Section -->
 	<section
 		id="products"
-		class="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-4xl mx-auto text-center mb-28"
+		class="grid grid-cols-1 md:grid-cols-1 gap-12 max-w-4xl mx-auto text-center mb-28"
 	>
 		<div>
 			<div class="flex justify-center mb-4">
@@ -36,39 +36,6 @@
 				class="px-6 py-2 !bg-black text-lg text-white border border-black rounded-md bg-transparent font-sans"
 				href="https://dos.1six.tech/"
 				target="_blank">Explore dOS</a
-			-->
-		</div>
-		<div>
-			<div class="flex justify-center mb-4">
-				<svg
-					width="64"
-					height="64"
-					viewBox="0 0 64 64"
-					fill="none"
-					xmlns="http://www.w3.org/2000/svg"
-				>
-					<circle cx="32" cy="32" r="30" stroke="black" stroke-width="2" />
-					<path
-						d="M8 36 C16 28, 24 28, 32 36 S48 44, 56 36"
-						stroke="black"
-						stroke-width="2"
-						fill="none"
-					/>
-				</svg>
-			</div>
-			<div class="text-2xl font-bold mb-2">Spring Valley</div>
-			<p class="text-gray-700 font-sans mb-8">
-				A spatial, consumer-facing interface for navigating and interacting in Web3.
-			</p>
-			<button class="px-6 py-2 text-lg border border-black rounded-md bg-transparent font-sans"
-				>SOON</button
-			>
-
-			<!--a
-				type="button"
-				class="px-6 py-2 text-lg border border-black rounded-md bg-transparent font-sans"
-				href="https://springvalley.fun/"
-				target="_blank">Discover Spring Valley</a
 			-->
 		</div>
 	</section>
