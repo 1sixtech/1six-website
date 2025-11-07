@@ -380,7 +380,7 @@ function Home() {
 							<ul className="space-y-2 font-sans text-sm text-gray-400">
 								<li>
 									<a
-										href="#"
+										href="https://x.com/1sixtech"
 										target="_blank"
 										rel="noopener noreferrer"
 										className="hover:text-white transition-colors"
@@ -390,7 +390,7 @@ function Home() {
 								</li>
 								<li>
 									<a
-										href="#"
+										href="https://github.com/1sixtech"
 										target="_blank"
 										rel="noopener noreferrer"
 										className="hover:text-white transition-colors"
@@ -400,7 +400,7 @@ function Home() {
 								</li>
 								<li>
 									<a
-										href="#"
+										href="https://discord.gg/wR4srtyhuU"
 										target="_blank"
 										rel="noopener noreferrer"
 										className="hover:text-white transition-colors"
