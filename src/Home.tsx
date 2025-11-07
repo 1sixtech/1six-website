@@ -128,7 +128,7 @@ function Home() {
 										strokeLinecap="round"
 										strokeLinejoin="round"
 										strokeWidth={2}
-										d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+										d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 919-9"
 									/>
 								</svg>
 							</a>
@@ -181,7 +181,7 @@ function Home() {
 					</div>
 
 					{/* Nevada */}
-					<div className="border border-black/20 p-8 hover:border-black hover:shadow-2xl transition-all group rounded-none">
+					{/* <div className="border border-black/20 p-8 hover:border-black hover:shadow-2xl transition-all group rounded-none">
 						<div className="mb-6">
 							<div className="w-16 h-16 border-2 border-black text-black flex items-center justify-center text-2xl font-bold mb-4">
 								N
@@ -224,7 +224,7 @@ function Home() {
 										strokeLinecap="round"
 										strokeLinejoin="round"
 										strokeWidth={2}
-										d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+										d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 919-9"
 									/>
 								</svg>
 							</a>
@@ -259,10 +259,10 @@ function Home() {
 								</svg>
 							</a>
 						</div>
-					</div>
+					</div> */}
 
 					{/* Mojave */}
-					<div className="border border-black/20 p-8 hover:border-black hover:shadow-2xl transition-all group rounded-none">
+					{/* <div className="border border-black/20 p-8 hover:border-black hover:shadow-2xl transition-all group rounded-none">
 						<div className="mb-6">
 							<div className="w-16 h-16 bg-black text-white flex items-center justify-center text-2xl font-bold mb-4">
 								M
@@ -319,7 +319,7 @@ function Home() {
 								</svg>
 							</a>
 						</div>
-					</div>
+					</div> */}
 				</div>
 			</section>
 
@@ -351,7 +351,7 @@ function Home() {
 										perpdex.tv
 									</a>
 								</li>
-								<li>
+								{/* <li>
 									<a
 										href="https://nevadadex.com"
 										target="_blank"
@@ -370,7 +370,7 @@ function Home() {
 									>
 										Mojave
 									</a>
-								</li>
+								</li> */}
 							</ul>
 						</div>
 						<div>
