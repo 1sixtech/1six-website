@@ -163,11 +163,11 @@ function Home() {
 								</svg>
 							</a>
 							<a
-								href="https://t.me/perpdextv"
+								href="https://discord.gg/wR4srtyhuU"
 								target="_blank"
 								rel="noopener noreferrer"
 								className="w-12 h-12 border border-black/20 hover:bg-black hover:text-white transition-all flex items-center justify-center rounded-none"
-								aria-label="Telegram"
+								aria-label="Discord"
 							>
 								<svg
 									className="w-5 h-5"
