@@ -14,15 +14,100 @@ const pretendard = localFont({
 });
 
 export const metadata: Metadata = {
-  title: '1SIX - Leading web3 industry to cross the chasm',
-  description:
-    '1SIX exists to push the industry past the 16% adoption line. Building infrastructure for crypto-native broadcasting and trading.',
-  openGraph: {
-    title: '1SIX Technologies',
-    description: 'Leading web3 industry to cross the chasm',
-    type: 'website',
-    url: 'https://1six.tech',
+  metadataBase: new URL('https://1six.tech'),
+
+  title: {
+    template: '%s | 1SIX',
+    default: '1SIX - Leading Web3 Industry to Cross the Chasm',
   },
+
+  description:
+    '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+
+  keywords: [
+    '1SIX',
+    '1SIX Technologies',
+    'web3 infrastructure',
+    'crypto broadcasting',
+    'crypto trading',
+    'blockchain adoption',
+    'Nevada TV',
+    'Nevada Trade',
+    'decentralized media',
+    'crypto streaming',
+    'social trading',
+  ],
+
+  authors: [{ name: '1SIX Technologies' }],
+  creator: '1SIX Technologies',
+  publisher: '1SIX Technologies',
+
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://1six.tech',
+    siteName: '1SIX Technologies',
+    title: '1SIX - Leading Web3 Industry to Cross the Chasm',
+    description:
+      '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: '1SIX Technologies - Leading web3 industry to cross the chasm',
+      },
+    ],
+  },
+
+  twitter: {
+    card: 'summary_large_image',
+    site: '@1sixtech',
+    creator: '@1sixtech',
+    title: '1SIX - Leading Web3 Industry to Cross the Chasm',
+    description:
+      '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+    images: ['/og-image.png'],
+  },
+
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+
+  alternates: {
+    canonical: 'https://1six.tech',
+  },
+
+  icons: {
+    icon: '/favicon.png',
+    apple: '/apple-icon.png',
+  },
+};
+
+const organizationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: '1SIX Technologies',
+  url: 'https://1six.tech',
+  logo: 'https://1six.tech/favicon.png',
+  description:
+    '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+  sameAs: [
+    'https://x.com/1sixtech',
+    'https://www.youtube.com/@nevada-app',
+    'https://discord.gg/wR4srtyhuU',
+    'https://www.threads.com/@live.nevada.app',
+    'https://www.instagram.com/live.nevada.app',
+    'https://www.tiktok.com/@live.nevada.app',
+  ],
 };
 
 export default function RootLayout({
@@ -50,6 +135,12 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(organizationJsonLd),
+          }}
+        />
         {/* Skip to content link for keyboard users */}
         <a
           href="#main-content"
