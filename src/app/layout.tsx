@@ -4,6 +4,7 @@ import './globals.css';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
+import { Analytics } from '@vercel/analytics/next';
 
 const pretendard = localFont({
   src: './fonts/PretendardVariable.woff2',
@@ -61,6 +62,7 @@ export default function RootLayout({
           <main id="main-content">{children}</main>
           <Footer />
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
