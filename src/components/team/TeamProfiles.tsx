@@ -1,32 +1,34 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 /**
  * Team Profiles — institution logo grid
  * Desktop: all logos in a 4-col grid
  * Mobile: first 6 logos visible, "see more"/"hide" toggle for the rest
+ *
+ * Logos are single SVGs (black fill). In dark mode CSS filter: invert(1)
+ * flips them to white — one file per logo, no dark/light variants needed.
  */
 
 const INSTITUTIONS = [
-  { name: 'Needham', file: 'Needham.png' },
-  { name: 'Schwarzman', file: 'Schwarzman.png' },
-  { name: 'ICPC', file: '_ICPC.png' },
-  { name: 'MIT', file: 'MIT.png' },
-  { name: 'Harvard', file: 'Harvard.png' },
-  { name: 'Codeforces', file: 'Codeforces.png' },
-  { name: 'Ethereum', file: 'Ethereum.png' },
-  { name: 'Starknet', file: 'Starknet.png' },
-  { name: 'Tsinghua', file: 'Tsinghua.png' },
+  { name: 'Needham', file: 'Needham.svg' },
+  { name: 'Schwarzman', file: 'Schwarzman.svg' },
+  { name: 'ICPC', file: '_ICPC.svg' },
+  { name: 'MIT', file: 'MIT.svg' },
+  { name: 'Harvard', file: 'Harvard.svg' },
+  { name: 'Codeforces', file: 'Codeforces.svg' },
+  { name: 'Ethereum', file: 'Ethereum.svg' },
+  { name: 'Starknet', file: 'Starknet.svg' },
+  { name: 'Tsinghua', file: 'Tsinghua.svg' },
 ];
 
 const MOBILE_INITIAL_COUNT = 6;
 
 export function TeamProfiles() {
-  const { theme, mounted } = useTheme();
-  const mode = theme === 'dark' ? 'dark' : 'light';
+  const { theme } = useTheme();
+  const invertFilter = theme === 'dark' ? 'invert(1)' : undefined;
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -49,15 +51,14 @@ export function TeamProfiles() {
               className="flex h-[98px] w-[207px] shrink-0 items-center justify-center px-4"
               style={{ backgroundColor: 'var(--color-card)' }}
             >
-              {mounted && (
-                <Image
-                  src={`/logos/${mode}/team/${inst.file}`}
-                  alt={inst.name}
-                  width={140}
-                  height={45}
-                  className="max-h-[45px] w-auto object-contain"
-                />
-              )}
+              <img
+                src={`/logos/${inst.file}`}
+                alt={inst.name}
+                width={140}
+                height={45}
+                className="max-h-[45px] w-auto object-contain"
+                style={{ filter: invertFilter }}
+              />
             </div>
           ))}
         </div>
@@ -72,15 +73,14 @@ export function TeamProfiles() {
                 className="flex h-[78px] items-center justify-center px-4"
                 style={{ backgroundColor: 'var(--color-card)' }}
               >
-                {mounted && (
-                  <Image
-                    src={`/logos/${mode}/team/${inst.file}`}
-                    alt={inst.name}
-                    width={120}
-                    height={40}
-                    className="max-h-[36px] w-auto object-contain"
-                  />
-                )}
+                <img
+                  src={`/logos/${inst.file}`}
+                  alt={inst.name}
+                  width={120}
+                  height={40}
+                  className="max-h-[36px] w-auto object-contain"
+                style={{ filter: invertFilter }}
+                />
               </div>
             ))}
           </div>
@@ -98,12 +98,13 @@ export function TeamProfiles() {
                     className="flex h-[78px] items-center justify-center px-4"
                     style={{ backgroundColor: 'var(--color-card)' }}
                   >
-                    <Image
-                      src={`/logos/${mode}/team/${inst.file}`}
+                    <img
+                      src={`/logos/${inst.file}`}
                       alt={inst.name}
                       width={120}
                       height={40}
                       className="max-h-[36px] w-auto object-contain"
+                style={{ filter: invertFilter }}
                     />
                   </div>
                 ))}

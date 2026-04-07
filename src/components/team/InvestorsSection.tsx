@@ -1,12 +1,14 @@
 'use client';
 
-import Image from 'next/image';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 /**
  * Investors Section
  * Desktop: flex-wrap row of cards
  * Mobile (Figma): 2-col grid, 3 rows, with "and more industry leaders" footer
+ *
+ * Firm logos are single SVGs (black fill). In dark mode CSS filter: invert(1)
+ * flips them to white.
  */
 
 const INDIVIDUAL_INVESTORS = [
@@ -16,14 +18,14 @@ const INDIVIDUAL_INVESTORS = [
 ];
 
 const FIRM_INVESTORS = [
-  { name: 'Lambda', file: 'Lambda.png', w: 95, h: 27, mw: 80, mh: 23 },
-  { name: 'Lemniscap', file: 'Lemniscap.png', w: 106, h: 22, mw: 90, mh: 19 },
-  { name: 'Ergodic Group', file: 'Ergodic.png', w: 137, h: 22, mw: 116, mh: 19 },
+  { name: 'Lambda', file: 'Lambda.svg', w: 95, h: 27, mw: 80, mh: 23 },
+  { name: 'Lemniscap', file: 'Lemniscap.svg', w: 106, h: 22, mw: 90, mh: 19 },
+  { name: 'Ergodic Group', file: 'Ergodic.svg', w: 137, h: 22, mw: 116, mh: 19 },
 ];
 
 export function InvestorsSection() {
-  const { theme, mounted } = useTheme();
-  const mode = theme === 'dark' ? 'dark' : 'light';
+  const { theme } = useTheme();
+  const invertFilter = theme === 'dark' ? 'invert(1)' : undefined;
 
   return (
     <section
@@ -73,16 +75,14 @@ export function InvestorsSection() {
                 className="flex h-[100px] w-[207px] shrink-0 items-center justify-center"
                 style={{ backgroundColor: 'var(--color-bg)' }}
               >
-                {mounted && (
-                  <Image
-                    src={`/logos/${mode}/investors/${firm.file}`}
-                    alt={firm.name}
-                    width={firm.w}
-                    height={firm.h}
-                    className="object-contain"
-                    style={{ width: firm.w, height: firm.h }}
-                  />
-                )}
+                <img
+                  src={`/logos/${firm.file}`}
+                  alt={firm.name}
+                  width={firm.w}
+                  height={firm.h}
+                  className="object-contain"
+                  style={{ width: firm.w, height: firm.h, filter: invertFilter }}
+                />
               </div>
             ))}
           </div>
@@ -132,16 +132,14 @@ export function InvestorsSection() {
               className="flex h-[79px] items-center justify-center"
               style={{ backgroundColor: 'var(--color-bg)' }}
             >
-              {mounted && (
-                <Image
-                  src={`/logos/${mode}/investors/${FIRM_INVESTORS[0].file}`}
-                  alt={FIRM_INVESTORS[0].name}
-                  width={FIRM_INVESTORS[0].mw}
-                  height={FIRM_INVESTORS[0].mh}
-                  className="object-contain"
-                  style={{ width: FIRM_INVESTORS[0].mw, height: FIRM_INVESTORS[0].mh }}
-                />
-              )}
+              <img
+                src={`/logos/${FIRM_INVESTORS[0].file}`}
+                alt={FIRM_INVESTORS[0].name}
+                width={FIRM_INVESTORS[0].mw}
+                height={FIRM_INVESTORS[0].mh}
+                className="object-contain"
+                style={{ width: FIRM_INVESTORS[0].mw, height: FIRM_INVESTORS[0].mh }}
+              />
             </div>
 
             {/* Row 3: Remaining firms */}
@@ -151,16 +149,14 @@ export function InvestorsSection() {
                 className="flex h-[79px] items-center justify-center"
                 style={{ backgroundColor: 'var(--color-bg)' }}
               >
-                {mounted && (
-                  <Image
-                    src={`/logos/${mode}/investors/${firm.file}`}
-                    alt={firm.name}
-                    width={firm.mw}
-                    height={firm.mh}
-                    className="object-contain"
-                    style={{ width: firm.mw, height: firm.mh }}
-                  />
-                )}
+                <img
+                  src={`/logos/${firm.file}`}
+                  alt={firm.name}
+                  width={firm.mw}
+                  height={firm.mh}
+                  className="object-contain"
+                  style={{ width: firm.mw, height: firm.mh }}
+                />
               </div>
             ))}
           </div>
