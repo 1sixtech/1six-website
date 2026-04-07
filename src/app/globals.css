@@ -1,0 +1,68 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: var(--font-pretendard), 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
+  --color-accent: #FF3700;
+  --color-bg-dark: #1C1C1C;
+  --color-bg-light: #F3F0F0;
+  --color-text-dark: #F7F2F2;
+  --color-text-light: #000000;
+  --color-sub1: #A6A6A6;
+  --color-sub2: #646464;
+  --color-card-dark: #2D2D2D;
+  --color-card-dark2: #252525;
+}
+
+/* Theme aliasing — active colors switch based on data-theme attribute */
+:root {
+  --color-bg: var(--color-bg-light);
+  --color-text: var(--color-text-light);
+  --color-card: #FBF9F9;
+  --color-card2: #F7F5F5;
+  --color-sub-text1: var(--color-sub1);
+  --color-sub-text2: var(--color-sub2);
+  --color-header-bg: rgba(255, 255, 255, 0.4);
+}
+
+[data-theme='dark'] {
+  --color-bg: var(--color-bg-dark);
+  --color-text: var(--color-text-dark);
+  --color-card: var(--color-card-dark);
+  --color-card2: var(--color-card-dark2);
+  --color-sub-text1: var(--color-sub2);
+  --color-header-bg: rgba(255, 255, 255, 0.1);
+}
+
+/* Hide scrollbar */
+html {
+  scrollbar-width: none; /* Firefox */
+  scroll-behavior: auto;
+}
+
+html::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge */
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Focus styles for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
