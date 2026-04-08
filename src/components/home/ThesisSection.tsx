@@ -463,15 +463,20 @@ export function ThesisSection() {
     });
     stRef.current = st;
 
-    // Observer: intercept wheel/touch, trigger discrete transitions
+    // Observer: intercept wheel/touch, trigger discrete transitions.
+    // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
+    // callbacks this normalises both input methods:
+    //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
+    //   iOS touch:     only swapped cb = fixes the inverted direction
     const obs = Observer.create({
       target: section,
       type: 'wheel,touch',
       tolerance: 10,
       preventDefault: true,
       lockAxis: true,
-      onUp: () => gotoPage(-1),
-      onDown: () => gotoPage(1),
+      wheelSpeed: -1,
+      onUp: () => gotoPage(1),
+      onDown: () => gotoPage(-1),
     });
     observerRef.current = obs;
 
@@ -541,7 +546,7 @@ export function ThesisSection() {
     <section
       ref={sectionRef}
       id="thesis"
-      className="relative h-dvh w-full"
+      className="relative h-svh w-full"
       style={{ backgroundColor: 'var(--color-card)' }}
       aria-live="polite"
     >

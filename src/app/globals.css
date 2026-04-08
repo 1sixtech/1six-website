@@ -67,6 +67,8 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   transition: background-color 0.3s ease, color 0.3s ease;
+  /* Account for iPhone notch & home indicator safe areas */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Focus styles for keyboard navigation */
