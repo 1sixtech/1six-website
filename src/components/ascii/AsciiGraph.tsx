@@ -28,8 +28,8 @@ export function AsciiGraphCanvas({ cameraOffsetX = 0 }: { cameraOffsetX?: number
       scale={2.3}
       noiseIntensity={0.1}
       noiseFPS={7}
-      minBrightness={86}
-      maxBrightness={37}
+      minBrightness={100}
+      maxBrightness={20}
       planeWidth={5.9}
       planeHeight={4}
     />

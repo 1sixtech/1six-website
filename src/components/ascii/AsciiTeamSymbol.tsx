@@ -20,8 +20,7 @@ export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
       eager
       textureUrl="/resource/Source_Team symbol.mp4"
       mosaicCellUrl={cellUrl}
-      width={208}
-      height={208}
+      className="absolute inset-0 h-full w-full"
       mosaicSize={9}
       shape="plane"
       orthographic
@@ -35,8 +34,7 @@ export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
       maxBrightness={0}
       planeWidth={4}
       planeHeight={4}
-      renderWidth={500}
-      renderHeight={500}
+      renderScale={2.4}
       onReady={onReady}
     />
   );

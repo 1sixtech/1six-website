@@ -37,8 +37,12 @@ export class AscMosaic {
   private tiltMaxAngle: number = Math.PI / 6;
   private tiltSmoothness: number = 0.15;
   private resizeHandler: (() => void) | null = null;
+  private contextLostHandler: ((e: Event) => void) | null = null;
+  private contextRestoredHandler: (() => void) | null = null;
   private container: HTMLElement;
   private asciiMosaicFilter: AsciiMosaicFilter | null = null;
+  /** Render at container_size × renderScale for denser mosaic grids. */
+  private renderScale: number = 1;
   private animationFrameId: number | null = null;
   private isAnimating: boolean = false;
   private useOrthographic: boolean = false;
@@ -80,9 +84,32 @@ export class AscMosaic {
     this.renderer.toneMappingExposure = 2.0;
     container.appendChild(this.renderer.domElement);
 
+    // WebGL context loss recovery. Mobile browsers evict contexts on tab switch
+    // or memory pressure. Three.js re-uploads textures/shaders internally on
+    // restore, but we must pause/resume the animation loop.
+    this.contextLostHandler = (e: Event) => { e.preventDefault(); this.stopAnimate(); };
+    this.contextRestoredHandler = () => {
+      if (this.asciiMosaicFilter) {
+        const w = this.renderer.domElement.width;
+        const h = this.renderer.domElement.height;
+        this.asciiMosaicFilter.setSize(w, h);
+      }
+      this.animate();
+    };
+    this.renderer.domElement.addEventListener('webglcontextlost', this.contextLostHandler);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.contextRestoredHandler);
+
+    // Resize handler: only fires on width changes to avoid flicker from
+    // mobile address bar show/hide (height-only changes).
+    let lastContainerWidth = container.clientWidth;
     this.resizeHandler = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
+      if (w === lastContainerWidth) return;
+      lastContainerWidth = w;
+
+      const rw = Math.round(w * this.renderScale);
+      const rh = Math.round(h * this.renderScale);
       if (this.camera instanceof THREE.PerspectiveCamera) {
         this.camera.aspect = w / h;
       } else {
@@ -94,9 +121,14 @@ export class AscMosaic {
         this.camera.bottom = -halfH;
       }
       this.camera.updateProjectionMatrix();
-      this.renderer.setSize(w, h);
+      this.renderer.setSize(rw, rh);
+      if (this.renderScale !== 1) {
+        const canvas = this.renderer.domElement;
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+      }
       if (this.asciiMosaicFilter) {
-        this.asciiMosaicFilter.setSize(w, h);
+        this.asciiMosaicFilter.setSize(rw, rh);
       }
     };
     window.addEventListener('resize', this.resizeHandler);
@@ -651,6 +683,27 @@ export class AscMosaic {
     }
   }
 
+  /**
+   * Set render scale multiplier. The WebGL renderer and mosaic filter will
+   * render at container_size × scale, while the canvas CSS stays at 100% of
+   * the container. Higher values produce denser mosaic grids.
+   */
+  setRenderScale(scale: number): void {
+    this.renderScale = scale;
+    // Immediately apply to current container size
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const rw = Math.round(w * scale);
+    const rh = Math.round(h * scale);
+    this.renderer.setSize(rw, rh);
+    const canvas = this.renderer.domElement;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    if (this.asciiMosaicFilter) {
+      this.asciiMosaicFilter.setSize(rw, rh);
+    }
+  }
+
   getOrbitControls(): OrbitControls | null {
     return this.orbitControls;
   }
@@ -693,6 +746,15 @@ export class AscMosaic {
     if (this.resizeHandler) {
       window.removeEventListener('resize', this.resizeHandler);
       this.resizeHandler = null;
+    }
+
+    if (this.contextLostHandler) {
+      this.renderer.domElement.removeEventListener('webglcontextlost', this.contextLostHandler);
+      this.contextLostHandler = null;
+    }
+    if (this.contextRestoredHandler) {
+      this.renderer.domElement.removeEventListener('webglcontextrestored', this.contextRestoredHandler);
+      this.contextRestoredHandler = null;
     }
 
     if (this.asciiMosaicFilter) {

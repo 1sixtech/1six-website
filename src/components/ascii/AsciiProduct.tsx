@@ -41,8 +41,7 @@ export function AsciiProductCanvas({ product }: AsciiProductProps) {
     <AsciiCanvas
       textureUrl={config.textureUrl}
       mosaicCellUrl={cellUrl}
-      width={320}
-      height={270}
+      className="absolute inset-0 h-full w-full"
       mosaicSize={7}
       shape="plane"
       orthographic={false}
@@ -57,8 +56,7 @@ export function AsciiProductCanvas({ product }: AsciiProductProps) {
       avoidStrength={13}
       planeWidth={4}
       planeHeight={4}
-      renderWidth={640}
-      renderHeight={540}
+      renderScale={2}
     />
   );
 }

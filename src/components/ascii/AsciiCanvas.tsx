@@ -73,6 +73,8 @@ interface AsciiCanvasProps {
   renderWidth?: number;
   /** Internal WebGL render height (higher = denser mosaic). CSS size stays at height. */
   renderHeight?: number;
+  /** Render at container_size × renderScale for denser mosaic grids. Survives resize. Default: 1 */
+  renderScale?: number;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
   eager?: boolean;
   /** Called once when the mosaic finishes initializing and starts animating */
@@ -131,6 +133,7 @@ export function AsciiCanvas({
   backgroundColor,
   renderWidth,
   renderHeight,
+  renderScale = 1,
   cameraOffsetX = 0,
   eager = false,
   onReady,
@@ -197,6 +200,12 @@ export function AsciiCanvas({
         canvas.style.height = '100%';
       }
 
+      // If renderScale specified, render at container_size × scale.
+      // This survives window resize events (handled in ascmosaic).
+      if (renderScale > 1) {
+        mosaic.setRenderScale(renderScale);
+      }
+
       // Add model with texture (supports both image and video)
       await mosaic.addModel({
         shape,
@@ -247,7 +256,7 @@ export function AsciiCanvas({
     } catch (err) {
       console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, cameraOffsetX]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;
