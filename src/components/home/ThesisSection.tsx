@@ -266,6 +266,9 @@ export function ThesisSection() {
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
   const stRef = useRef<ScrollTrigger | null>(null);
+  // When true, Observer callbacks fire and native scroll is blocked.
+  // Observer stays always-enabled so it never misses touchstart events.
+  const sectionActiveRef = useRef(false);
   // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
   const justExitedRef = useRef(false);
 
@@ -309,7 +312,7 @@ export function ThesisSection() {
       // within 300ms (stale pin math, iOS scroll batching), force exit.
       setTimeout(() => {
         if (animatingRef.current) {
-          observerRef.current?.disable();
+          sectionActiveRef.current = false;
           animatingRef.current = false;
         }
       }, 300);
@@ -439,31 +442,32 @@ export function ThesisSection() {
       start: 'top top',
       end: '+=' + ((TOTAL - 1) * 100) + '%',
       onEnter: () => {
-        // Skip if we just exited (scroll bounce / momentum)
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(0);
-        observerRef.current?.enable();
+        sectionActiveRef.current = true;
       },
       onEnterBack: () => {
-        // Skip if we just exited (scroll bounce / momentum)
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(TOTAL - 1);
-        observerRef.current?.enable();
+        sectionActiveRef.current = true;
       },
       onLeave: () => {
-        observerRef.current?.disable();
+        sectionActiveRef.current = false;
         animatingRef.current = false;
       },
       onLeaveBack: () => {
-        observerRef.current?.disable();
+        sectionActiveRef.current = false;
         animatingRef.current = false;
       },
     });
     stRef.current = st;
 
-    // Observer: intercept wheel/touch, trigger discrete transitions.
+    // Observer: always enabled so it never misses touchstart events.
+    // Callbacks are gated by sectionActiveRef so they only fire when
+    // the section is pinned.
+    //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
     //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
@@ -472,19 +476,31 @@ export function ThesisSection() {
       target: section,
       type: 'wheel,touch',
       tolerance: 10,
-      preventDefault: true,
+      preventDefault: false,
       lockAxis: true,
       wheelSpeed: -1,
-      onUp: () => gotoPage(1),
-      onDown: () => gotoPage(-1),
+      onUp: () => { if (sectionActiveRef.current) gotoPage(1); },
+      onDown: () => { if (sectionActiveRef.current) gotoPage(-1); },
     });
     observerRef.current = obs;
 
-    // Start disabled — ScrollTrigger onEnter will enable it
-    obs.disable();
+    // Block native scroll ONLY while section is pinned.
+    // We intercept touchmove on the section itself (non-passive)
+    // and only preventDefault when active.
+    const onTouchMove = (e: TouchEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
+    section.addEventListener('touchmove', onTouchMove, { passive: false });
+    // Also block wheel scroll when active
+    const onWheel = (e: WheelEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
+    section.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
-      obs.disable();
+      section.removeEventListener('touchmove', onTouchMove);
+      section.removeEventListener('wheel', onWheel);
+      obs.kill();
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
