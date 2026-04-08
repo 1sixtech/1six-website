@@ -1,44 +1,44 @@
 'use client';
 
-import { useTheme } from '@/components/providers/ThemeProvider';
-
 /**
- * Investors Section
- * Desktop: flex-wrap row of cards
- * Mobile (Figma): 2-col grid, 3 rows, with "and more industry leaders" footer
+ * Investors Section — D4 "River" layout
  *
- * Firm logos are single SVGs (black fill). In dark mode CSS filter: invert(1)
- * flips them to white.
+ * Desktop: CSS Grid 7-column (4 investors + 3 dividers), row 2 firms span with
+ *          center divider aligned to row 1's middle divider.
+ * Mobile:  CSS Grid 3-column (2 items + 1 divider), 3 rows of pairs.
+ *
+ * All text, no card backgrounds, no logos. Dividers use --color-divider.
  */
 
 const INDIVIDUAL_INVESTORS = [
   { name: 'Naval Ravikant', role: 'Founder of AngelList' },
   { name: 'Charlie Songhurst', role: 'Facebook Board Member' },
+  { name: 'Ken Ng', role: 'Uniswap Foundation\nCofounder' },
   { name: 'Loi Luu', role: 'WBTC Creator' },
 ];
 
-const FIRM_INVESTORS = [
-  { name: 'Lambda', file: 'Lambda.svg', w: 95, h: 27, mw: 80, mh: 23 },
-  { name: 'Lemniscap', file: 'Lemniscap.svg', w: 106, h: 22, mw: 90, mh: 19 },
-  { name: 'Ergodic Group', file: 'Ergodic.svg', w: 137, h: 22, mw: 116, mh: 19 },
-];
+const FIRM_INVESTORS = ['Lemniscap', 'Lambda'];
+
+/* Shared vertical divider (both breakpoints) */
+function Divider({ className = '' }: { className?: string }) {
+  return (
+    <div
+      className={`justify-self-center self-center ${className}`}
+      style={{ width: 1, backgroundColor: 'var(--color-divider)' }}
+    />
+  );
+}
 
 export function InvestorsSection() {
-  const { theme } = useTheme();
-  const invertFilter = theme === 'dark' ? 'invert(1)' : undefined;
-
   return (
     <section
       id="investors"
-      className="pt-[70px] pb-[24px] md:h-[494px]"
+      className="pt-[100px] pb-[100px]"
       style={{ backgroundColor: 'var(--color-card)' }}
     >
       <div className="mx-auto max-w-[1440px] px-[22px] md:px-12">
         {/* Header */}
-        <div className="mb-[60px] md:mb-[102px] text-center">
-          <p className="text-[14px] md:text-[20px] font-normal tracking-[-0.28px] md:tracking-[-0.4px] text-[var(--color-sub-text1)]">
-            INVESTORS
-          </p>
+        <div className="mb-[50px] md:mb-[80px] text-center">
           <h2
             className="text-[20px] md:text-[24px] font-medium leading-[1.3] md:leading-[1.2] tracking-[-0.4px] md:tracking-[-0.48px]"
             style={{ color: 'var(--color-text)' }}
@@ -49,124 +49,169 @@ export function InvestorsSection() {
           </h2>
         </div>
 
-        {/* Desktop: horizontal row of 6 cards */}
+        {/* ── Desktop: 7-column grid ── */}
         <div className="hidden md:block">
-          <div className="flex items-center justify-center gap-[10px] overflow-x-auto">
-            {INDIVIDUAL_INVESTORS.map((investor) => (
-              <div
-                key={investor.name}
-                className="flex h-[100px] w-[207px] shrink-0 flex-col items-center justify-center"
-                style={{ backgroundColor: 'var(--color-bg)' }}
+          <div
+            className="mx-auto grid max-w-[860px]"
+            style={{
+              gridTemplateColumns: '1fr 1px 1fr 1px 1fr 1px 1fr',
+              rowGap: 40,
+            }}
+          >
+            {/* Row 1 — Individual investors */}
+            <InvestorCell
+              name={INDIVIDUAL_INVESTORS[0].name}
+              role={INDIVIDUAL_INVESTORS[0].role}
+            />
+            <Divider className="h-[28px]" />
+            <InvestorCell
+              name={INDIVIDUAL_INVESTORS[1].name}
+              role={INDIVIDUAL_INVESTORS[1].role}
+            />
+            <Divider className="h-[28px]" />
+            <InvestorCell
+              name={INDIVIDUAL_INVESTORS[2].name}
+              role={INDIVIDUAL_INVESTORS[2].role}
+            />
+            <Divider className="h-[28px]" />
+            <InvestorCell
+              name={INDIVIDUAL_INVESTORS[3].name}
+              role={INDIVIDUAL_INVESTORS[3].role}
+            />
+
+            {/* Row 2 — Firms (span to align center divider) */}
+            <div
+              className="flex items-center justify-center"
+              style={{ gridColumn: '1 / 4' }}
+            >
+              <span
+                className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+                style={{ color: 'var(--color-text)' }}
               >
-                <span
-                  className="text-[18px] font-normal tracking-[-0.36px]"
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  {investor.name}
-                </span>
-                <span className="text-[12px] tracking-[-0.12px] text-[var(--color-sub-text1)]">
-                  {investor.role}
-                </span>
-              </div>
-            ))}
-            {FIRM_INVESTORS.map((firm) => (
-              <div
-                key={firm.name}
-                className="flex h-[100px] w-[207px] shrink-0 items-center justify-center"
-                style={{ backgroundColor: 'var(--color-bg)' }}
+                {FIRM_INVESTORS[0]}
+              </span>
+            </div>
+            <Divider className="h-[28px]" />
+            <div
+              className="flex items-center justify-center"
+              style={{ gridColumn: '5 / 8' }}
+            >
+              <span
+                className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+                style={{ color: 'var(--color-text)' }}
               >
-                <img
-                  src={`/logos/${firm.file}`}
-                  alt={firm.name}
-                  width={firm.w}
-                  height={firm.h}
-                  className="object-contain"
-                  style={{ width: firm.w, height: firm.h, filter: invertFilter }}
-                />
-              </div>
-            ))}
+                {FIRM_INVESTORS[1]}
+              </span>
+            </div>
           </div>
-          <p className="mt-6 text-center text-[12px] tracking-[-0.12px] text-[var(--color-sub-text1)]">
-            and more industry leaders
+
+          <p
+            className="mt-6 text-center text-[11px] tracking-[-0.1px]"
+            style={{ color: 'var(--color-sub-text2)' }}
+          >
+            and more
           </p>
         </div>
 
-        {/* Mobile: 2-col grid, 3 rows */}
+        {/* ── Mobile: 3-column grid (M2 — 2-column pairs) ── */}
         <div className="md:hidden">
-          <div className="grid grid-cols-2 gap-3">
-            {/* Row 1: Individual investors */}
-            {INDIVIDUAL_INVESTORS.slice(0, 2).map((investor) => (
-              <div
-                key={investor.name}
-                className="flex h-[79px] flex-col items-center justify-center"
-                style={{ backgroundColor: 'var(--color-bg)' }}
-              >
-                <span
-                  className="text-[15px] font-normal tracking-[-0.3px]"
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  {investor.name}
-                </span>
-                <span className="text-[12px] tracking-[-0.12px] text-[var(--color-sub-text2)]">
-                  {investor.role}
-                </span>
-              </div>
-            ))}
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: '1fr 1px 1fr',
+              rowGap: 20,
+            }}
+          >
+            {/* Row 1 */}
+            <InvestorCellMobile
+              name={INDIVIDUAL_INVESTORS[0].name}
+              role={INDIVIDUAL_INVESTORS[0].role}
+            />
+            <Divider className="h-[24px]" />
+            <InvestorCellMobile
+              name={INDIVIDUAL_INVESTORS[1].name}
+              role={INDIVIDUAL_INVESTORS[1].role}
+            />
 
-            {/* Row 2: Last individual + first firm */}
-            <div
-              className="flex h-[79px] flex-col items-center justify-center"
-              style={{ backgroundColor: 'var(--color-bg)' }}
-            >
+            {/* Row 2 */}
+            <InvestorCellMobile
+              name={INDIVIDUAL_INVESTORS[2].name}
+              role={INDIVIDUAL_INVESTORS[2].role}
+            />
+            <Divider className="h-[24px]" />
+            <InvestorCellMobile
+              name={INDIVIDUAL_INVESTORS[3].name}
+              role={INDIVIDUAL_INVESTORS[3].role}
+            />
+
+            {/* Row 3 — Firms */}
+            <div className="flex items-center justify-center py-[8px]">
               <span
-                className="text-[15px] font-normal tracking-[-0.3px]"
+                className="text-[13px] font-normal tracking-[-0.2px] leading-none"
                 style={{ color: 'var(--color-text)' }}
               >
-                {INDIVIDUAL_INVESTORS[2].name}
-              </span>
-              <span className="text-[12px] tracking-[-0.12px] text-[var(--color-sub-text2)]">
-                {INDIVIDUAL_INVESTORS[2].role}
+                {FIRM_INVESTORS[0]}
               </span>
             </div>
-            <div
-              className="flex h-[79px] items-center justify-center"
-              style={{ backgroundColor: 'var(--color-bg)' }}
-            >
-              <img
-                src={`/logos/${FIRM_INVESTORS[0].file}`}
-                alt={FIRM_INVESTORS[0].name}
-                width={FIRM_INVESTORS[0].mw}
-                height={FIRM_INVESTORS[0].mh}
-                className="object-contain"
-                style={{ width: FIRM_INVESTORS[0].mw, height: FIRM_INVESTORS[0].mh }}
-              />
-            </div>
-
-            {/* Row 3: Remaining firms */}
-            {FIRM_INVESTORS.slice(1).map((firm) => (
-              <div
-                key={firm.name}
-                className="flex h-[79px] items-center justify-center"
-                style={{ backgroundColor: 'var(--color-bg)' }}
+            <Divider className="h-[24px]" />
+            <div className="flex items-center justify-center py-[8px]">
+              <span
+                className="text-[13px] font-normal tracking-[-0.2px] leading-none"
+                style={{ color: 'var(--color-text)' }}
               >
-                <img
-                  src={`/logos/${firm.file}`}
-                  alt={firm.name}
-                  width={firm.mw}
-                  height={firm.mh}
-                  className="object-contain"
-                  style={{ width: firm.mw, height: firm.mh }}
-                />
-              </div>
-            ))}
+                {FIRM_INVESTORS[1]}
+              </span>
+            </div>
           </div>
 
-          {/* "and more" footer */}
-          <p className="mt-8 text-center text-[12px] tracking-[-0.12px] text-[var(--color-sub-text1)]">
-            and more industry leaders
+          <p
+            className="mt-6 text-center text-[11px] tracking-[-0.1px]"
+            style={{ color: 'var(--color-sub-text2)' }}
+          >
+            and more
           </p>
         </div>
       </div>
     </section>
+  );
+}
+
+/* ── Desktop investor cell ── */
+function InvestorCell({ name, role }: { name: string; role: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-[4px]">
+      <span
+        className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+        style={{ color: 'var(--color-text)' }}
+      >
+        {name}
+      </span>
+      <span
+        className="mt-[6px] text-[9px] uppercase tracking-[0.2px] leading-[1.4] text-center whitespace-pre-line"
+        style={{ color: 'var(--color-sub-text1)' }}
+      >
+        {role}
+      </span>
+    </div>
+  );
+}
+
+/* ── Mobile investor cell ── */
+function InvestorCellMobile({ name, role }: { name: string; role: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-[8px]">
+      <span
+        className="text-[13px] font-normal tracking-[-0.2px] leading-none"
+        style={{ color: 'var(--color-text)' }}
+      >
+        {name}
+      </span>
+      <span
+        className="mt-[4px] text-[8px] uppercase tracking-[0.2px] leading-[1.4] text-center whitespace-pre-line"
+        style={{ color: 'var(--color-sub-text1)' }}
+      >
+        {role}
+      </span>
+    </div>
   );
 }

@@ -1,41 +1,134 @@
 'use client';
 
-import { useState } from 'react';
-import { useTheme } from '@/components/providers/ThemeProvider';
-
 /**
- * Team Profiles — institution logo grid
- * Desktop: all logos in a 4-col grid
- * Mobile: first 6 logos visible, "see more"/"hide" toggle for the rest
+ * TeamProfiles — Infinite Marquee Logo Section
  *
- * Logos are single SVGs (black fill). In dark mode CSS filter: invert(1)
- * flips them to white — one file per logo, no dark/light variants needed.
+ * Desktop (V4): Single-row infinite horizontal marquee with centered sub-labels
+ *               and vertical dividers between items.
+ * Mobile  (M2): Dual-row marquee scrolling in opposite directions.
+ *
+ * Performance strategy (derived from 20+ resource research):
+ * ─────────────────────────────────────────────────────────
+ * 1. Pure CSS animation with `transform: translate3d` — GPU-composited,
+ *    no layout/paint triggers, locked to compositor thread.
+ * 2. `will-change: transform` on animated tracks only (not on display:none tracks).
+ * 3. `backface-visibility: hidden` prevents Safari flicker.
+ * 4. Content duplicated exactly once (2x total). Both content blocks are structurally
+ *    identical — no trailing divider — so the -50% reset is pixel-perfect.
+ * 5. `animation-timing-function: linear` for constant velocity.
+ * 6. Duplicate content gets `aria-hidden="true"` for screen readers.
+ * 7. Global `prefers-reduced-motion` in globals.css handles accessibility.
+ * 8. CSS-only = no JS timers = immune to background-tab throttling.
+ * 9. Styles live in globals.css (build-time extraction), not inline <style> tags.
  */
 
-const INSTITUTIONS = [
-  { name: 'Needham', file: 'Needham.svg' },
-  { name: 'Schwarzman', file: 'Schwarzman.svg' },
-  { name: 'ICPC', file: '_ICPC.svg' },
-  { name: 'MIT', file: 'MIT.svg' },
-  { name: 'Harvard', file: 'Harvard.svg' },
-  { name: 'Codeforces', file: 'Codeforces.svg' },
-  { name: 'Ethereum', file: 'Ethereum.svg' },
-  { name: 'Starknet', file: 'Starknet.svg' },
-  { name: 'Tsinghua', file: 'Tsinghua.svg' },
+// ── Data ──────────────────────────────────────────────────
+
+interface Institution {
+  name: string;
+  sub?: string;
+}
+
+const ROW1: Institution[] = [
+  { name: 'MIT' },
+  { name: 'Harvard' },
+  { name: 'Schwarzman', sub: 'scholars' },
+  { name: 'Ethereum', sub: 'foundation' },
+  { name: 'Starknet', sub: 'foundation' },
 ];
 
-const MOBILE_INITIAL_COUNT = 6;
+const ROW2: Institution[] = [
+  { name: 'ICPC', sub: 'world finalists' },
+  { name: 'Codeforces', sub: 'grandmasters' },
+  { name: 'Needham' },
+  { name: 'Tsinghua' },
+];
 
-export function TeamProfiles() {
-  const { theme } = useTheme();
-  const invertFilter = theme === 'dark' ? 'invert(1)' : undefined;
-  const [expanded, setExpanded] = useState(false);
+const ALL: Institution[] = [...ROW1, ...ROW2];
+
+// ── Marquee Item ──────────────────────────────────────────
+
+function MarqueeItem({ inst, size }: { inst: Institution; size: 'desktop' | 'mobile' }) {
+  const isDesktop = size === 'desktop';
 
   return (
-    <section className="pt-12 md:pt-16 pb-24 md:pb-[220px]" style={{ backgroundColor: 'var(--color-bg)' }}>
-      <div className="mx-auto max-w-[1440px] px-[22px] md:px-12">
+    <span className={`marquee-item ${isDesktop ? 'marquee-item--desktop' : 'marquee-item--mobile'}`}>
+      <span className="marquee-item__name">{inst.name}</span>
+      {inst.sub && <span className="marquee-item__sub">{inst.sub}</span>}
+    </span>
+  );
+}
+
+function MarqueeDivider({ size }: { size: 'desktop' | 'mobile' }) {
+  return <span className={`marquee-divider ${size === 'desktop' ? 'marquee-divider--desktop' : 'marquee-divider--mobile'}`} />;
+}
+
+// ── Marquee Track ─────────────────────────────────────────
+
+function MarqueeTrack({
+  items,
+  size,
+  reverse = false,
+  durationMs,
+}: {
+  items: Institution[];
+  size: 'desktop' | 'mobile';
+  reverse?: boolean;
+  durationMs: number;
+}) {
+  // Build content: items separated by dividers, WITH trailing divider.
+  // The trailing divider ensures a visual separator between the last item
+  // of one content block and the first item of the duplicate.
+  // Both content blocks are structurally identical, so -50% translateX
+  // resets to a pixel-identical visual state — zero visible jump.
+  const content = items.flatMap((inst, i) => {
+    const els: React.ReactNode[] = [];
+    if (i > 0) els.push(<MarqueeDivider key={`d-${i}`} size={size} />);
+    els.push(<MarqueeItem key={inst.name} inst={inst} size={size} />);
+    return els;
+  });
+
+  const contentWithTrailingDivider = [
+    ...content,
+    <MarqueeDivider key="d-trail" size={size} />,
+  ];
+
+  const trackStyle: React.CSSProperties = {
+    ['--marquee-duration' as string]: `${durationMs}ms`,
+  };
+
+  const trackClass = [
+    'marquee-track',
+    reverse ? 'marquee-track--reverse' : '',
+  ].join(' ');
+
+  return (
+    <div className="marquee-track-wrapper">
+      <div className={trackClass} style={trackStyle}>
+        {/* Original content */}
+        <div className="marquee-track__content">
+          {contentWithTrailingDivider}
+        </div>
+        {/* Duplicate for seamless loop — hidden from screen readers */}
+        <div className="marquee-track__content" aria-hidden="true">
+          {contentWithTrailingDivider}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────
+
+export function TeamProfiles() {
+  return (
+    <section
+      className="marquee-section"
+      style={{ backgroundColor: 'var(--color-bg)' }}
+    >
+      <div className="marquee-container">
         <h2
-          className="mb-12 md:mb-[103px] text-center text-[20px] md:text-[24px] font-medium leading-[1.2] tracking-[-0.4px] md:tracking-[-0.48px]"
+          className="marquee-heading"
           style={{ color: 'var(--color-text)' }}
         >
           driven by
@@ -43,97 +136,16 @@ export function TeamProfiles() {
           expertise from the best
         </h2>
 
-        {/* Desktop: 4-col flex grid, fixed card sizes matching Figma (4×207 + 3×20 = 888px) */}
-        <div className="hidden md:flex flex-wrap gap-x-[20px] gap-y-[20px] max-w-[888px] mx-auto">
-          {INSTITUTIONS.map((inst) => (
-            <div
-              key={inst.name}
-              className="flex h-[98px] w-[207px] shrink-0 items-center justify-center px-4"
-              style={{ backgroundColor: 'var(--color-card)' }}
-            >
-              <img
-                src={`/logos/${inst.file}`}
-                alt={inst.name}
-                width={140}
-                height={45}
-                className="max-h-[45px] w-auto object-contain"
-                style={{ filter: invertFilter }}
-              />
-            </div>
-          ))}
+        {/* Desktop: single row with all institutions */}
+        <div className="marquee-desktop">
+          <MarqueeTrack items={ALL} size="desktop" durationMs={35000} />
         </div>
 
-        {/* Mobile: 2-col grid with smooth slide toggle */}
-        <div className="mx-auto md:hidden">
-          {/* Always-visible first batch */}
-          <div className="grid grid-cols-2 gap-3">
-            {INSTITUTIONS.slice(0, MOBILE_INITIAL_COUNT).map((inst) => (
-              <div
-                key={inst.name}
-                className="flex h-[78px] items-center justify-center px-4"
-                style={{ backgroundColor: 'var(--color-card)' }}
-              >
-                <img
-                  src={`/logos/${inst.file}`}
-                  alt={inst.name}
-                  width={120}
-                  height={40}
-                  className="max-h-[36px] w-auto object-contain"
-                style={{ filter: invertFilter }}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Expandable overflow — slides open/closed */}
-          <div
-            className="grid transition-[grid-template-rows] duration-500 ease-in-out"
-            style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
-          >
-            <div className="overflow-hidden">
-              <div className="grid grid-cols-2 gap-3 pt-3">
-                {INSTITUTIONS.slice(MOBILE_INITIAL_COUNT).map((inst) => (
-                  <div
-                    key={inst.name}
-                    className="flex h-[78px] items-center justify-center px-4"
-                    style={{ backgroundColor: 'var(--color-card)' }}
-                  >
-                    <img
-                      src={`/logos/${inst.file}`}
-                      alt={inst.name}
-                      width={120}
-                      height={40}
-                      className="max-h-[36px] w-auto object-contain"
-                style={{ filter: invertFilter }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* see more / hide toggle */}
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="mx-auto mt-6 flex cursor-pointer flex-col items-center gap-1 text-[14px] tracking-[-0.14px] text-[var(--color-sub-text2)]"
-          >
-            <span>{expanded ? 'hide' : 'see more'}</span>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              className={`transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-            >
-              <path
-                d="M2 4.5L6 8.5L10 4.5"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+        {/* Mobile: two rows, opposite directions */}
+        <div className="marquee-mobile">
+          <MarqueeTrack items={ROW1} size="mobile" durationMs={25000} />
+          <div className="marquee-row-gap" />
+          <MarqueeTrack items={ROW2} size="mobile" durationMs={28000} reverse />
         </div>
       </div>
     </section>
