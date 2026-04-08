@@ -8,7 +8,7 @@ export function TeamHero() {
 
   return (
     <section
-      className="flex max-md:h-screen flex-col items-center max-md:justify-center gap-6 md:gap-8 px-[22px] md:px-6 md:pt-[105px] md:pb-24"
+      className="flex max-md:h-dvh flex-col items-center max-md:justify-center gap-6 md:gap-8 px-[22px] md:px-6 md:pt-[105px] md:pb-24"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
       <p className="text-[14px] md:text-[20px] font-normal tracking-[-0.28px] md:tracking-[-0.4px] text-[var(--color-sub-text1)]">

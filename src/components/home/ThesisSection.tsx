@@ -39,8 +39,34 @@ if (typeof window !== 'undefined') {
   //   3) GSAP Observer misses the first swipe gesture after momentum scroll
   // normalizeScroll intercepts all scroll input and replays it in JS,
   // eliminating the UIScrollView interference entirely.
+  //
+  // IMPORTANT: Activation is deferred until intro-lock is released.
+  // normalizeScroll conflicts with the intro-lock's overflow:hidden —
+  // if initialized while the viewport is non-scrollable, its internal
+  // Observer starts with stale scroll dimensions and blocks all scroll
+  // even after intro-lock removal.
   if (ScrollTrigger.isTouch === 1) {
-    ScrollTrigger.normalizeScroll(true);
+    const html = document.documentElement;
+
+    const activateNormalizeScroll = () => {
+      ScrollTrigger.normalizeScroll(true);
+      // Recalculate all ScrollTrigger positions now that the page is scrollable
+      ScrollTrigger.refresh();
+    };
+
+    if (html.classList.contains('intro-lock')) {
+      const mo = new MutationObserver(() => {
+        if (!html.classList.contains('intro-lock')) {
+          mo.disconnect();
+          // Let the browser reflow after overflow:hidden removal
+          requestAnimationFrame(activateNormalizeScroll);
+        }
+      });
+      mo.observe(html, { attributes: true, attributeFilter: ['class'] });
+    } else {
+      // Not on homepage or intro-lock already removed (e.g. back-navigation)
+      activateNormalizeScroll();
+    }
   }
 }
 
@@ -561,7 +587,7 @@ export function ThesisSection() {
     <section
       ref={sectionRef}
       id="thesis"
-      className="relative h-screen w-full"
+      className="relative h-dvh w-full"
       style={{ backgroundColor: 'var(--color-card)' }}
       aria-live="polite"
     >
