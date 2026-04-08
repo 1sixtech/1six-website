@@ -485,11 +485,17 @@ export function ThesisSection() {
     observerRef.current = obs;
 
     // Block native scroll ONLY while section is pinned.
-    // We intercept touchmove on the section itself (non-passive)
-    // and only preventDefault when active.
+    // On iOS Safari, preventDefault on touchSTART is required to prevent
+    // the browser from committing to scroll-mode on the compositor thread.
+    // If you only preventDefault on touchmove, iOS ignores it because
+    // the scroll decision was already made at touchstart time.
+    const onTouchStart = (e: TouchEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
     const onTouchMove = (e: TouchEvent) => {
       if (sectionActiveRef.current) e.preventDefault();
     };
+    section.addEventListener('touchstart', onTouchStart, { passive: false });
     section.addEventListener('touchmove', onTouchMove, { passive: false });
     // Also block wheel scroll when active
     const onWheel = (e: WheelEvent) => {
@@ -498,6 +504,7 @@ export function ThesisSection() {
     section.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
+      section.removeEventListener('touchstart', onTouchStart);
       section.removeEventListener('touchmove', onTouchMove);
       section.removeEventListener('wheel', onWheel);
       obs.kill();

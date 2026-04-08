@@ -47,10 +47,7 @@ export function Footer() {
   return (
     <footer
       className="relative w-full overflow-hidden"
-      style={{
-        backgroundColor: 'var(--color-footer-bg, var(--color-bg))',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      }}
+      style={{ backgroundColor: 'var(--color-footer-bg, var(--color-bg))' }}
     >
       {/* ===== MOBILE FOOTER (<768px) ===== */}
       <div className="block md:hidden px-[22px] py-10">
