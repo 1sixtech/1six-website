@@ -30,6 +30,18 @@ if (typeof window !== 'undefined') {
   } else {
     window.addEventListener('load', () => { _lastW = window.innerWidth; }, { once: true });
   }
+
+  // On touch devices, move scroll handling from native UIScrollView to JavaScript.
+  // iOS Safari drives momentum scroll on a native compositor thread that is
+  // completely outside WebKit's JS context. This means:
+  //   1) The first touch that stops momentum is consumed by UIScrollView
+  //   2) preventDefault() from JS cannot interrupt compositor-driven momentum
+  //   3) GSAP Observer misses the first swipe gesture after momentum scroll
+  // normalizeScroll intercepts all scroll input and replays it in JS,
+  // eliminating the UIScrollView interference entirely.
+  if (ScrollTrigger.isTouch === 1) {
+    ScrollTrigger.normalizeScroll(true);
+  }
 }
 
 interface ThesisState {
@@ -266,9 +278,6 @@ export function ThesisSection() {
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
   const stRef = useRef<ScrollTrigger | null>(null);
-  // When true, Observer callbacks fire and native scroll is blocked.
-  // Observer stays always-enabled so it never misses touchstart events.
-  const sectionActiveRef = useRef(false);
   // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
   const justExitedRef = useRef(false);
 
@@ -312,7 +321,7 @@ export function ThesisSection() {
       // within 300ms (stale pin math, iOS scroll batching), force exit.
       setTimeout(() => {
         if (animatingRef.current) {
-          sectionActiveRef.current = false;
+          observerRef.current?.disable();
           animatingRef.current = false;
         }
       }, 300);
@@ -445,28 +454,30 @@ export function ThesisSection() {
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(0);
-        sectionActiveRef.current = true;
+        observerRef.current?.enable();
       },
       onEnterBack: () => {
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(TOTAL - 1);
-        sectionActiveRef.current = true;
+        observerRef.current?.enable();
       },
       onLeave: () => {
-        sectionActiveRef.current = false;
+        observerRef.current?.disable();
         animatingRef.current = false;
       },
       onLeaveBack: () => {
-        sectionActiveRef.current = false;
+        observerRef.current?.disable();
         animatingRef.current = false;
       },
     });
     stRef.current = st;
 
-    // Observer: always enabled so it never misses touchstart events.
-    // Callbacks are gated by sectionActiveRef so they only fire when
-    // the section is pinned.
+    // Observer: intercept wheel/touch, trigger discrete page transitions.
+    // Starts disabled. ScrollTrigger onEnter/onEnterBack enables it.
+    // With normalizeScroll active on touch devices, the enable/disable
+    // pattern works reliably because scroll is JS-controlled (no native
+    // UIScrollView stealing touch events during momentum).
     //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
@@ -476,38 +487,19 @@ export function ThesisSection() {
       target: section,
       type: 'wheel,touch',
       tolerance: 10,
-      preventDefault: false,
+      preventDefault: true,
       lockAxis: true,
       wheelSpeed: -1,
-      onUp: () => { if (sectionActiveRef.current) gotoPage(1); },
-      onDown: () => { if (sectionActiveRef.current) gotoPage(-1); },
+      onUp: () => gotoPage(1),
+      onDown: () => gotoPage(-1),
     });
     observerRef.current = obs;
 
-    // Block native scroll ONLY while section is pinned.
-    // On iOS Safari, preventDefault on touchSTART is required to prevent
-    // the browser from committing to scroll-mode on the compositor thread.
-    // If you only preventDefault on touchmove, iOS ignores it because
-    // the scroll decision was already made at touchstart time.
-    const onTouchStart = (e: TouchEvent) => {
-      if (sectionActiveRef.current) e.preventDefault();
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (sectionActiveRef.current) e.preventDefault();
-    };
-    section.addEventListener('touchstart', onTouchStart, { passive: false });
-    section.addEventListener('touchmove', onTouchMove, { passive: false });
-    // Also block wheel scroll when active
-    const onWheel = (e: WheelEvent) => {
-      if (sectionActiveRef.current) e.preventDefault();
-    };
-    section.addEventListener('wheel', onWheel, { passive: false });
+    // Start disabled — ScrollTrigger onEnter will enable it
+    obs.disable();
 
     return () => {
-      section.removeEventListener('touchstart', onTouchStart);
-      section.removeEventListener('touchmove', onTouchMove);
-      section.removeEventListener('wheel', onWheel);
-      obs.kill();
+      obs.disable();
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
@@ -569,7 +561,7 @@ export function ThesisSection() {
     <section
       ref={sectionRef}
       id="thesis"
-      className="relative h-svh w-full"
+      className="relative h-screen w-full"
       style={{ backgroundColor: 'var(--color-card)' }}
       aria-live="polite"
     >

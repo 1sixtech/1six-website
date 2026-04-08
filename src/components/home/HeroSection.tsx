@@ -130,7 +130,7 @@ export function HeroSection() {
 
   return (
     <section
-      className="relative flex h-svh w-full items-center justify-center overflow-hidden"
+      className="relative flex h-screen w-full items-center justify-center overflow-hidden"
       style={{ backgroundColor: 'var(--color-card)' }}
     >
       {/* ASCII mosaic background — fades in once loaded */}
