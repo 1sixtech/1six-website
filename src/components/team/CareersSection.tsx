@@ -89,7 +89,7 @@ export function CareersSection() {
                     </div>
                     <a
                       href="#"
-                      className="text-[14px] text-[var(--color-sub1)] transition-colors hover:text-[var(--color-accent)]"
+                      className="text-[14px] text-[var(--color-sub-text1)] transition-colors hover:text-[var(--color-accent)]"
                     >
                       Apply
                     </a>

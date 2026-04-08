@@ -17,7 +17,7 @@ export function TeamHero() {
 
       {/* 1SIX ASCII symbol — fades in once loaded */}
       <div
-        className="flex h-[208px] w-[208px] items-center justify-center transition-opacity duration-700 ease-out"
+        className="relative h-[208px] w-[208px] transition-opacity duration-700 ease-out"
         style={{ opacity: symbolReady ? 1 : 0 }}
       >
         <AsciiTeamSymbol onReady={() => setSymbolReady(true)} />
@@ -44,7 +44,11 @@ export function TeamHero() {
         we prefer to{' '}
         <span className="text-[var(--color-accent)]">take actions</span>
         {' '}to make our dreams come true.
-        <br />
+      </p>
+      <p
+        className="hidden md:block max-w-[850px] text-center text-[18px] font-normal leading-[1.3] tracking-[-0.48px]"
+        style={{ color: 'var(--color-text)' }}
+      >
         we bring experience from Harvard, Ethereum, PhD Programs,
         <br />
         world level competitive programming (ICPC World Finals), Sniper Special Forces,

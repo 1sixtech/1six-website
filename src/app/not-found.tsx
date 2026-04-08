@@ -3,7 +3,7 @@ import Link from 'next/link';
 export default function NotFound() {
   return (
     <div
-      className="flex h-screen w-full flex-col items-center justify-center gap-6"
+      className="flex h-dvh w-full flex-col items-center justify-center gap-6"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
       <h1
