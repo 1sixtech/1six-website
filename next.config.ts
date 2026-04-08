@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['gsap', 'three'],
   },
+  redirects: async () => [
+    {
+      source: '/team',
+      destination: '/about',
+      permanent: true,
+    },
+  ],
   headers: async () => [
     {
       source: '/resource/:path*',

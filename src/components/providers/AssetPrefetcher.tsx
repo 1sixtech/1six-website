@@ -52,7 +52,7 @@ export function AssetPrefetcher() {
       next();
     }
 
-    // --- Batch 1: Below-fold videos on the home page (highest value) ---
+    // --- Batch 1: Below-fold videos on the home page — Thesis section + products (highest value) ---
     const homepageVideos = [
       '/resource/Source_About 01.mp4',
       '/resource/Source_About 02.mp4',
@@ -81,21 +81,9 @@ export function AssetPrefetcher() {
       '/resource/mosaic_cell.png',
     ];
 
-    // --- Batch 3: Team page assets (next-page prefetch) ---
+    // --- Batch 3: About page assets (next-page prefetch) ---
     const teamPageAssets = [
       '/resource/Source_Team symbol.mp4',
-      '/logos/Harvard.svg',
-      '/logos/MIT.svg',
-      '/logos/Ethereum.svg',
-      '/logos/Tsinghua.svg',
-      '/logos/Schwarzman.svg',
-      '/logos/_ICPC.svg',
-      '/logos/Codeforces.svg',
-      '/logos/Ergodic.svg',
-      '/logos/Lambda.svg',
-      '/logos/Lemniscap.svg',
-      '/logos/Needham.svg',
-      '/logos/Starknet.svg',
     ];
 
     // Start prefetching after a short delay to let the page settle
@@ -121,11 +109,11 @@ export function AssetPrefetcher() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Prefetch the team page route via dynamic link injection (same as other assets)
+  // Prefetch the about page route via dynamic link injection (same as other assets)
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'prefetch';
-    link.href = '/team';
+    link.href = '/about';
     document.head.appendChild(link);
   }, []);
 

@@ -8,7 +8,7 @@ const AsciiCanvas = dynamic(
 );
 
 
-const ABOUT_ASCII_CONFIG: Record<number, { textureUrl: string; minBrightness: number; maxBrightness: number; scale: number }> = {
+const THESIS_ASCII_CONFIG: Record<number, { textureUrl: string; minBrightness: number; maxBrightness: number; scale: number }> = {
   1: { textureUrl: '/resource/Source_About 01.mp4', minBrightness: 0, maxBrightness: 33, scale: 4.8 },
   2: { textureUrl: '/resource/Source_About 02.mp4', minBrightness: 0, maxBrightness: 28, scale: 4.8 },
   3: { textureUrl: '/resource/Source_About 03.mp4', minBrightness: 10, maxBrightness: 100, scale: 4.8 },
@@ -17,21 +17,20 @@ const ABOUT_ASCII_CONFIG: Record<number, { textureUrl: string; minBrightness: nu
   6: { textureUrl: '/resource/Source_About 06.mp4', minBrightness: 29, maxBrightness: 0, scale: 4.8 },
 };
 
-interface AsciiAboutProps {
+interface AsciiThesisProps {
   stateNumber: 1 | 2 | 3 | 4 | 5 | 6;
 }
 
-/** About inline ASCII art — flat plane, mouse avoid */
-export function AsciiAbout({ stateNumber }: AsciiAboutProps) {
-  const config = ABOUT_ASCII_CONFIG[stateNumber];
+/** Thesis inline ASCII art — flat plane, mouse avoid */
+export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
+  const config = THESIS_ASCII_CONFIG[stateNumber];
   if (!config) return null;
 
   return (
     <AsciiCanvas
       textureUrl={config.textureUrl}
       mosaicCellUrl="/resource/Monotone Cell F_4-1.png"
-      width={110}
-      height={110}
+      className="absolute inset-0 h-full w-full"
       mosaicSize={9}
       shape="plane"
       orthographic={false}
@@ -46,8 +45,7 @@ export function AsciiAbout({ stateNumber }: AsciiAboutProps) {
       avoidStrength={13}
       planeWidth={4}
       planeHeight={4}
-      renderWidth={500}
-      renderHeight={500}
+      renderScale={4.5}
     />
   );
 }

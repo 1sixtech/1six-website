@@ -6,12 +6,33 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Observer } from 'gsap/Observer';
 import { useGSAP } from '@gsap/react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
-import { AsciiAbout } from '@/components/ascii/AsciiAbout';
+import { AsciiThesis } from '@/components/ascii/AsciiThesis';
 
 gsap.registerPlugin(ScrollTrigger, Observer, useGSAP);
-ScrollTrigger.config({ ignoreMobileResize: true });
 
-interface AboutState {
+// Prevent ScrollTrigger auto-refresh on mobile address bar height changes.
+// Only refresh when viewport WIDTH changes (real resize / orientation change).
+// Width-only gating replaces the global ignoreMobileResize which would break
+// all other ScrollTrigger instances (ScrollRevealWrapper, RollingNumber).
+if (typeof window !== 'undefined') {
+  let _lastW = 0;
+  ScrollTrigger.config({
+    autoRefreshEvents: 'visibilitychange,DOMContentLoaded,load',
+  });
+  const onResize = () => {
+    const w = window.innerWidth;
+    if (_lastW && w !== _lastW) ScrollTrigger.refresh();
+    _lastW = w;
+  };
+  window.addEventListener('resize', onResize);
+  if (document.readyState === 'complete') {
+    _lastW = window.innerWidth;
+  } else {
+    window.addEventListener('load', () => { _lastW = window.innerWidth; }, { once: true });
+  }
+}
+
+interface ThesisState {
   id: string;
   /** Desktop layout: inline ASCII within text flow */
   desktopContent: React.ReactNode;
@@ -33,7 +54,7 @@ function InlineAscii({ n, extend }: {
         className="absolute inset-x-0 h-[110px] overflow-hidden"
         style={extend === 'up' ? { bottom: 0 } : { top: 0 }}
       >
-        <AsciiAbout stateNumber={n} />
+        <AsciiThesis stateNumber={n} />
       </span>
     </span>
   );
@@ -47,8 +68,8 @@ function MobileAscii({ n, align = 'center' }: {
   const justifyClass = align === 'left' ? 'justify-start' : align === 'right' ? 'justify-end' : 'justify-center';
   return (
     <div className={`flex ${justifyClass} w-full`}>
-      <div className="w-[76px] h-[76px] overflow-hidden">
-        <AsciiAbout stateNumber={n} />
+      <div className="relative w-[76px] h-[76px] overflow-hidden">
+        <AsciiThesis stateNumber={n} />
       </div>
     </div>
   );
@@ -57,9 +78,9 @@ function MobileAscii({ n, align = 'center' }: {
 /* ─── Shared sub-text style for mobile ─── */
 const subTextClass = "text-[var(--color-sub-text1)] text-[18px] leading-[1.25] tracking-[-0.36px]";
 
-const ABOUT_STATES: AboutState[] = [
+const THESIS_STATES: ThesisState[] = [
   {
-    id: 'about-01',
+    id: 'thesis-01',
     desktopContent: (
       <>
         <span>the internet was built on </span>
@@ -84,7 +105,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-02',
+    id: 'thesis-02',
     desktopContent: (
       <>
         <span>but that vision remains </span>
@@ -110,7 +131,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-03',
+    id: 'thesis-03',
     desktopContent: (
       <>
         <span>blockchains are </span>
@@ -134,7 +155,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-04',
+    id: 'thesis-04',
     desktopContent: (
       <>
         <span>yet the technology is still early,</span>
@@ -159,7 +180,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-05',
+    id: 'thesis-05',
     desktopContent: (
       <>
         <span>we are here to </span>
@@ -184,7 +205,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-06',
+    id: 'thesis-06',
     desktopContent: (
       <>
         <span>from possibility to default.</span>
@@ -208,7 +229,7 @@ const ABOUT_STATES: AboutState[] = [
     ),
   },
   {
-    id: 'about-07',
+    id: 'thesis-07',
     desktopContent: (
       <>
         <span>this is why we are </span>
@@ -223,19 +244,30 @@ const ABOUT_STATES: AboutState[] = [
   },
 ];
 
-const TOTAL = ABOUT_STATES.length;
+const TOTAL = THESIS_STATES.length;
 
-export function AboutSection() {
+export function ThesisSection() {
   const sectionRef = useRef<HTMLDivElement>(null);
   const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
   const prefersReducedMotion = useReducedMotion();
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Refs for Observer logic (no re-renders needed)
   const indexRef = useRef(0);
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
   const stRef = useRef<ScrollTrigger | null>(null);
+  // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
+  const justExitedRef = useRef(false);
 
   const setContentRef = useCallback(
     (index: number) => (el: HTMLDivElement | null) => {
@@ -246,38 +278,54 @@ export function AboutSection() {
 
   // Core transition: discrete page-by-page with crossfade
   const gotoPage = useCallback((direction: 1 | -1) => {
+    // Gate ALL transitions (including boundary exit) while animating.
+    // Without this, momentum scroll during a page 5→6 transition would
+    // fire the exit code (toIndex=7) before the animation completes,
+    // and the animation's onComplete would then scrollTo(st.end),
+    // pulling the user back into the section.
+    if (animatingRef.current) return;
+
     const idx = indexRef.current;
     const toIndex = idx + direction;
 
-    // Boundary: exit About section
+    // Boundary: exit thesis section
     if (toIndex < 0 || toIndex >= TOTAL) {
-      // Release scroll control back to native
-      observerRef.current?.disable();
+      animatingRef.current = true;
+      // Block onEnter/onEnterBack from re-trapping during scroll bounce
+      justExitedRef.current = true;
+      setTimeout(() => { justExitedRef.current = false; }, 600);
 
       if (stRef.current) {
         const st = stRef.current;
         if (toIndex >= TOTAL) {
-          // Scroll past the pin end → next section
-          window.scrollTo({ top: st.end + 1, behavior: 'auto' });
+          // Use ceil + 2 to survive sub-pixel rounding & pin unpin reflow
+          window.scrollTo({ top: Math.ceil(st.end) + 2, behavior: 'auto' });
         } else {
-          // Scroll before pin start → hero
-          window.scrollTo({ top: st.start - 1, behavior: 'auto' });
+          window.scrollTo({ top: Math.floor(st.start) - 2, behavior: 'auto' });
         }
       }
+
+      // Safety net: if ScrollTrigger's onLeave/onLeaveBack doesn't fire
+      // within 300ms (stale pin math, iOS scroll batching), force exit.
+      setTimeout(() => {
+        if (animatingRef.current) {
+          observerRef.current?.disable();
+          animatingRef.current = false;
+        }
+      }, 300);
+
       return;
     }
 
-    if (animatingRef.current) return;
-
     animatingRef.current = true;
-    // Disable Observer during animation to ignore trackpad momentum
-    observerRef.current?.disable();
+    // Observer stays ENABLED during animation so that preventDefault
+    // continues to block native scroll on mobile touch devices.
+    // animatingRef guards the callbacks from firing during animation.
 
     const fromEl = contentRefs.current[idx];
     const toEl = contentRefs.current[toIndex];
     if (!fromEl || !toEl) {
       animatingRef.current = false;
-      observerRef.current?.enable();
       return;
     }
 
@@ -286,8 +334,6 @@ export function AboutSection() {
 
     const tl = gsap.timeline({
       onComplete: () => {
-        animatingRef.current = false;
-
         // Sync scroll position within pin range
         if (stRef.current) {
           const progress = toIndex / (TOTAL - 1);
@@ -295,10 +341,12 @@ export function AboutSection() {
           window.scrollTo({ top: scrollTarget, behavior: 'auto' });
         }
 
-        // Re-enable Observer after animation + short delay to flush momentum
+        // Cooldown: keep animatingRef true briefly to flush residual
+        // momentum events (desktop trackpad / iOS inertia).
+        // Observer stays ENABLED so preventDefault keeps blocking native scroll.
         setTimeout(() => {
-          observerRef.current?.enable();
-        }, 100);
+          animatingRef.current = false;
+        }, 150);
       },
     });
 
@@ -391,18 +439,26 @@ export function AboutSection() {
       start: 'top top',
       end: '+=' + ((TOTAL - 1) * 100) + '%',
       onEnter: () => {
+        // Skip if we just exited (scroll bounce / momentum)
+        if (justExitedRef.current) return;
+        animatingRef.current = false;
         showPage(0);
         observerRef.current?.enable();
       },
       onEnterBack: () => {
+        // Skip if we just exited (scroll bounce / momentum)
+        if (justExitedRef.current) return;
+        animatingRef.current = false;
         showPage(TOTAL - 1);
         observerRef.current?.enable();
       },
       onLeave: () => {
         observerRef.current?.disable();
+        animatingRef.current = false;
       },
       onLeaveBack: () => {
         observerRef.current?.disable();
+        animatingRef.current = false;
       },
     });
     stRef.current = st;
@@ -456,21 +512,24 @@ export function AboutSection() {
 
   if (prefersReducedMotion) {
     return (
-      <section id="about">
-        {ABOUT_STATES.map((state) => (
+      <section id="thesis">
+        {THESIS_STATES.map((state) => (
           <div
             key={state.id}
             className="flex min-h-[60vh] w-full items-center justify-center px-6"
             style={{ backgroundColor: 'var(--color-card)' }}
           >
             <div className="max-w-[1034px] text-center">
-              <div className="hidden md:block text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
-                style={{ color: 'var(--color-text)' }}>
-                {state.desktopContent}
-              </div>
-              <div className="md:hidden text-center">
-                {state.mobileContent}
-              </div>
+              {isMobile ? (
+                <div className="text-center">
+                  {state.mobileContent}
+                </div>
+              ) : (
+                <div className="text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
+                  style={{ color: 'var(--color-text)' }}>
+                  {state.desktopContent}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -481,14 +540,14 @@ export function AboutSection() {
   return (
     <section
       ref={sectionRef}
-      id="about"
-      className="relative h-screen w-full"
+      id="thesis"
+      className="relative h-dvh w-full"
       style={{ backgroundColor: 'var(--color-card)' }}
       aria-live="polite"
     >
       {/* Page indicator dots */}
       <div className="absolute right-8 top-1/2 z-10 hidden md:flex -translate-y-1/2 flex-col gap-2">
-        {ABOUT_STATES.map((_, i) => (
+        {THESIS_STATES.map((_, i) => (
           <button
             key={i}
             className="h-1.5 w-1.5 rounded-full transition-all duration-300 cursor-pointer"
@@ -506,7 +565,7 @@ export function AboutSection() {
       {/* All states stacked in center — only render ASCII art for nearby states
            to avoid exhausting WebGL context limits (browsers allow ~8-16 contexts) */}
       <div className="absolute inset-0 flex items-center justify-center">
-        {ABOUT_STATES.map((state, index) => {
+        {THESIS_STATES.map((state, index) => {
           const isNearby = Math.abs(index - currentIndex) <= 1;
           return (
             <div
@@ -516,17 +575,16 @@ export function AboutSection() {
               style={index !== 0 ? { visibility: 'hidden', opacity: 0 } : undefined}
             >
               {isNearby && (
-                <>
-                  {/* Desktop: inline ASCII layout */}
-                  <div className="hidden md:block text-center text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
+                isMobile ? (
+                  <div className="text-center">
+                    {state.mobileContent}
+                  </div>
+                ) : (
+                  <div className="text-center text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
                     style={{ color: 'var(--color-text)' }}>
                     {state.desktopContent}
                   </div>
-                  {/* Mobile: block ASCII layout per Figma */}
-                  <div className="md:hidden text-center">
-                    {state.mobileContent}
-                  </div>
-                </>
+                )
               )}
             </div>
           );

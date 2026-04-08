@@ -2,10 +2,10 @@ import Link from 'next/link';
 import { LogoFooter } from '@/components/ui/Logo';
 
 const COMPANY_LINKS = [
-  { label: 'About', href: '/#about' },
-  { label: 'Team', href: '/team' },
-  { label: 'Investors', href: '/team#investors' },
-  { label: 'Careers', href: '/team#careers' },
+  { label: 'Thesis', href: '/#thesis' },
+  { label: 'About', href: '/about' },
+  { label: 'Investors', href: '/about#investors' },
+  { label: 'Careers', href: '/about#careers' },
 ];
 
 const PRODUCT_LINKS = [

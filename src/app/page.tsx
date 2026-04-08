@@ -1,6 +1,6 @@
 import { HeroSection } from '@/components/home/HeroSection';
-import { AboutSection } from '@/components/home/AboutSection';
-import { AboutGraph } from '@/components/home/AboutGraph';
+import { ThesisSection } from '@/components/home/ThesisSection';
+import { ThesisGraph } from '@/components/home/ThesisGraph';
 import { ProductsHeading } from '@/components/home/ProductsHeading';
 import { ProductMap } from '@/components/home/ProductMap';
 import { ProductCard } from '@/components/home/ProductCard';
@@ -12,8 +12,8 @@ export default function HomePage() {
     <>
       <ScrollToTop />
       <HeroSection />
-      <AboutSection />
-      <AboutGraph />
+      <ThesisSection />
+      <ThesisGraph />
 
       <ScrollRevealWrapper y={30} duration={0.8}>
         <ProductsHeading />
@@ -42,6 +42,8 @@ export default function HomePage() {
           ctaHref="https://trade.nevada.app"
         />
       </ScrollRevealWrapper>
+
+      <div className="h-[100px] md:h-[140px]" />
 
       {/* Insight section hidden until content is ready */}
     </>
