@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* Enable Tailwind dark: utilities with data-theme attribute (v4 syntax) */
+@variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --font-sans: var(--font-pretendard), 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
   --color-accent: #FF3700;
@@ -22,6 +25,7 @@
   --color-sub-text1: var(--color-sub1);
   --color-sub-text2: var(--color-sub2);
   --color-header-bg: rgba(255, 255, 255, 0.4);
+  --color-divider: #E5E2E2;
 }
 
 [data-theme='dark'] {
@@ -31,6 +35,22 @@
   --color-card2: var(--color-card-dark2);
   --color-sub-text1: var(--color-sub2);
   --color-header-bg: rgba(255, 255, 255, 0.1);
+  --color-divider: #3A3A3A;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Intro lock — freeze viewport until hero scramble completes
+   ══════════════════════════════════════════════════════════ */
+html.intro-lock {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+html.intro-lock body {
+  overflow: hidden !important;
+  pointer-events: none !important;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
 }
 
 /* Hide scrollbar */
@@ -64,5 +84,189 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Marquee — infinite horizontal scroll for TeamProfiles
+   ══════════════════════════════════════════════════════════ */
+
+.marquee-section {
+  padding-top: 48px;
+  padding-bottom: 96px;
+}
+@media (min-width: 768px) {
+  .marquee-section {
+    padding-top: 64px;
+    padding-bottom: 220px;
+  }
+}
+
+.marquee-container {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.marquee-heading {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
+  margin-bottom: 48px;
+}
+@media (min-width: 768px) {
+  .marquee-heading {
+    font-size: 24px;
+    letter-spacing: -0.48px;
+    margin-bottom: 103px;
+  }
+}
+
+/* Responsive visibility — hide inactive track to free GPU layers */
+.marquee-desktop { display: none; }
+.marquee-mobile  { display: block; }
+@media (min-width: 768px) {
+  .marquee-desktop { display: block; }
+  .marquee-mobile  { display: none; }
+}
+/* Tracks inside display:none wrappers should not promote GPU layers */
+.marquee-desktop .marquee-track,
+.marquee-mobile .marquee-track {
+  will-change: auto;
+  animation-play-state: paused;
+}
+/* Only the visible track gets GPU compositing */
+@media (min-width: 768px) {
+  .marquee-desktop .marquee-track {
+    will-change: transform;
+    animation-play-state: running;
+  }
+}
+@media (max-width: 767px) {
+  .marquee-mobile .marquee-track {
+    will-change: transform;
+    animation-play-state: running;
+  }
+}
+
+.marquee-row-gap { height: 16px; }
+
+/* Track wrapper: overflow clip + edge fade mask */
+.marquee-track-wrapper {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 8%,
+    black 92%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 8%,
+    black 92%,
+    transparent 100%
+  );
+}
+
+/* Animated track — GPU-composited, compositor-thread only */
+.marquee-track {
+  display: flex;
+  width: max-content;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  animation: marquee-scroll var(--marquee-duration, 30s) linear infinite;
+}
+
+.marquee-track--reverse {
+  animation-direction: reverse;
+}
+
+/* Two identical content blocks sit side-by-side.
+   Each is exactly 50% of the track width.
+   Trailing divider in each block provides consistent spacing
+   between end→start across the loop boundary.
+   -50% translateX resets to pixel-identical start. */
+.marquee-track__content {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+@keyframes marquee-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-50%, 0, 0); }
+}
+
+/* Marquee items */
+.marquee-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--color-sub-text2);
+  cursor: default;
+}
+
+.marquee-item__name {
+  font-weight: 600;
+  line-height: 1;
+}
+
+.marquee-item__sub {
+  font-weight: 400;
+  text-transform: uppercase;
+  color: var(--color-sub-text1);
+}
+
+/* Desktop item sizes */
+.marquee-item--desktop .marquee-item__name {
+  font-size: 18px;
+  letter-spacing: -0.2px;
+}
+.marquee-item--desktop .marquee-item__sub {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--color-divider);
+  min-width: 100%;
+  text-align: center;
+}
+
+/* Mobile item sizes */
+.marquee-item--mobile .marquee-item__name {
+  font-size: 14px;
+  letter-spacing: -0.15px;
+}
+.marquee-item--mobile .marquee-item__sub {
+  font-size: 8px;
+  letter-spacing: 1px;
+  margin-top: 4px;
+}
+
+/* Dividers */
+.marquee-divider {
+  flex-shrink: 0;
+  background: var(--color-divider);
+}
+.marquee-divider--desktop {
+  width: 1px;
+  height: 32px;
+  margin: 0 56px;
+}
+.marquee-divider--mobile {
+  width: 1px;
+  height: 22px;
+  margin: 0 36px;
+}
+
+/* Hover: pause on desktop (pointer devices only) */
+@media (hover: hover) {
+  .marquee-track-wrapper:hover .marquee-track {
+    animation-play-state: paused;
   }
 }

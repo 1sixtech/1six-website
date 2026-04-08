@@ -24,11 +24,12 @@ function randomChar() {
   );
 }
 
-function StaggeredScramble() {
+function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
   const [displayed, setDisplayed] = useState(['', '', '']);
   const [visible, setVisible] = useState([false, false, false]);
   const intervalsRef = useRef<ReturnType<typeof setInterval>[]>([]);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const settledRef = useRef(0);
 
   const startScramble = useCallback((index: number) => {
     // Make character visible
@@ -56,9 +57,13 @@ function StaggeredScramble() {
         next[index] = CHARS[index];
         return next;
       });
+      settledRef.current += 1;
+      if (settledRef.current === CHARS.length) {
+        onComplete?.();
+      }
     }, SCRAMBLE_DURATION);
     timeoutsRef.current.push(settleTimeout);
-  }, []);
+  }, [onComplete]);
 
   useEffect(() => {
     // Schedule each character's scramble start
@@ -91,12 +96,41 @@ function StaggeredScramble() {
   );
 }
 
+/** Remove the intro-lock class from <html>, re-enabling scroll & interaction */
+function unlockPage() {
+  document.documentElement.classList.remove('intro-lock');
+}
+
+/** Block keyboard-based scrolling while intro-lock is active */
+const SCROLL_KEYS = new Set([
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Space', ' ', 'PageUp', 'PageDown', 'Home', 'End',
+  'Tab',
+]);
+
+function blockScrollKeys(e: KeyboardEvent) {
+  if (document.documentElement.classList.contains('intro-lock') && SCROLL_KEYS.has(e.key)) {
+    e.preventDefault();
+  }
+}
+
 export function HeroSection() {
   const [bgReady, setBgReady] = useState(false);
 
+  // Safety fallback — always unlock after 2.5s even if scramble callback fails
+  // Also block keyboard scrolling during the lock period
+  useEffect(() => {
+    const fallback = setTimeout(unlockPage, 2500);
+    window.addEventListener('keydown', blockScrollKeys, { passive: false });
+    return () => {
+      clearTimeout(fallback);
+      window.removeEventListener('keydown', blockScrollKeys);
+    };
+  }, []);
+
   return (
     <section
-      className="relative flex h-screen w-full items-center justify-center overflow-hidden"
+      className="relative flex h-dvh w-full items-center justify-center overflow-hidden"
       style={{ backgroundColor: 'var(--color-card)' }}
     >
       {/* ASCII mosaic background — fades in once loaded */}
@@ -112,7 +146,7 @@ export function HeroSection() {
         className="relative z-10 max-w-[249px] md:max-w-none text-center text-[26px] md:text-[36px] font-normal leading-[1.25] tracking-[-0.52px] md:tracking-[-0.72px]"
         style={{ color: 'var(--color-text)' }}
       >
-        we haven&apos;t crossed the <StaggeredScramble /> yet.
+        we haven&apos;t crossed the <StaggeredScramble onComplete={unlockPage} /> yet.
       </h1>
     </section>
   );

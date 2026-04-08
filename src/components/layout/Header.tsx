@@ -5,15 +5,15 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { useTheme } from '@/components/providers/ThemeProvider';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 
 const NAV_ITEMS = [
-  { label: 'ABOUT', href: '/#about' },
+  { label: 'THESIS', href: '/#thesis' },
   { label: 'PRODUCTS', href: '/#products' },
   // { label: 'INSIGHT', href: '/#insight' },
-  { label: 'TEAM', href: '/team' },
+  { label: 'ABOUT', href: '/about' },
 ];
 
 /**
@@ -41,7 +41,6 @@ export function Header() {
   const headerRef = useRef<HTMLElement>(null);
   const isVisible = useScrollReveal();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { theme, toggleTheme } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -65,14 +64,14 @@ export function Header() {
   }, []);
 
   /**
-   * Handle nav link clicks. For same-page hash links (/#about, /#products),
+   * Handle nav link clicks. For same-page hash links (/#thesis, /#products),
    * use programmatic scrollTo which generates 'scroll' events, not
-   * 'wheel'/'touch' events, so it bypasses the AboutSection's GSAP Observer.
+   * 'wheel'/'touch' events, so it bypasses the ThesisSection's GSAP Observer.
    */
   const handleNavClick = useCallback((e: React.MouseEvent, href: string) => {
     const hashMatch = href.match(/^\/?#(.+)$/);
     if (!hashMatch) {
-      // Non-hash link (e.g. /team): close menu, let Next.js Link handle navigation
+      // Non-hash link (e.g. /about): close menu, let Next.js Link handle navigation
       setMenuOpen(false);
       return;
     }
@@ -191,7 +190,7 @@ export function Header() {
           </Link>
 
           {/* Desktop Nav */}
-          <nav className="absolute top-[17px] right-0 hidden items-center md:flex"
+          <nav className="absolute top-1/2 -translate-y-1/2 right-0 hidden items-center md:flex"
             style={{ right: 'calc(8.33% - 38px)' }}>
             <div className="flex items-center gap-8">
               {NAV_ITEMS.map((item) => (
@@ -204,6 +203,7 @@ export function Header() {
                   {item.label}
                 </Link>
               ))}
+              <ThemeToggle />
             </div>
           </nav>
 
@@ -264,12 +264,9 @@ export function Header() {
 
           {/* Bottom: copyright + theme toggle */}
           <div className="mt-auto px-[22px] pb-[36px]">
-            <button
-              onClick={() => { toggleTheme(); setMenuOpen(false); }}
-              className="mb-4 text-[12px] text-[var(--color-sub-text2)]"
-            >
-              {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-            </button>
+            <div className="mb-4">
+              <ThemeToggle />
+            </div>
             <p className="text-[12px] text-[var(--color-sub-text1)]">
               &copy; 2025 - 2026 1SIX Technologies Inc.
             </p>

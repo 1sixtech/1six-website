@@ -25,13 +25,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Ensure data-theme attribute is in sync (covers edge cases where
-    // localStorage changed between SSR and hydration)
+    // Sync React state with the theme the blocking script already applied.
+    // For first-time visitors, the script defaults to dark on mobile, light on desktop.
     try {
       const stored = localStorage.getItem('theme') as Theme | null;
       if (stored === 'dark' || stored === 'light') {
         setTheme(stored);
         document.documentElement.setAttribute('data-theme', stored);
+      } else {
+        // First visit: match blocking script logic
+        const isMobile = window.matchMedia('(max-width: 767px)').matches;
+        const defaultTheme: Theme = isMobile ? 'dark' : 'light';
+        setTheme(defaultTheme);
+        localStorage.setItem('theme', defaultTheme);
+        document.documentElement.setAttribute('data-theme', defaultTheme);
       }
     } catch {
       // localStorage may throw in private browsing

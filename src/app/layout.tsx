@@ -124,10 +124,21 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               try {
-                var theme = localStorage.getItem('theme') || 'light';
+                var stored = localStorage.getItem('theme');
+                var theme;
+                if (stored === 'dark' || stored === 'light') {
+                  theme = stored;
+                } else {
+                  // First visit: dark on mobile, light on desktop
+                  theme = window.matchMedia('(max-width: 767px)').matches ? 'dark' : 'light';
+                  localStorage.setItem('theme', theme);
+                }
                 document.documentElement.setAttribute('data-theme', theme);
               } catch (e) {}
               if (history.scrollRestoration) history.scrollRestoration = 'manual';
+              if (window.location.pathname === '/') {
+                document.documentElement.classList.add('intro-lock');
+              }
               window.addEventListener('pageshow', function(e) {
                 if (e.persisted) window.location.reload();
               });
