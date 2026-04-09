@@ -40,7 +40,7 @@ const ROW1: Institution[] = [
 const ROW2: Institution[] = [
   { name: 'ICPC', sub: 'world finalists' },
   { name: 'Codeforces', sub: 'grandmasters' },
-  { name: 'Needham' },
+  { name: 'Needham & Co.' },
   { name: 'Tsinghua' },
 ];
 

@@ -30,7 +30,7 @@ export function ThesisGraph() {
           className="relative z-10 max-w-[328px] md:max-w-[1034px] px-[22px] md:px-0 text-center text-[24px] md:text-[36px] font-normal leading-[1.3] tracking-[-0.48px] md:tracking-[-0.72px]"
           style={{ color: 'var(--color-text)' }}
         >
-          1six exists to push the industry past that line.
+          1six exists to drive the industry to <span className="text-[var(--color-accent)]">cross the chasm.</span>
         </p>
       </ScrollRevealWrapper>
     </section>
