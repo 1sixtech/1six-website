@@ -315,24 +315,24 @@ export function ThesisSection() {
       exitingRef.current = true;
       sectionActiveRef.current = false;
 
-      // Disable Observer so preventDefault stops and native scroll works.
-      // touch-action CSS stays as mobile backup until onLeave fires.
+      // Disable Observer + normalizeScroll so native scroll can operate.
       observerRef.current?.disable();
+      if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
       document.documentElement.classList.remove('thesis-touch-lock');
 
-      // Defer scrollTo to next frame so Observer disable propagates.
+      // scrollTo immediately — Observer.disable() is synchronous, no rAF needed.
+      // Previous rAF deferral caused a 16ms gap where the user's swipe was
+      // "consumed" but no visual feedback appeared (felt like input was eaten).
       // +50px offset survives sub-pixel rounding and pin-spacer reflow.
-      requestAnimationFrame(() => {
-        if (stRef.current) {
-          const st = stRef.current;
-          if (toIndex >= TOTAL) {
-            window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
-          } else {
-            window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
-          }
-          ScrollTrigger.update();
+      if (stRef.current) {
+        const st = stRef.current;
+        if (toIndex >= TOTAL) {
+          window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
+        } else {
+          window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
         }
-      });
+        ScrollTrigger.update();
+      }
 
       // Safety net: if onLeave/onLeaveBack didn't fire, fully recover
       // so the user is not stuck with sectionActive=false.
@@ -345,6 +345,7 @@ export function ThesisSection() {
           if (scrollY >= st.start && scrollY <= st.end) {
             // Still in pin range — exit failed. Restore full interactive state.
             sectionActiveRef.current = true;
+            if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
             observerRef.current?.enable();
             document.documentElement.classList.add('thesis-touch-lock');
             const progress = (scrollY - st.start) / (st.end - st.start);
@@ -476,26 +477,41 @@ export function ThesisSection() {
       onEnter: () => {
         if (exitingRef.current) return;
         sectionActiveRef.current = true;
-        animatingRef.current = false;
-        lastTransitionTimeRef.current = Date.now();
+        // Brief animatingRef window absorbs desktop entry momentum (wheel
+        // events that arrive immediately after pin). 150ms is enough for
+        // 2-3 trackpad wheel ticks while being imperceptible to mobile
+        // users (their next touchstart arrives 200-300ms+ after touchend).
+        animatingRef.current = true;
         showPage(0);
+        // Intercept iOS compositor-driven momentum scroll. Without this,
+        // UIScrollView momentum runs on the compositor thread — JS can't
+        // stop it, and the first touch only halts momentum (not a swipe).
+        // normalizeScroll re-routes scroll to JS, giving Observer control.
+        // Scoped: only active during pin, disabled on exit to avoid jank.
+        // Previous global approach (b68ba61) caused site-wide scroll jank;
+        // scoped toggle avoids that since thesis uses discrete page
+        // transitions (no continuous native scroll to stutter).
+        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
+        setTimeout(() => { animatingRef.current = false; }, 150);
       },
       onEnterBack: () => {
         if (exitingRef.current) return;
         sectionActiveRef.current = true;
-        animatingRef.current = false;
-        lastTransitionTimeRef.current = Date.now();
+        animatingRef.current = true;
         showPage(TOTAL - 1);
+        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
+        setTimeout(() => { animatingRef.current = false; }, 150);
       },
       onLeave: () => {
         sectionActiveRef.current = false;
         exitingRef.current = false;
         animatingRef.current = false;
         observerRef.current?.disable();
+        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
         document.documentElement.classList.remove('thesis-touch-lock');
       },
       onLeaveBack: () => {
@@ -503,6 +519,7 @@ export function ThesisSection() {
         exitingRef.current = false;
         animatingRef.current = false;
         observerRef.current?.disable();
+        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
         document.documentElement.classList.remove('thesis-touch-lock');
       },
     });
@@ -547,6 +564,7 @@ export function ThesisSection() {
 
     return () => {
       observer.disable();
+      if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
       document.documentElement.classList.remove('thesis-touch-lock');
       st.kill(true);
     };
