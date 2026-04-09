@@ -50,8 +50,10 @@ if (typeof window !== 'undefined') {
 
     const activateNormalizeScroll = () => {
       ScrollTrigger.normalizeScroll(true);
-      // Recalculate all ScrollTrigger positions now that the page is scrollable
-      ScrollTrigger.refresh();
+      // Recalculate all ScrollTrigger positions now that the page is scrollable.
+      // Safe mode (true) waits for a rAF tick before measuring, avoiding
+      // a synchronous reflow that would cause visible jank.
+      ScrollTrigger.refresh(true);
     };
 
     if (html.classList.contains('intro-lock')) {
@@ -382,9 +384,14 @@ export function ThesisSection() {
         // Cooldown: keep animatingRef true briefly to flush residual
         // momentum events (desktop trackpad / iOS inertia).
         // Observer stays ENABLED so preventDefault keeps blocking native scroll.
+        // Boundary pages (first/last) need a longer cooldown because a fast
+        // swipe's residual momentum can fire an immediate boundary-exit
+        // (gotoPage(1) when already on the last page), scroll past the
+        // section, and then onEnterBack snaps back — perceived as overshoot.
+        const atBoundary = toIndex === 0 || toIndex === TOTAL - 1;
         setTimeout(() => {
           animatingRef.current = false;
-        }, 150);
+        }, atBoundary ? 400 : 150);
       },
     });
 
@@ -470,10 +477,14 @@ export function ThesisSection() {
     // Initialize: first page visible
     showPage(0);
 
-    // Pin the section for the full scroll range
+    // Pin the section for the full scroll range.
+    // anticipatePin monitors scroll velocity and applies the pin slightly
+    // before the trigger, preventing the 1-frame flash of unpinned content
+    // caused by the browser's render thread painting before JS pins.
     const st = ScrollTrigger.create({
       trigger: section,
       pin: true,
+      anticipatePin: 1,
       start: 'top top',
       end: '+=' + ((TOTAL - 1) * 100) + '%',
       onEnter: () => {
