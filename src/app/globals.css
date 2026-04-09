@@ -75,6 +75,14 @@ body {
   outline-offset: 2px;
 }
 
+/* Prevent content bleed-through behind ScrollTrigger pinned sections.
+   Pin-spacer is created dynamically by GSAP; without a background,
+   the next section's content can peek through gaps caused by dvh
+   changes on mobile (address bar show/hide). */
+.pin-spacer {
+  background-color: var(--color-card);
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

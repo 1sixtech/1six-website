@@ -265,10 +265,7 @@ export function ThesisSection() {
   const indexRef = useRef(0);
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
-  const preventScrollRef = useRef<Observer | null>(null);
   const stRef = useRef<ScrollTrigger | null>(null);
-  // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
-  const justExitedRef = useRef(false);
 
   const setContentRef = useCallback(
     (index: number) => (el: HTMLDivElement | null) => {
@@ -292,40 +289,42 @@ export function ThesisSection() {
     // Boundary: exit thesis section
     if (toIndex < 0 || toIndex >= TOTAL) {
       animatingRef.current = true;
-      // Block onEnter/onEnterBack from re-trapping during scroll bounce
-      justExitedRef.current = true;
-      setTimeout(() => { justExitedRef.current = false; }, 600);
 
-      // Disable both observers BEFORE scrollTo so native scroll can proceed.
-      preventScrollRef.current?.disable();
+      // Disable Observer so it stops intercepting input and calling preventDefault.
+      // This frees native scroll for the exit scrollTo.
       observerRef.current?.disable();
 
-      if (stRef.current) {
-        const st = stRef.current;
-        if (toIndex >= TOTAL) {
-          // +50px ensures we clear the pin range even with sub-pixel
-          // rounding and pin-spacer unpin reflow on any viewport size.
-          window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
-        } else {
-          window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
+      // Defer scrollTo to next frame so Observer disable fully takes effect.
+      // Use +50px offset (not +2) to survive sub-pixel rounding, pin-spacer
+      // unpin reflow, and ensure ScrollTrigger's onLeave/onLeaveBack fires.
+      requestAnimationFrame(() => {
+        if (stRef.current) {
+          const st = stRef.current;
+          if (toIndex >= TOTAL) {
+            window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
+          } else {
+            window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
+          }
         }
-      }
+      });
 
-      // Safety net: if ScrollTrigger's onLeave/onLeaveBack didn't fire
-      // (stale pin math, scroll batching), recover from the deadlock.
+      // Safety net: if ScrollTrigger's onLeave/onLeaveBack didn't fire,
+      // recover from the broken state instead of leaving the user trapped.
       setTimeout(() => {
         animatingRef.current = false;
-        // If observers are still disabled and we're inside the pin range,
-        // re-enable them so the section isn't permanently stuck.
-        if (stRef.current && observerRef.current && !observerRef.current.isEnabled) {
-          const y = window.scrollY;
-          const st = stRef.current;
-          if (y >= st.start && y <= st.end) {
-            preventScrollRef.current?.enable();
+        // If still inside pin range with Observer disabled → re-enable
+        const st = stRef.current;
+        if (st && !observerRef.current?.isEnabled) {
+          const scrollY = window.scrollY;
+          if (scrollY >= st.start && scrollY <= st.end) {
+            // Exit scrollTo failed — restore Observer so user isn't stuck
+            const progress = (scrollY - st.start) / (st.end - st.start);
+            const nearestPage = Math.round(progress * (TOTAL - 1));
+            showPage(Math.min(Math.max(nearestPage, 0), TOTAL - 1));
             observerRef.current?.enable();
           }
         }
-      }, 400);
+      }, 600);
 
       return;
     }
@@ -347,20 +346,20 @@ export function ThesisSection() {
 
     const tl = gsap.timeline({
       onComplete: () => {
-        // Sync scroll position within pin range
-        if (stRef.current) {
-          const progress = toIndex / (TOTAL - 1);
-          const scrollTarget = stRef.current.start + (stRef.current.end - stRef.current.start) * progress;
-          window.scrollTo({ top: scrollTarget, behavior: 'auto' });
-        }
+        // Flush residual momentum by disabling then re-enabling Observer.
+        // disable() resets GSAP's internal delta accumulator, so lingering
+        // trackpad/touch inertia events restart from zero and must exceed
+        // tolerance again before triggering another page transition.
+        // This is more reliable than a timer-only cooldown because momentum
+        // duration varies wildly across devices (150ms–1.5s+).
+        const obs = observerRef.current;
+        obs?.disable();
 
-        // Cooldown: keep animatingRef true to absorb residual momentum
-        // events (desktop trackpad inertia lasts 300-500ms, iOS touch
-        // momentum even longer). 500ms ensures a single physical gesture
-        // cannot trigger multiple page transitions.
+        const atBoundary = toIndex === 0 || toIndex === TOTAL - 1;
         setTimeout(() => {
           animatingRef.current = false;
-        }, 500);
+          obs?.enable();
+        }, atBoundary ? 600 : 350);
       },
     });
 
@@ -457,70 +456,42 @@ export function ThesisSection() {
       start: 'top top',
       end: '+=' + ((TOTAL - 1) * 100) + '%',
       onEnter: () => {
-        if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(0);
-        preventScrollRef.current?.enable();
         observerRef.current?.enable();
       },
       onEnterBack: () => {
-        if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(TOTAL - 1);
-        preventScrollRef.current?.enable();
         observerRef.current?.enable();
       },
       onLeave: () => {
-        preventScrollRef.current?.disable();
         observerRef.current?.disable();
         animatingRef.current = false;
       },
       onLeaveBack: () => {
-        preventScrollRef.current?.disable();
         observerRef.current?.disable();
         animatingRef.current = false;
       },
     });
     stRef.current = st;
 
-    // Set pin-spacer background to match the thesis section.
-    // Without this, the pin-spacer (which sits behind the position:fixed
-    // pinned section) has a transparent background, and if the pinned
-    // section's height (h-dvh) is shorter than the viewport (e.g. iOS
-    // address bar state), the page background bleeds through at the bottom.
-    const spacer = section.parentElement;
-    if (spacer?.classList.contains('pin-spacer')) {
-      spacer.style.backgroundColor = 'var(--color-card)';
-    }
-
-    // ── Two-Observer pattern ──
-    // Replaces the previous normalizeScroll(true) approach which hijacked
-    // ALL scroll site-wide (moving it from compositor to JS thread).
-    // Instead, two scoped observers handle scroll ONLY while pinned:
-
-    // Observer 1: Block native scroll while thesis section is pinned.
-    // Only prevents default on wheel/touch — does NOT intercept scroll
-    // events (which are non-cancelable and would conflict with our
-    // programmatic scrollTo calls in gotoPage's onComplete).
-    // No onChangeY/savedScroll — preventDefault alone is sufficient to
-    // stop user-initiated scroll, and avoiding scrollY restoration
-    // prevents the viewport-level observer from consuming wheel deltas
-    // before the section-level intentObserver can read them.
-    const preventScroll = ScrollTrigger.observe({
-      preventDefault: true,
-      type: 'wheel,touch',
-    });
-    preventScrollRef.current = preventScroll;
-    preventScroll.disable();
-
-    // Observer 2: Detect swipe/wheel intent for page transitions.
-    // Scoped to the thesis section element.
+    // ── Single Observer ──
+    // Replaces the previous Two-Observer pattern (preventScroll + intentObserver)
+    // which caused a critical bug: the viewport-level preventScroll consumed
+    // wheel events before the section-level intentObserver could process them,
+    // freezing page advancement on desktop.
+    //
+    // A single Observer handles BOTH scroll prevention (preventDefault: true
+    // blocks native scroll while pinned) AND page-intent detection.
+    // No target → viewport-level, catches all events regardless of cursor
+    // position (header, section, etc.) while the full-screen pin is active.
+    //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
     //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
     //   iOS touch:     only swapped cb = fixes the inverted direction
-    const intentObserver = Observer.create({
-      target: section,
+    const observer = Observer.create({
       type: 'wheel,touch',
       tolerance: 10,
       preventDefault: true,
@@ -529,12 +500,11 @@ export function ThesisSection() {
       onUp: () => gotoPage(1),
       onDown: () => gotoPage(-1),
     });
-    observerRef.current = intentObserver;
-    intentObserver.disable();
+    observerRef.current = observer;
+    observer.disable();
 
     return () => {
-      preventScroll.disable();
-      intentObserver.disable();
+      observer.disable();
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
@@ -596,7 +566,7 @@ export function ThesisSection() {
     <section
       ref={sectionRef}
       id="thesis"
-      className="relative h-dvh w-full"
+      className="relative h-dvh w-full overflow-hidden z-10"
       style={{ backgroundColor: 'var(--color-card)' }}
       aria-live="polite"
     >
