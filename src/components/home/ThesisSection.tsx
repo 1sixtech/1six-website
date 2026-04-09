@@ -30,6 +30,63 @@ if (typeof window !== 'undefined') {
   } else {
     window.addEventListener('load', () => { _lastW = window.innerWidth; }, { once: true });
   }
+
+  // ── iOS momentum scroll interception (touch-only devices) ──
+  // iOS Safari drives momentum scroll on a native compositor thread
+  // (UIScrollView) that is completely outside WebKit's JS context:
+  //   1) The first touch that stops momentum is consumed by UIScrollView
+  //      and never dispatched as a DOM touchstart event (WebKit #174300)
+  //   2) preventDefault() from JS cannot interrupt compositor-driven momentum
+  //   3) position:fixed hit-testing desyncs after scroll until a touch re-syncs
+  //
+  // normalizeScroll intercepts ALL scroll input and replays it via JS,
+  // preventing the compositor from ever starting momentum. This MUST be
+  // activated BEFORE any gesture begins (at module load, not onEnter) —
+  // once compositor momentum starts, JS cannot reclaim control.
+  //
+  // Activation is deferred until intro-lock is released. normalizeScroll
+  // conflicts with intro-lock's overflow:hidden — if initialized while
+  // the viewport is non-scrollable, its internal Observer starts with
+  // stale scroll dimensions and blocks all scroll afterward.
+  //
+  // Known trade-off: all scroll goes through JS thread, which can cause
+  // micro-stutter if main thread is contended. On this site, thesis uses
+  // discrete page transitions (no continuous scroll to stutter) and WebGL
+  // contexts dispose when offscreen (reduced main-thread load).
+  //
+  // Previously tried alternatives that failed:
+  //   - onEnter-scoped normalizeScroll toggle (d15407a): too late, momentum
+  //     already running; internal Observer conflicts corrupted pin position
+  //   - section touchstart preventDefault (27fb73d): only catches touches
+  //     ON the section; Hero-originated momentum has no touchstart to catch
+  //   - CSS touch-action:none (thesis-touch-lock): only affects NEXT gesture,
+  //     not the current in-flight momentum (MDN: "changes during a gesture
+  //     do not affect the current gesture")
+  if (ScrollTrigger.isTouch === 1) {
+    const html = document.documentElement;
+
+    const activateNormalizeScroll = () => {
+      ScrollTrigger.normalizeScroll(true);
+      // Recalculate all ScrollTrigger positions now that the page is scrollable.
+      // Safe mode (true) defers to a rAF tick, avoiding synchronous reflow jank.
+      ScrollTrigger.refresh(true);
+    };
+
+    if (html.classList.contains('intro-lock')) {
+      // Wait for intro-lock removal (Hero scramble animation completion)
+      const mo = new MutationObserver(() => {
+        if (!html.classList.contains('intro-lock')) {
+          mo.disconnect();
+          // Let the browser reflow after overflow:hidden removal
+          requestAnimationFrame(activateNormalizeScroll);
+        }
+      });
+      mo.observe(html, { attributes: true, attributeFilter: ['class'] });
+    } else {
+      // Not on homepage or intro-lock already removed (e.g. back-navigation)
+      activateNormalizeScroll();
+    }
+  }
 }
 
 interface ThesisState {
