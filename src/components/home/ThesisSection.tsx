@@ -266,7 +266,6 @@ export function ThesisSection() {
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
   const preventScrollRef = useRef<Observer | null>(null);
-  const savedScrollRef = useRef(0);
   const stRef = useRef<ScrollTrigger | null>(null);
   // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
   const justExitedRef = useRef(false);
@@ -297,26 +296,36 @@ export function ThesisSection() {
       justExitedRef.current = true;
       setTimeout(() => { justExitedRef.current = false; }, 600);
 
-      // Disable scroll lock BEFORE scrollTo so the browser can actually move.
-      // preventScroll's onChangeY would immediately restore the saved position
-      // if still enabled, blocking the exit scroll.
+      // Disable both observers BEFORE scrollTo so native scroll can proceed.
       preventScrollRef.current?.disable();
       observerRef.current?.disable();
 
       if (stRef.current) {
         const st = stRef.current;
         if (toIndex >= TOTAL) {
-          // Use ceil + 2 to survive sub-pixel rounding & pin unpin reflow
-          window.scrollTo({ top: Math.ceil(st.end) + 2, behavior: 'auto' });
+          // +50px ensures we clear the pin range even with sub-pixel
+          // rounding and pin-spacer unpin reflow on any viewport size.
+          window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
         } else {
-          window.scrollTo({ top: Math.floor(st.start) - 2, behavior: 'auto' });
+          window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
         }
       }
 
-      // Safety net: clear animating flag if ScrollTrigger callbacks didn't fire
+      // Safety net: if ScrollTrigger's onLeave/onLeaveBack didn't fire
+      // (stale pin math, scroll batching), recover from the deadlock.
       setTimeout(() => {
         animatingRef.current = false;
-      }, 300);
+        // If observers are still disabled and we're inside the pin range,
+        // re-enable them so the section isn't permanently stuck.
+        if (stRef.current && observerRef.current && !observerRef.current.isEnabled) {
+          const y = window.scrollY;
+          const st = stRef.current;
+          if (y >= st.start && y <= st.end) {
+            preventScrollRef.current?.enable();
+            observerRef.current?.enable();
+          }
+        }
+      }, 400);
 
       return;
     }
@@ -345,17 +354,13 @@ export function ThesisSection() {
           window.scrollTo({ top: scrollTarget, behavior: 'auto' });
         }
 
-        // Cooldown: keep animatingRef true briefly to flush residual
-        // momentum events (desktop trackpad / iOS inertia).
-        // Observer stays ENABLED so preventDefault keeps blocking native scroll.
-        // Boundary pages (first/last) need a longer cooldown because a fast
-        // swipe's residual momentum can fire an immediate boundary-exit
-        // (gotoPage(1) when already on the last page), scroll past the
-        // section, and then onEnterBack snaps back — perceived as overshoot.
-        const atBoundary = toIndex === 0 || toIndex === TOTAL - 1;
+        // Cooldown: keep animatingRef true to absorb residual momentum
+        // events (desktop trackpad inertia lasts 300-500ms, iOS touch
+        // momentum even longer). 500ms ensures a single physical gesture
+        // cannot trigger multiple page transitions.
         setTimeout(() => {
           animatingRef.current = false;
-        }, atBoundary ? 400 : 150);
+        }, 500);
       },
     });
 
@@ -478,24 +483,32 @@ export function ThesisSection() {
     });
     stRef.current = st;
 
+    // Set pin-spacer background to match the thesis section.
+    // Without this, the pin-spacer (which sits behind the position:fixed
+    // pinned section) has a transparent background, and if the pinned
+    // section's height (h-dvh) is shorter than the viewport (e.g. iOS
+    // address bar state), the page background bleeds through at the bottom.
+    const spacer = section.parentElement;
+    if (spacer?.classList.contains('pin-spacer')) {
+      spacer.style.backgroundColor = 'var(--color-card)';
+    }
+
     // ── Two-Observer pattern ──
     // Replaces the previous normalizeScroll(true) approach which hijacked
     // ALL scroll site-wide (moving it from compositor to JS thread).
     // Instead, two scoped observers handle scroll ONLY while pinned:
 
-    // Observer 1: Lock scroll position while thesis section is pinned.
-    // Saves scroll position on enable, restores on every Y change.
-    // This prevents native scroll from drifting the page while the
-    // discrete page carousel is active — scoped, not global.
+    // Observer 1: Block native scroll while thesis section is pinned.
+    // Only prevents default on wheel/touch — does NOT intercept scroll
+    // events (which are non-cancelable and would conflict with our
+    // programmatic scrollTo calls in gotoPage's onComplete).
+    // No onChangeY/savedScroll — preventDefault alone is sufficient to
+    // stop user-initiated scroll, and avoiding scrollY restoration
+    // prevents the viewport-level observer from consuming wheel deltas
+    // before the section-level intentObserver can read them.
     const preventScroll = ScrollTrigger.observe({
       preventDefault: true,
-      type: 'wheel,touch,scroll',
-      onEnable: (self) => {
-        savedScrollRef.current = self.scrollY();
-      },
-      onChangeY: (self) => {
-        self.scrollY(savedScrollRef.current);
-      },
+      type: 'wheel,touch',
     });
     preventScrollRef.current = preventScroll;
     preventScroll.disable();
