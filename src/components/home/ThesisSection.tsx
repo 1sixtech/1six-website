@@ -315,28 +315,27 @@ export function ThesisSection() {
       exitingRef.current = true;
       sectionActiveRef.current = false;
 
-      // Remove touch-action lock so native scroll can operate after exit
+      // Disable Observer so preventDefault stops and native scroll works.
+      // touch-action CSS stays as mobile backup until onLeave fires.
+      observerRef.current?.disable();
       document.documentElement.classList.remove('thesis-touch-lock');
 
-      // Defer scrollTo to next frame to ensure state changes propagate.
-      // +1px offset is sufficient — elastic bounce protection comes from
-      // exitingRef blocking onEnterBack, not from large pixel offsets.
+      // Defer scrollTo to next frame so Observer disable propagates.
+      // +50px offset survives sub-pixel rounding and pin-spacer reflow.
       requestAnimationFrame(() => {
         if (stRef.current) {
           const st = stRef.current;
           if (toIndex >= TOTAL) {
-            window.scrollTo({ top: Math.ceil(st.end) + 1, behavior: 'auto' });
+            window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
           } else {
-            window.scrollTo({ top: Math.floor(st.start) - 1, behavior: 'auto' });
+            window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
           }
-          // Force ScrollTrigger to process the new scroll position
-          // in the same frame, ensuring onLeave/onLeaveBack fires.
           ScrollTrigger.update();
         }
       });
 
-      // Safety net: if onLeave/onLeaveBack didn't fire (e.g. pin-spacer
-      // reflow absorbed the +1px), retry the exit and recover state.
+      // Safety net: if onLeave/onLeaveBack didn't fire, fully recover
+      // so the user is not stuck with sectionActive=false.
       setTimeout(() => {
         animatingRef.current = false;
         exitingRef.current = false;
@@ -344,13 +343,13 @@ export function ThesisSection() {
         if (st) {
           const scrollY = window.scrollY;
           if (scrollY >= st.start && scrollY <= st.end) {
-            // Still in pin range — exit failed, retry scrollTo
-            if (toIndex >= TOTAL) {
-              window.scrollTo({ top: Math.ceil(st.end) + 1, behavior: 'auto' });
-            } else {
-              window.scrollTo({ top: Math.floor(st.start) - 1, behavior: 'auto' });
-            }
-            ScrollTrigger.update();
+            // Still in pin range — exit failed. Restore full interactive state.
+            sectionActiveRef.current = true;
+            observerRef.current?.enable();
+            document.documentElement.classList.add('thesis-touch-lock');
+            const progress = (scrollY - st.start) / (st.end - st.start);
+            const nearestPage = Math.round(progress * (TOTAL - 1));
+            showPage(Math.min(Math.max(nearestPage, 0), TOTAL - 1));
           }
         }
       }, 800);
@@ -480,6 +479,7 @@ export function ThesisSection() {
         animatingRef.current = false;
         lastTransitionTimeRef.current = Date.now();
         showPage(0);
+        observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
       },
       onEnterBack: () => {
@@ -488,41 +488,45 @@ export function ThesisSection() {
         animatingRef.current = false;
         lastTransitionTimeRef.current = Date.now();
         showPage(TOTAL - 1);
+        observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
       },
       onLeave: () => {
         sectionActiveRef.current = false;
         exitingRef.current = false;
         animatingRef.current = false;
+        observerRef.current?.disable();
         document.documentElement.classList.remove('thesis-touch-lock');
       },
       onLeaveBack: () => {
         sectionActiveRef.current = false;
         exitingRef.current = false;
         animatingRef.current = false;
+        observerRef.current?.disable();
         document.documentElement.classList.remove('thesis-touch-lock');
       },
     });
     stRef.current = st;
 
-    // ── Always-on Observer ──
-    // Returns to the 721296c approach (always-on observer + boolean gate)
-    // with the critical fix: preventDefault: true.
+    // ── Observer: enabled only during pin ──
+    // Lifecycle: disabled by default → enabled on onEnter/onEnterBack →
+    // disabled on onLeave/onLeaveBack or boundary exit.
     //
-    // History of Observer strategies and why each failed:
-    //   721296c: always-on + sectionActiveRef gate, BUT preventDefault:false
-    //            → native scroll leaked through on mobile
-    //   ffff820: Two-Observer (preventScroll + intent), enable/disable cycle
-    //            → preventScroll consumed wheel events, freezing desktop
-    //   d3a0e7c: Single Observer, disable/re-enable flush in onComplete
-    //            → disable window allowed mobile touch to bypass section
+    // Key design decision: Observer is NOT disabled during onComplete
+    // (between page transitions within thesis). This prevents the mobile
+    // touch leak bug (d3a0e7c) where the disable window allowed touchmove
+    // events to fall through to native scroll. Time-based debounce
+    // (COOLDOWN_MS) absorbs residual momentum instead of disable/re-enable.
     //
-    // This version: always-on + sectionActiveRef gate + preventDefault:true
-    //   - Observer is NEVER disabled during pin lifecycle
-    //   - preventDefault blocks native scroll continuously (fixes mobile leak)
-    //   - sectionActiveRef + animatingRef + time debounce gate callbacks
-    //   - target: section scopes events to pinned area (avoids blocking
-    //     scroll on other sections when thesis is offscreen)
+    // Why not always-on (18e889e): an always-on Observer with
+    // preventDefault:true blocks native scroll OUTSIDE the pin range —
+    // users get stuck between Hero and Thesis if they stop scrolling
+    // before the pin triggers.
+    //
+    // Mobile backup: CSS thesis-touch-lock (touch-action:none) on <html>
+    // during pin provides a second layer of native scroll prevention for
+    // edge cases where Observer's preventDefault is ineffective (Chrome 56+
+    // passive listener defaults, WebKit Bug #184250).
     //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
@@ -539,7 +543,7 @@ export function ThesisSection() {
       onDown: () => gotoPage(-1),
     });
     observerRef.current = observer;
-    // Do NOT disable — observer stays always-on for continuous preventDefault
+    observer.disable(); // starts disabled; onEnter/onEnterBack will enable
 
     return () => {
       observer.disable();
