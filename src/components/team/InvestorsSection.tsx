@@ -85,7 +85,7 @@ export function InvestorsSection() {
               style={{ gridColumn: '1 / 4' }}
             >
               <span
-                className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+                className="text-[18px] font-semibold tracking-[-0.2px] leading-none"
                 style={{ color: 'var(--color-text)' }}
               >
                 {FIRM_INVESTORS[0]}
@@ -97,7 +97,7 @@ export function InvestorsSection() {
               style={{ gridColumn: '5 / 8' }}
             >
               <span
-                className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+                className="text-[18px] font-semibold tracking-[-0.2px] leading-none"
                 style={{ color: 'var(--color-text)' }}
               >
                 {FIRM_INVESTORS[1]}
@@ -147,7 +147,7 @@ export function InvestorsSection() {
             {/* Row 3 — Firms */}
             <div className="flex items-center justify-center py-[8px]">
               <span
-                className="text-[13px] font-normal tracking-[-0.2px] leading-none"
+                className="text-[14px] font-semibold tracking-[-0.15px] leading-none"
                 style={{ color: 'var(--color-text)' }}
               >
                 {FIRM_INVESTORS[0]}
@@ -156,7 +156,7 @@ export function InvestorsSection() {
             <Divider className="h-[24px]" />
             <div className="flex items-center justify-center py-[8px]">
               <span
-                className="text-[13px] font-normal tracking-[-0.2px] leading-none"
+                className="text-[14px] font-semibold tracking-[-0.15px] leading-none"
                 style={{ color: 'var(--color-text)' }}
               >
                 {FIRM_INVESTORS[1]}
@@ -181,7 +181,7 @@ function InvestorCell({ name, role }: { name: string; role: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-[4px]">
       <span
-        className="text-[15px] font-normal tracking-[-0.3px] leading-none"
+        className="text-[18px] font-semibold tracking-[-0.2px] leading-none"
         style={{ color: 'var(--color-text)' }}
       >
         {name}
@@ -201,7 +201,7 @@ function InvestorCellMobile({ name, role }: { name: string; role: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-[8px]">
       <span
-        className="text-[13px] font-normal tracking-[-0.2px] leading-none"
+        className="text-[14px] font-semibold tracking-[-0.15px] leading-none"
         style={{ color: 'var(--color-text)' }}
       >
         {name}
