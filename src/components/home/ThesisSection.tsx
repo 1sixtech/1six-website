@@ -66,18 +66,7 @@ if (typeof window !== 'undefined') {
     const html = document.documentElement;
 
     const activateNormalizeScroll = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (ScrollTrigger.normalizeScroll as any)({
-        // Short momentum: reduces JS-thread scroll processing frames.
-        // Default GSAP momentum runs ~1-2s of synthetic deceleration
-        // after finger lift, each frame requiring JS scroll processing.
-        // Capping at 0.3s keeps scroll feeling responsive while cutting
-        // JS work by ~80%. The site's main content (Products, Footer)
-        // doesn't need long momentum — thesis uses discrete transitions.
-        momentum: (self: { velocityY: number }) => Math.min(0.3, Math.abs(self.velocityY) / 3000),
-        // Allow scrolling within nested scrollable containers if any
-        allowNestedScroll: true,
-      });
+      ScrollTrigger.normalizeScroll(true);
       // Recalculate all ScrollTrigger positions now that the page is scrollable.
       // Safe mode (true) defers to a rAF tick, avoiding synchronous reflow jank.
       ScrollTrigger.refresh(true);
