@@ -30,46 +30,6 @@ if (typeof window !== 'undefined') {
   } else {
     window.addEventListener('load', () => { _lastW = window.innerWidth; }, { once: true });
   }
-
-  // On touch devices, move scroll handling from native UIScrollView to JavaScript.
-  // iOS Safari drives momentum scroll on a native compositor thread that is
-  // completely outside WebKit's JS context. This means:
-  //   1) The first touch that stops momentum is consumed by UIScrollView
-  //   2) preventDefault() from JS cannot interrupt compositor-driven momentum
-  //   3) GSAP Observer misses the first swipe gesture after momentum scroll
-  // normalizeScroll intercepts all scroll input and replays it in JS,
-  // eliminating the UIScrollView interference entirely.
-  //
-  // IMPORTANT: Activation is deferred until intro-lock is released.
-  // normalizeScroll conflicts with the intro-lock's overflow:hidden —
-  // if initialized while the viewport is non-scrollable, its internal
-  // Observer starts with stale scroll dimensions and blocks all scroll
-  // even after intro-lock removal.
-  if (ScrollTrigger.isTouch === 1) {
-    const html = document.documentElement;
-
-    const activateNormalizeScroll = () => {
-      ScrollTrigger.normalizeScroll(true);
-      // Recalculate all ScrollTrigger positions now that the page is scrollable.
-      // Safe mode (true) waits for a rAF tick before measuring, avoiding
-      // a synchronous reflow that would cause visible jank.
-      ScrollTrigger.refresh(true);
-    };
-
-    if (html.classList.contains('intro-lock')) {
-      const mo = new MutationObserver(() => {
-        if (!html.classList.contains('intro-lock')) {
-          mo.disconnect();
-          // Let the browser reflow after overflow:hidden removal
-          requestAnimationFrame(activateNormalizeScroll);
-        }
-      });
-      mo.observe(html, { attributes: true, attributeFilter: ['class'] });
-    } else {
-      // Not on homepage or intro-lock already removed (e.g. back-navigation)
-      activateNormalizeScroll();
-    }
-  }
 }
 
 interface ThesisState {
@@ -305,6 +265,8 @@ export function ThesisSection() {
   const indexRef = useRef(0);
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
+  const preventScrollRef = useRef<Observer | null>(null);
+  const savedScrollRef = useRef(0);
   const stRef = useRef<ScrollTrigger | null>(null);
   // Prevents immediate re-entry after intentional exit (scroll bounce / momentum)
   const justExitedRef = useRef(false);
@@ -335,6 +297,12 @@ export function ThesisSection() {
       justExitedRef.current = true;
       setTimeout(() => { justExitedRef.current = false; }, 600);
 
+      // Disable scroll lock BEFORE scrollTo so the browser can actually move.
+      // preventScroll's onChangeY would immediately restore the saved position
+      // if still enabled, blocking the exit scroll.
+      preventScrollRef.current?.disable();
+      observerRef.current?.disable();
+
       if (stRef.current) {
         const st = stRef.current;
         if (toIndex >= TOTAL) {
@@ -345,13 +313,9 @@ export function ThesisSection() {
         }
       }
 
-      // Safety net: if ScrollTrigger's onLeave/onLeaveBack doesn't fire
-      // within 300ms (stale pin math, iOS scroll batching), force exit.
+      // Safety net: clear animating flag if ScrollTrigger callbacks didn't fire
       setTimeout(() => {
-        if (animatingRef.current) {
-          observerRef.current?.disable();
-          animatingRef.current = false;
-        }
+        animatingRef.current = false;
       }, 300);
 
       return;
@@ -491,36 +455,58 @@ export function ThesisSection() {
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(0);
+        preventScrollRef.current?.enable();
         observerRef.current?.enable();
       },
       onEnterBack: () => {
         if (justExitedRef.current) return;
         animatingRef.current = false;
         showPage(TOTAL - 1);
+        preventScrollRef.current?.enable();
         observerRef.current?.enable();
       },
       onLeave: () => {
+        preventScrollRef.current?.disable();
         observerRef.current?.disable();
         animatingRef.current = false;
       },
       onLeaveBack: () => {
+        preventScrollRef.current?.disable();
         observerRef.current?.disable();
         animatingRef.current = false;
       },
     });
     stRef.current = st;
 
-    // Observer: intercept wheel/touch, trigger discrete page transitions.
-    // Starts disabled. ScrollTrigger onEnter/onEnterBack enables it.
-    // With normalizeScroll active on touch devices, the enable/disable
-    // pattern works reliably because scroll is JS-controlled (no native
-    // UIScrollView stealing touch events during momentum).
-    //
+    // ── Two-Observer pattern ──
+    // Replaces the previous normalizeScroll(true) approach which hijacked
+    // ALL scroll site-wide (moving it from compositor to JS thread).
+    // Instead, two scoped observers handle scroll ONLY while pinned:
+
+    // Observer 1: Lock scroll position while thesis section is pinned.
+    // Saves scroll position on enable, restores on every Y change.
+    // This prevents native scroll from drifting the page while the
+    // discrete page carousel is active — scoped, not global.
+    const preventScroll = ScrollTrigger.observe({
+      preventDefault: true,
+      type: 'wheel,touch,scroll',
+      onEnable: (self) => {
+        savedScrollRef.current = self.scrollY();
+      },
+      onChangeY: (self) => {
+        self.scrollY(savedScrollRef.current);
+      },
+    });
+    preventScrollRef.current = preventScroll;
+    preventScroll.disable();
+
+    // Observer 2: Detect swipe/wheel intent for page transitions.
+    // Scoped to the thesis section element.
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
     //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
     //   iOS touch:     only swapped cb = fixes the inverted direction
-    const obs = Observer.create({
+    const intentObserver = Observer.create({
       target: section,
       type: 'wheel,touch',
       tolerance: 10,
@@ -530,13 +516,12 @@ export function ThesisSection() {
       onUp: () => gotoPage(1),
       onDown: () => gotoPage(-1),
     });
-    observerRef.current = obs;
-
-    // Start disabled — ScrollTrigger onEnter will enable it
-    obs.disable();
+    observerRef.current = intentObserver;
+    intentObserver.disable();
 
     return () => {
-      obs.disable();
+      preventScroll.disable();
+      intentObserver.disable();
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
