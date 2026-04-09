@@ -266,6 +266,12 @@ export function ThesisSection() {
   const animatingRef = useRef(false);
   const observerRef = useRef<Observer | null>(null);
   const stRef = useRef<ScrollTrigger | null>(null);
+  // True while thesis section is in ScrollTrigger pin range
+  const sectionActiveRef = useRef(false);
+  // True during boundary exit scrollTo — blocks onEnter/onEnterBack bounce-back
+  const exitingRef = useRef(false);
+  // Timestamp of last completed page transition — time-based momentum debounce
+  const lastTransitionTimeRef = useRef(0);
 
   const setContentRef = useCallback(
     (index: number) => (el: HTMLDivElement | null) => {
@@ -274,65 +280,88 @@ export function ThesisSection() {
     []
   );
 
-  // Core transition: discrete page-by-page with crossfade
+  // Core transition: discrete page-by-page with crossfade.
+  //
+  // ── Guard layers (checked in order) ──
+  // 1. animatingRef: blocks during GSAP crossfade animation
+  // 2. sectionActiveRef: blocks when scroll is outside pin range
+  // 3. time debounce: blocks residual momentum events after a transition
+  //
+  // ── Why Observer is NEVER disabled during page transitions ──
+  // Previous versions disabled Observer in onComplete to flush momentum.
+  // This created Bug 3: during the disabled window, mobile touch events
+  // fell through to native scroll, allowing the pinned section to be
+  // bypassed entirely. Keeping Observer always-on ensures preventDefault
+  // continuously blocks native scroll. Momentum is absorbed by the
+  // time-based debounce (COOLDOWN_MS) instead.
+  const COOLDOWN_MS = 400;
+
   const gotoPage = useCallback((direction: 1 | -1) => {
-    // Gate ALL transitions (including boundary exit) while animating.
-    // Without this, momentum scroll during a page 5→6 transition would
-    // fire the exit code (toIndex=7) before the animation completes,
-    // and the animation's onComplete would then scrollTo(st.end),
-    // pulling the user back into the section.
     if (animatingRef.current) return;
+    if (!sectionActiveRef.current) return;
+
+    // Time-based debounce: reject residual momentum events arriving
+    // too soon after a completed transition. Replaces the disable/
+    // re-enable flush pattern that caused mobile touch scroll leaks.
+    const now = Date.now();
+    if (now - lastTransitionTimeRef.current < COOLDOWN_MS) return;
 
     const idx = indexRef.current;
     const toIndex = idx + direction;
 
-    // Boundary: exit thesis section
+    // ── Boundary exit: leave thesis section ──
     if (toIndex < 0 || toIndex >= TOTAL) {
       animatingRef.current = true;
+      exitingRef.current = true;
+      sectionActiveRef.current = false;
 
-      // Disable Observer so it stops intercepting input and calling preventDefault.
-      // This frees native scroll for the exit scrollTo.
-      observerRef.current?.disable();
+      // Remove touch-action lock so native scroll can operate after exit
+      document.documentElement.classList.remove('thesis-touch-lock');
 
-      // Defer scrollTo to next frame so Observer disable fully takes effect.
-      // Use +50px offset (not +2) to survive sub-pixel rounding, pin-spacer
-      // unpin reflow, and ensure ScrollTrigger's onLeave/onLeaveBack fires.
+      // Defer scrollTo to next frame to ensure state changes propagate.
+      // +1px offset is sufficient — elastic bounce protection comes from
+      // exitingRef blocking onEnterBack, not from large pixel offsets.
       requestAnimationFrame(() => {
         if (stRef.current) {
           const st = stRef.current;
           if (toIndex >= TOTAL) {
-            window.scrollTo({ top: Math.ceil(st.end) + 50, behavior: 'auto' });
+            window.scrollTo({ top: Math.ceil(st.end) + 1, behavior: 'auto' });
           } else {
-            window.scrollTo({ top: Math.floor(st.start) - 50, behavior: 'auto' });
+            window.scrollTo({ top: Math.floor(st.start) - 1, behavior: 'auto' });
           }
+          // Force ScrollTrigger to process the new scroll position
+          // in the same frame, ensuring onLeave/onLeaveBack fires.
+          ScrollTrigger.update();
         }
       });
 
-      // Safety net: if ScrollTrigger's onLeave/onLeaveBack didn't fire,
-      // recover from the broken state instead of leaving the user trapped.
+      // Safety net: if onLeave/onLeaveBack didn't fire (e.g. pin-spacer
+      // reflow absorbed the +1px), retry the exit and recover state.
       setTimeout(() => {
         animatingRef.current = false;
-        // If still inside pin range with Observer disabled → re-enable
+        exitingRef.current = false;
         const st = stRef.current;
-        if (st && !observerRef.current?.isEnabled) {
+        if (st) {
           const scrollY = window.scrollY;
           if (scrollY >= st.start && scrollY <= st.end) {
-            // Exit scrollTo failed — restore Observer so user isn't stuck
-            const progress = (scrollY - st.start) / (st.end - st.start);
-            const nearestPage = Math.round(progress * (TOTAL - 1));
-            showPage(Math.min(Math.max(nearestPage, 0), TOTAL - 1));
-            observerRef.current?.enable();
+            // Still in pin range — exit failed, retry scrollTo
+            if (toIndex >= TOTAL) {
+              window.scrollTo({ top: Math.ceil(st.end) + 1, behavior: 'auto' });
+            } else {
+              window.scrollTo({ top: Math.floor(st.start) - 1, behavior: 'auto' });
+            }
+            ScrollTrigger.update();
           }
         }
-      }, 600);
+      }, 800);
 
       return;
     }
 
+    // ── Normal page transition ──
     animatingRef.current = true;
-    // Observer stays ENABLED during animation so that preventDefault
-    // continues to block native scroll on mobile touch devices.
-    // animatingRef guards the callbacks from firing during animation.
+    // Observer stays always-on — preventDefault continues blocking
+    // native scroll on mobile. animatingRef gates the callbacks.
 
     const fromEl = contentRefs.current[idx];
     const toEl = contentRefs.current[toIndex];
@@ -346,20 +375,10 @@ export function ThesisSection() {
 
     const tl = gsap.timeline({
       onComplete: () => {
-        // Flush residual momentum by disabling then re-enabling Observer.
-        // disable() resets GSAP's internal delta accumulator, so lingering
-        // trackpad/touch inertia events restart from zero and must exceed
-        // tolerance again before triggering another page transition.
-        // This is more reliable than a timer-only cooldown because momentum
-        // duration varies wildly across devices (150ms–1.5s+).
-        const obs = observerRef.current;
-        obs?.disable();
-
-        const atBoundary = toIndex === 0 || toIndex === TOTAL - 1;
-        setTimeout(() => {
-          animatingRef.current = false;
-          obs?.enable();
-        }, atBoundary ? 600 : 350);
+        lastTransitionTimeRef.current = Date.now();
+        animatingRef.current = false;
+        // Observer is NOT disabled. preventDefault remains active.
+        // Time debounce (COOLDOWN_MS) absorbs residual momentum.
       },
     });
 
@@ -456,42 +475,61 @@ export function ThesisSection() {
       start: 'top top',
       end: '+=' + ((TOTAL - 1) * 100) + '%',
       onEnter: () => {
+        if (exitingRef.current) return;
+        sectionActiveRef.current = true;
         animatingRef.current = false;
+        lastTransitionTimeRef.current = Date.now();
         showPage(0);
-        observerRef.current?.enable();
+        document.documentElement.classList.add('thesis-touch-lock');
       },
       onEnterBack: () => {
+        if (exitingRef.current) return;
+        sectionActiveRef.current = true;
         animatingRef.current = false;
+        lastTransitionTimeRef.current = Date.now();
         showPage(TOTAL - 1);
-        observerRef.current?.enable();
+        document.documentElement.classList.add('thesis-touch-lock');
       },
       onLeave: () => {
-        observerRef.current?.disable();
+        sectionActiveRef.current = false;
+        exitingRef.current = false;
         animatingRef.current = false;
+        document.documentElement.classList.remove('thesis-touch-lock');
       },
       onLeaveBack: () => {
-        observerRef.current?.disable();
+        sectionActiveRef.current = false;
+        exitingRef.current = false;
         animatingRef.current = false;
+        document.documentElement.classList.remove('thesis-touch-lock');
       },
     });
     stRef.current = st;
 
-    // ── Single Observer ──
-    // Replaces the previous Two-Observer pattern (preventScroll + intentObserver)
-    // which caused a critical bug: the viewport-level preventScroll consumed
-    // wheel events before the section-level intentObserver could process them,
-    // freezing page advancement on desktop.
+    // ── Always-on Observer ──
+    // Returns to the 721296c approach (always-on observer + boolean gate)
+    // with the critical fix: preventDefault: true.
     //
-    // A single Observer handles BOTH scroll prevention (preventDefault: true
-    // blocks native scroll while pinned) AND page-intent detection.
-    // No target → viewport-level, catches all events regardless of cursor
-    // position (header, section, etc.) while the full-screen pin is active.
+    // History of Observer strategies and why each failed:
+    //   721296c: always-on + sectionActiveRef gate, BUT preventDefault:false
+    //            → native scroll leaked through on mobile
+    //   ffff820: Two-Observer (preventScroll + intent), enable/disable cycle
+    //            → preventScroll consumed wheel events, freezing desktop
+    //   d3a0e7c: Single Observer, disable/re-enable flush in onComplete
+    //            → disable window allowed mobile touch to bypass section
+    //
+    // This version: always-on + sectionActiveRef gate + preventDefault:true
+    //   - Observer is NEVER disabled during pin lifecycle
+    //   - preventDefault blocks native scroll continuously (fixes mobile leak)
+    //   - sectionActiveRef + animatingRef + time debounce gate callbacks
+    //   - target: section scopes events to pinned area (avoids blocking
+    //     scroll on other sections when thesis is offscreen)
     //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
     //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
     //   iOS touch:     only swapped cb = fixes the inverted direction
     const observer = Observer.create({
+      target: section,
       type: 'wheel,touch',
       tolerance: 10,
       preventDefault: true,
@@ -501,10 +539,11 @@ export function ThesisSection() {
       onDown: () => gotoPage(-1),
     });
     observerRef.current = observer;
-    observer.disable();
+    // Do NOT disable — observer stays always-on for continuous preventDefault
 
     return () => {
       observer.disable();
+      document.documentElement.classList.remove('thesis-touch-lock');
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
@@ -514,7 +553,7 @@ export function ThesisSection() {
     if (prefersReducedMotion) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!observerRef.current?.isEnabled) return;
+      if (!sectionActiveRef.current) return;
 
       switch (e.key) {
         case 'ArrowDown':

@@ -83,6 +83,17 @@ body {
   background-color: var(--color-card);
 }
 
+/* Thesis pin: block native touch scroll while section is active.
+   Applied via JS class toggle on <html> during ScrollTrigger onEnter/onLeave.
+   Backup for Observer's preventDefault — covers edge cases where
+   Chrome/Safari passive listener handling ignores preventDefault
+   (Chrome 56+, Safari iOS 11.3+ default to passive on document-level
+   touch listeners; WebKit Bug #184250 affects dynamically added listeners). */
+html.thesis-touch-lock {
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
