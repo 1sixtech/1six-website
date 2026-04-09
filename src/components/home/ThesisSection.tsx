@@ -315,9 +315,8 @@ export function ThesisSection() {
       exitingRef.current = true;
       sectionActiveRef.current = false;
 
-      // Disable Observer + normalizeScroll so native scroll can operate.
+      // Disable Observer so native scroll can operate for exit.
       observerRef.current?.disable();
-      if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
       document.documentElement.classList.remove('thesis-touch-lock');
 
       // scrollTo immediately — Observer.disable() is synchronous, no rAF needed.
@@ -345,7 +344,6 @@ export function ThesisSection() {
           if (scrollY >= st.start && scrollY <= st.end) {
             // Still in pin range — exit failed. Restore full interactive state.
             sectionActiveRef.current = true;
-            if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
             observerRef.current?.enable();
             document.documentElement.classList.add('thesis-touch-lock');
             const progress = (scrollY - st.start) / (st.end - st.start);
@@ -483,15 +481,6 @@ export function ThesisSection() {
         // users (their next touchstart arrives 200-300ms+ after touchend).
         animatingRef.current = true;
         showPage(0);
-        // Intercept iOS compositor-driven momentum scroll. Without this,
-        // UIScrollView momentum runs on the compositor thread — JS can't
-        // stop it, and the first touch only halts momentum (not a swipe).
-        // normalizeScroll re-routes scroll to JS, giving Observer control.
-        // Scoped: only active during pin, disabled on exit to avoid jank.
-        // Previous global approach (b68ba61) caused site-wide scroll jank;
-        // scoped toggle avoids that since thesis uses discrete page
-        // transitions (no continuous native scroll to stutter).
-        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
         setTimeout(() => { animatingRef.current = false; }, 150);
@@ -501,7 +490,6 @@ export function ThesisSection() {
         sectionActiveRef.current = true;
         animatingRef.current = true;
         showPage(TOTAL - 1);
-        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(true);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
         setTimeout(() => { animatingRef.current = false; }, 150);
@@ -511,7 +499,6 @@ export function ThesisSection() {
         exitingRef.current = false;
         animatingRef.current = false;
         observerRef.current?.disable();
-        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
         document.documentElement.classList.remove('thesis-touch-lock');
       },
       onLeaveBack: () => {
@@ -519,7 +506,6 @@ export function ThesisSection() {
         exitingRef.current = false;
         animatingRef.current = false;
         observerRef.current?.disable();
-        if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
         document.documentElement.classList.remove('thesis-touch-lock');
       },
     });
@@ -529,21 +515,28 @@ export function ThesisSection() {
     // Lifecycle: disabled by default → enabled on onEnter/onEnterBack →
     // disabled on onLeave/onLeaveBack or boundary exit.
     //
-    // Key design decision: Observer is NOT disabled during onComplete
-    // (between page transitions within thesis). This prevents the mobile
-    // touch leak bug (d3a0e7c) where the disable window allowed touchmove
-    // events to fall through to native scroll. Time-based debounce
-    // (COOLDOWN_MS) absorbs residual momentum instead of disable/re-enable.
+    // preventDefault is FALSE on the Observer itself. Native scroll
+    // prevention is handled by manual event listeners below (touchstart,
+    // touchmove, wheel) which conditionally call preventDefault only
+    // when sectionActiveRef is true. This solves three problems:
     //
-    // Why not always-on (18e889e): an always-on Observer with
-    // preventDefault:true blocks native scroll OUTSIDE the pin range —
-    // users get stuck between Hero and Thesis if they stop scrolling
-    // before the pin triggers.
+    // 1. Pin-outside blocking (18e889e bug): Observer preventDefault:true
+    //    blocked scroll even before pin activated. Manual listeners +
+    //    sectionActiveRef gate prevent this — scroll works normally
+    //    outside pin range.
     //
-    // Mobile backup: CSS thesis-touch-lock (touch-action:none) on <html>
-    // during pin provides a second layer of native scroll prevention for
-    // edge cases where Observer's preventDefault is ineffective (Chrome 56+
-    // passive listener defaults, WebKit Bug #184250).
+    // 2. iOS compositor momentum (b68ba61 problem): iOS Safari decides
+    //    to start compositor-driven momentum scroll at touchstart time.
+    //    By calling preventDefault on touchstart (before the browser
+    //    commits to scrolling), we prevent UIScrollView from ever
+    //    starting momentum. normalizeScroll tried to intercept already-
+    //    running momentum (too late); this prevents it from starting.
+    //
+    // 3. Mobile touch leak (d3a0e7c bug): manual listeners are always
+    //    registered on the section element regardless of Observer
+    //    enable/disable state. Even during onComplete (when Observer
+    //    stays enabled but animatingRef blocks callbacks), the manual
+    //    listeners keep calling preventDefault on touch events.
     //
     // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
     // callbacks this normalises both input methods:
@@ -553,7 +546,7 @@ export function ThesisSection() {
       target: section,
       type: 'wheel,touch',
       tolerance: 10,
-      preventDefault: true,
+      preventDefault: false,
       lockAxis: true,
       wheelSpeed: -1,
       onUp: () => gotoPage(1),
@@ -562,9 +555,34 @@ export function ThesisSection() {
     observerRef.current = observer;
     observer.disable(); // starts disabled; onEnter/onEnterBack will enable
 
+    // ── Manual event listeners for conditional scroll prevention ──
+    // Registered directly on the section element with { passive: false }
+    // so preventDefault() is honoured by the browser.
+    //
+    // On iOS Safari, preventDefault on touchSTART is critical — it tells
+    // the browser NOT to commit to compositor-thread scrolling. Without
+    // this, momentum scroll is driven by UIScrollView on the compositor
+    // thread, completely outside JS context, and the first touch after
+    // entering thesis only stops momentum (not a swipe).
+    // See commit 447c95b for the original implementation of this pattern.
+    const onTouchStart = (e: TouchEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (sectionActiveRef.current) e.preventDefault();
+    };
+    section.addEventListener('touchstart', onTouchStart, { passive: false });
+    section.addEventListener('touchmove', onTouchMove, { passive: false });
+    section.addEventListener('wheel', onWheel, { passive: false });
+
     return () => {
       observer.disable();
-      if (ScrollTrigger.isTouch) ScrollTrigger.normalizeScroll(false);
+      section.removeEventListener('touchstart', onTouchStart);
+      section.removeEventListener('touchmove', onTouchMove);
+      section.removeEventListener('wheel', onWheel);
       document.documentElement.classList.remove('thesis-touch-lock');
       st.kill(true);
     };
