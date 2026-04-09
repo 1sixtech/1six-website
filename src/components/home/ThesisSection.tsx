@@ -173,7 +173,7 @@ const THESIS_STATES: ThesisState[] = [
           yet the technology is still early,<br />not even past the first
         </p>
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          <span className="text-[var(--color-accent)]">16%</span> of adoption
+          <span className="text-[var(--color-accent)]">16%</span> of adoption.
         </p>
         <MobileAscii n={4} align="left" />
       </div>
@@ -199,7 +199,7 @@ const THESIS_STATES: ThesisState[] = [
           we are here to <span className="text-[var(--color-accent)]">change</span> that.<br />to move blockchain
         </p>
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          from experiment to infrastructure
+          from experiment to infrastructure.
         </p>
       </div>
     ),
@@ -213,7 +213,7 @@ const THESIS_STATES: ThesisState[] = [
         <span>from the edges to </span>
         <InlineAscii n={6} extend="down" />
         <span> </span>
-        <span className="text-[var(--color-accent)]">the center of the world.</span>
+        the <span className="text-[var(--color-accent)]">center</span> of the world.
       </>
     ),
     mobileContent: (
@@ -221,8 +221,8 @@ const THESIS_STATES: ThesisState[] = [
         <p className={subTextClass}>
           from possibility to default.<br />from the edges to
         </p>
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px] text-[var(--color-accent)]">
-          the center of the world
+        <p className="text-[24px] leading-[1.25] tracking-[-0.48px] text-[var(--color-text)]">
+          the <span className="text-[var(--color-accent)]">center</span> of the world.
         </p>
         <MobileAscii n={6} align="center" />
       </div>
