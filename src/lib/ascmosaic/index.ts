@@ -5,6 +5,14 @@ import {
 import { createTexturedMesh, TexturedMeshOptions } from './texturedMesh';
 import { OrbitControls, OrbitControlsOptions } from './orbitControls';
 import * as THREE from 'three';
+// Cross-layer coupling: ascmosaic is a self-contained WebGL library, but
+// this project shares HTMLVideoElement instances via a global pool so
+// multiple sections can reuse pre-warmed videos. The dispose paths below
+// need to know which videos are pooled (shared) vs. owned (one-off) so
+// they don't kill videos still in use by other sections. If ascmosaic is
+// ever extracted as a standalone library, convert to an injected
+// `shouldDispose: (video: HTMLVideoElement) => boolean` predicate on
+// AscMosaicOptions instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
 /** AscMosaic 생성 옵션 */

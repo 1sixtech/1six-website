@@ -49,11 +49,18 @@ function createVideoTexture(
   videoUrl: string,
   existingVideo?: HTMLVideoElement,
 ): Promise<THREE.VideoTexture> {
-  // Fast path: reuse a pre-warmed video from videoPool
+  // Fast path: reuse a pre-warmed video from videoPool.
+  // Defensively resume playback — Safari Low Power Mode and backgrounded
+  // tab heuristics can pause muted videos even though the pool left them
+  // playing. A fire-and-forget play() ensures the VideoTexture sees frame
+  // updates. The catch is intentional: if play() rejects (e.g. user
+  // interaction required) we let the texture show the last decoded frame
+  // rather than throwing — the lazy path below would have failed here too.
   if (existingVideo && existingVideo.readyState >= 2) {
     const texture = new THREE.VideoTexture(existingVideo);
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
+    void existingVideo.play().catch(() => {});
     return Promise.resolve(texture);
   }
 
