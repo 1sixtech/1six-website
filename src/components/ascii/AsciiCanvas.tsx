@@ -2,6 +2,8 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import * as videoPool from '@/lib/videoPool';
+import { markAsciiReady } from '@/lib/introState';
 
 /**
  * AsciiCanvas — React wrapper for the AscMosaic Three.js/WebGL library
@@ -79,11 +81,21 @@ interface AsciiCanvasProps {
   eager?: boolean;
   /** Called once when the mosaic finishes initializing and starts animating */
   onReady?: () => void;
+  /**
+   * Stable key used by the intro orchestration to identify this canvas.
+   * When provided, videoPool is checked for a pre-warmed video element,
+   * and on ready the 'ascii:ready' event fires with this key in the detail.
+   * Required for homepage canvases; unused on /about.
+   */
+  preloadKey?: string;
 }
 
-// Global WebGL context counter to enforce budget
+// Global WebGL context counter to enforce budget.
+// 14 is chosen as a safety margin below WebKit's empirical 16-context limit
+// while accommodating the homepage's 11 homepage-target pre-warm + headroom
+// for context-loss recovery. See design spec §6.2.
 let activeContextCount = 0;
-const MAX_ACTIVE_CONTEXTS = 10;
+const MAX_ACTIVE_CONTEXTS = 14;
 
 // Global initialization queue — prevents multiple WebGL contexts from
 // initializing simultaneously on page mount/back-navigation, which causes
@@ -137,6 +149,7 @@ export function AsciiCanvas({
   cameraOffsetX = 0,
   eager = false,
   onReady,
+  preloadKey,
 }: AsciiCanvasProps) {
   // Default: no auto-rotation for planes
   const resolvedAutoRotate = autoRotate ?? (shape !== 'plane');
@@ -206,7 +219,12 @@ export function AsciiCanvas({
         mosaic.setRenderScale(renderScale);
       }
 
-      // Add model with texture (supports both image and video)
+      // Add model with texture (supports both image and video).
+      // For video textures, try the videoPool first — if a warmed element
+      // exists, AscMosaic reuses it and skips the network fetch path.
+      const existingVideo = resolvedTextureType === 'video'
+        ? videoPool.get(textureUrl)
+        : undefined;
       await mosaic.addModel({
         shape,
         textureUrl,
@@ -214,6 +232,7 @@ export function AsciiCanvas({
         width: planeWidth,
         height: planeHeight,
         scale,
+        existingVideo,
       });
 
       // Bail if the component unmounted OR if destroyMosaic raced us while
@@ -276,10 +295,13 @@ export function AsciiCanvas({
       mosaic.animate();
       setIsInitialized(true);
       onReady?.();
+      if (preloadKey) {
+        markAsciiReady(preloadKey);
+      }
     } catch (err) {
       console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX, preloadKey]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;
