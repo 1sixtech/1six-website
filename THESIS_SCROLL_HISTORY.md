@@ -74,8 +74,14 @@ Hero (normal page scroll)
 │    all page-level scroll (fullpage.js pattern).      │
 │  Swiper handles internal vertical swipes for         │
 │    page-by-page crossfade (7 slides).                │
-│  Only ACTIVE slide mounts WebGL canvas               │
-│    (others use opacity:0 placeholder).               │
+│  All 6 MobileAscii WebGL canvases mount concurrently │
+│    while thesis is in view — AsciiCanvas's IO is     │
+│    geometric and ignores the opacity-0 wrapper on    │
+│    inactive slides. `MAX_ACTIVE_CONTEXTS = 10`       │
+│    provides the headroom (verified working from      │
+│    aa3f932 onward). A true single-canvas approach    │
+│    would require real unmount of inactive subtrees   │
+│    and is NOT implemented.                           │
 │                                                      │
 │  Edge exit (touchend on section):                    │
 │    Slide 0  + swipe UP   > 50px → release('up')     │
@@ -117,7 +123,7 @@ ThesisGraph (normal page scroll)
 - **데이터 공유:** `thesisData.tsx`에서 `THESIS_STATES`, `InlineAscii`, `MobileAscii`, `subTextClass` export. 두 컴포넌트에서 공유.
 - **Scroll capture vs body lock:** `position:fixed` + `overflow:hidden`이 아닌 `document.addEventListener('touchmove', preventDefault, {passive:false})` 사용. iOS momentum race 없고 DOM 조작 없음.
 - **normalizeScroll:** 완전 제거. 대신 intro-lock 해제 시 `ScrollTrigger.refresh(true)` 명시적 호출 (ScrollRevealWrapper 동작 보장).
-- **WebGL:** active slide만 mount (모바일 GPU 절약, +-1보다 공격적).
+- **WebGL:** 활성 슬라이드 포함 6개 캔버스가 thesis가 뷰포트에 들어올 때 동시에 mount됨. opacity-0 wrapper는 `AsciiCanvas`의 기하학적 IntersectionObserver(`rootMargin: '200px'`)를 막지 못하므로 "active slide만 mount"는 실현되지 않았음. 대신 `MAX_ACTIVE_CONTEXTS = 10` 전역 예산에 의존. `aa3f932` 이후 실사용 검증됨. 실제 단일 캔버스 mount로 가려면 비활성 subtree를 진짜 unmount해야 하고, 그 경우 매 슬라이드 전환마다 re-init 지연이 보이게 됨 — iPhone 검증 없이 변경 금지.
 - **Direction-aware cooldown:** exit 방향 반대의 sentinel만 700ms 잠금. 즉시 reverse re-entry 허용.
 - **IO entry coords:** capture 시 `getBoundingClientRect()` 대신 `entry.boundingClientRect` 사용. iOS momentum overshoot으로 인한 좌표 오차 제거.
 
