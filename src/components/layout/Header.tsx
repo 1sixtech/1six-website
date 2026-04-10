@@ -4,10 +4,10 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
 
 const NAV_ITEMS = [
   { label: 'THESIS', href: '/#thesis' },
@@ -15,27 +15,6 @@ const NAV_ITEMS = [
   // { label: 'INSIGHT', href: '/#insight' },
   { label: 'ABOUT', href: '/about' },
 ];
-
-/**
- * Programmatically scroll to a hash target element, bypassing GSAP Observer
- * which only intercepts wheel/touch events (not programmatic scrollTo).
- * Uses ScrollTrigger.refresh() to ensure pin spacer heights are current.
- */
-function scrollToHash(hash: string) {
-  const id = hash.replace('#', '');
-  const target = document.getElementById(id);
-  if (!target) return;
-
-  // Ensure ScrollTrigger positions are fresh (pin spacer heights may shift
-  // if fonts or images loaded between initial setup and now)
-  ScrollTrigger.refresh();
-
-  // Use requestAnimationFrame to let ScrollTrigger process the refresh
-  requestAnimationFrame(() => {
-    const top = target.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top, behavior: 'auto' });
-  });
-}
 
 export function Header() {
   const headerRef = useRef<HTMLElement>(null);
@@ -86,27 +65,14 @@ export function Header() {
       manualUnlockRef.current = true;
       unlockScroll(false);
       setMenuOpen(false);
+      emitHashScrollRequest(hash);
       history.pushState(null, '', `#${hash}`);
-      scrollToHash(hash);
+      requestAnimationFrame(() => {
+        scrollToHashTarget(hash);
+      });
     } else {
       setMenuOpen(false);
-      router.push('/');
-      const startTime = Date.now();
-      const maxWait = 5000;
-      const waitAndScroll = () => {
-        requestAnimationFrame(() => {
-          const target = document.getElementById(hash);
-          if (target) {
-            ScrollTrigger.refresh();
-            requestAnimationFrame(() => {
-              scrollToHash(hash);
-            });
-          } else if (Date.now() - startTime < maxWait) {
-            setTimeout(waitAndScroll, 50);
-          }
-        });
-      };
-      setTimeout(waitAndScroll, 100);
+      router.push(`/#${hash}`, { scroll: false });
     }
   }, [pathname, router, unlockScroll]);
 
