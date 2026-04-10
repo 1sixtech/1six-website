@@ -74,15 +74,37 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
     const timeouts = timeoutsRef.current;
     const intervals = intervalsRef.current;
 
-    // Schedule each character's scramble start
-    DELAYS.forEach((delay, i) => {
-      const t = setTimeout(() => startScramble(i), delay);
-      timeouts.push(t);
-    });
+    const scheduleAllChars = () => {
+      DELAYS.forEach((delay, i) => {
+        const t = setTimeout(() => startScramble(i), delay);
+        timeouts.push(t);
+      });
+    };
+
+    // If the intro did not run (reduced-motion or session repeat), start
+    // the scramble immediately — there is no data-intro-active attribute.
+    const introActive = document.documentElement.dataset.introActive === 'true';
+    let revealListener: (() => void) | null = null;
+
+    if (!introActive) {
+      scheduleAllChars();
+    } else {
+      revealListener = () => {
+        scheduleAllChars();
+        if (revealListener) {
+          window.removeEventListener('intro:revealed', revealListener);
+          revealListener = null;
+        }
+      };
+      window.addEventListener('intro:revealed', revealListener);
+    }
 
     return () => {
       timeouts.forEach(clearTimeout);
       intervals.forEach(clearInterval);
+      if (revealListener) {
+        window.removeEventListener('intro:revealed', revealListener);
+      }
     };
   }, [startScramble]);
 
