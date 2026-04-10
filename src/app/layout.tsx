@@ -5,7 +5,7 @@ import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
-import { AssetPrefetcher } from '@/components/providers/AssetPrefetcher';
+import { HomeIntroMount } from '@/components/intro/HomeIntroMount';
 
 const pretendard = localFont({
   src: './fonts/PretendardVariable.woff2',
@@ -142,7 +142,21 @@ export default function RootLayout({
               } catch (e) {}
               if (history.scrollRestoration) history.scrollRestoration = 'manual';
               if (window.location.pathname === '/') {
-                document.documentElement.classList.add('intro-lock');
+                var shouldIntro = true;
+                try {
+                  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    shouldIntro = false;
+                  }
+                  if (sessionStorage.getItem('introSeen') === '1') {
+                    shouldIntro = false;
+                  }
+                } catch (e) {
+                  // sessionStorage may throw in private browsing — fail open (show intro)
+                }
+                if (shouldIntro) {
+                  document.documentElement.classList.add('intro-lock');
+                  document.documentElement.dataset.introActive = 'true';
+                }
               }
               window.addEventListener('pageshow', function(e) {
                 if (e.persisted) window.location.reload();
@@ -170,7 +184,7 @@ export default function RootLayout({
           <main id="main-content">{children}</main>
           <Footer />
         </ThemeProvider>
-        <AssetPrefetcher />
+        <HomeIntroMount />
         <Analytics />
       </body>
     </html>
