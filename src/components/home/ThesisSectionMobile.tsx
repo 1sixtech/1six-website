@@ -52,6 +52,7 @@ import 'swiper/css/effect-fade';
  */
 export function ThesisSectionMobile() {
   const CAPTURE_SUSPEND_MS = 1200;
+  const HASH_CAPTURE_ALIGNMENT_TOLERANCE = 1;
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -60,20 +61,26 @@ export function ThesisSectionMobile() {
   // State: 'idle' (normal scroll) | 'captured' (touch blocked by us)
   const stateRef = useRef<'idle' | 'captured'>('idle');
   const touchStartY = useRef(0);
+  // Marks whether touchStartY is a valid swipe baseline. Set true on
+  // touchstart, false on touchcancel. onTouchEnd only processes the swipe
+  // when this is true, preventing a stray touchend that fires after an
+  // OS-cancelled gesture (incoming call, notification) from computing a
+  // bogus deltaY against a stale start position. A boolean flag is
+  // unambiguous — clientY = 0 is itself a valid coordinate, so resetting
+  // touchStartY to 0 as a sentinel was not a reliable signal.
+  const touchValidRef = useRef(false);
   const prevScrollYRef = useRef(0);
   const captureSuspendedUntilRef = useRef(0);
+  const pendingHashCaptureRef = useRef(false);
   // Boundary cooldown: block the sentinel on the edge we just crossed until the
   // smooth exit settles. This prevents the exit animation from immediately
   // re-triggering capture at the same boundary.
   const blockedSentinel = useRef<'top' | 'bottom' | null>(null);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suspendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
-  }, []);
-
-  const suspendCapture = useCallback((duration = CAPTURE_SUSPEND_MS) => {
-    captureSuspendedUntilRef.current = Date.now() + duration;
   }, []);
 
   // ── Touch capture: block all page-level scrolling ──
@@ -92,6 +99,7 @@ export function ThesisSectionMobile() {
   const capture = useCallback((fromDirection: 'top' | 'bottom', sectionTopAbs: number) => {
     if (stateRef.current !== 'idle') return;
     stateRef.current = 'captured';
+    pendingHashCaptureRef.current = false;
 
     // Instant snap using the pre-computed position (no momentum-induced offset)
     window.scrollTo({ top: sectionTopAbs, behavior: 'auto' as ScrollBehavior });
@@ -109,6 +117,39 @@ export function ThesisSectionMobile() {
     // Block page scroll at document level
     document.addEventListener('touchmove', preventPageScroll, { passive: false });
   }, [preventPageScroll]);
+
+  const flushPendingCapture = useCallback(() => {
+    const section = sectionRef.current;
+    if (!section || stateRef.current !== 'idle') return;
+
+    const currentScrollY = window.scrollY;
+    const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
+
+    // Only pending hash-captures are flushed here. A pending reverse-capture
+    // was previously queued during the suspend window and replayed at flush
+    // time, but the replay semantic was wrong: re-checking the scroll
+    // position ~1.2s after a threshold crossing does not tell us whether the
+    // user still intends to re-enter thesis (they may have continued past
+    // it, reversed again, or simply stopped above it). Trusting the flag
+    // caused unintended snap-backs to the last slide. We now let the reverse
+    // re-entry rely purely on the next real onScroll event after the suspend
+    // window expires, which matches the behavior that shipped in d14f610.
+    if (pendingHashCaptureRef.current
+      && Math.abs(currentScrollY - sectionTopAbs) <= HASH_CAPTURE_ALIGNMENT_TOLERANCE) {
+      capture('top', sectionTopAbs);
+      return;
+    }
+
+    pendingHashCaptureRef.current = false;
+  }, [capture]);
+
+  const suspendCapture = useCallback((duration = CAPTURE_SUSPEND_MS) => {
+    captureSuspendedUntilRef.current = Date.now() + duration;
+    if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
+    suspendTimerRef.current = setTimeout(() => {
+      flushPendingCapture();
+    }, duration + 32);
+  }, [flushPendingCapture]);
 
   const stopCapture = useCallback((blockedBoundary: 'top' | 'bottom' | null) => {
     stateRef.current = 'idle';
@@ -194,17 +235,23 @@ export function ThesisSectionMobile() {
       const currentScrollY = window.scrollY;
       const prevScrollY = prevScrollYRef.current;
       prevScrollYRef.current = currentScrollY;
+      const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
+
+      if (pendingHashCaptureRef.current
+        && stateRef.current === 'idle'
+        && Math.abs(currentScrollY - sectionTopAbs) <= HASH_CAPTURE_ALIGNMENT_TOLERANCE) {
+        capture('top', sectionTopAbs);
+        return;
+      }
 
       if (currentScrollY >= prevScrollY) return;
       if (stateRef.current !== 'idle') return;
       if (Date.now() < captureSuspendedUntilRef.current) return;
       if (blockedSentinel.current === 'bottom') return;
 
-      const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
       // Match the forward Hero -> Thesis handoff: only capture once Thesis
       // fully occupies the viewport again (section top reaches viewport top).
       const reverseCaptureThreshold = sectionTopAbs;
-
       if (prevScrollY > reverseCaptureThreshold && currentScrollY <= reverseCaptureThreshold) {
         capture('bottom', sectionTopAbs);
       }
@@ -212,6 +259,33 @@ export function ThesisSectionMobile() {
 
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
+  }, [capture]);
+
+  useEffect(() => {
+    if (window.location.hash !== '#thesis') return;
+
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const startTime = Date.now();
+    const maxWait = 500;
+    const poll = setInterval(() => {
+      if (stateRef.current !== 'idle') {
+        clearInterval(poll);
+        return;
+      }
+
+      const currentScrollY = window.scrollY;
+      const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
+      if (Math.abs(currentScrollY - sectionTopAbs) <= HASH_CAPTURE_ALIGNMENT_TOLERANCE) {
+        clearInterval(poll);
+        capture('top', sectionTopAbs);
+      } else if (Date.now() - startTime > maxWait) {
+        clearInterval(poll);
+      }
+    }, 50);
+
+    return () => clearInterval(poll);
   }, [capture]);
 
   // ── Edge exit: swipe past first/last slide ──
@@ -223,10 +297,28 @@ export function ThesisSectionMobile() {
 
     const onTouchStart = (e: TouchEvent) => {
       touchStartY.current = e.touches[0].clientY;
+      touchValidRef.current = true;
+    };
+
+    // Invalidate the swipe baseline if the OS cancels the touch (incoming
+    // call, notification, etc). A stray touchend that fires after the cancel
+    // would otherwise compute a bogus deltaY against a stale start position
+    // and trigger a false edge exit. onTouchEnd checks touchValidRef before
+    // processing, so flipping the flag here is sufficient — we deliberately
+    // leave touchStartY untouched so there is no dependency on a sentinel
+    // value that could collide with a real coordinate.
+    const onTouchCancel = () => {
+      touchValidRef.current = false;
     };
 
     const onTouchEnd = (e: TouchEvent) => {
       if (stateRef.current !== 'captured') return;
+      // Ignore stray touchend events that arrive after an OS-cancelled
+      // gesture. Without this guard, a cancelled swipe's trailing touchend
+      // would compute deltaY against a stale touchStartY and could trigger
+      // a false edge exit on the first or last slide.
+      if (!touchValidRef.current) return;
+      touchValidRef.current = false;
 
       const swiper = swiperRef.current;
       if (!swiper) return;
@@ -253,10 +345,12 @@ export function ThesisSectionMobile() {
 
     section.addEventListener('touchstart', onTouchStart, { passive: true });
     section.addEventListener('touchend', onTouchEnd, { passive: true });
+    section.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
     return () => {
       section.removeEventListener('touchstart', onTouchStart);
       section.removeEventListener('touchend', onTouchEnd);
+      section.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [release, smoothScrollToExit]);
 
@@ -264,7 +358,16 @@ export function ThesisSectionMobile() {
   useEffect(() => {
     const onHashScrollRequest = (event: Event) => {
       const nextHash = (event as CustomEvent<{ hash?: string }>).detail?.hash;
-      if (!nextHash || nextHash === 'thesis') return;
+      if (!nextHash) return;
+      if (nextHash === 'thesis') {
+        if (stateRef.current !== 'captured') {
+          pendingHashCaptureRef.current = true;
+          suspendCapture();
+        }
+        return;
+      }
+
+      pendingHashCaptureRef.current = false;
       releaseForProgrammaticNavigation();
     };
 
@@ -273,12 +376,13 @@ export function ThesisSectionMobile() {
     return () => {
       window.removeEventListener(HASH_SCROLL_REQUEST_EVENT, onHashScrollRequest as EventListener);
     };
-  }, [releaseForProgrammaticNavigation]);
+  }, [releaseForProgrammaticNavigation, suspendCapture]);
 
   useEffect(() => {
     return () => {
       document.removeEventListener('touchmove', preventPageScroll);
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
+      if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
     };
   }, [preventPageScroll]);
 
@@ -308,7 +412,16 @@ export function ThesisSectionMobile() {
           className="h-full w-full"
         >
           {THESIS_STATES.map((state, index) => {
-            // Only active slide mounts WebGL canvas (aggressive for mobile GPU)
+            // NOTE on WebGL mounting: the `isActive` gate below is VISUAL only.
+            // `state.mobileContent` (including `<MobileAscii>` → `<AsciiCanvas>`)
+            // is rendered in BOTH branches — the inactive branch just wraps it in
+            // `opacity-0`. AsciiCanvas uses an IntersectionObserver with
+            // `rootMargin: '200px'`, which is geometric and ignores opacity, so
+            // all 6 canvases initialize concurrently whenever thesis is in view.
+            // We rely on AsciiCanvas's `MAX_ACTIVE_CONTEXTS = 10` global budget
+            // for headroom. True single-canvas mounting would require a real
+            // unmount of inactive subtrees, which would introduce a visible
+            // re-init delay on every slide change — avoid unless iPhone-verified.
             const isActive = index === activeIndex;
             return (
               <SwiperSlide key={state.id} className="!flex items-center justify-center">
