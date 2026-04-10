@@ -1,0 +1,205 @@
+'use client';
+
+import { useEffect, useRef, type RefObject } from 'react';
+import gsap from 'gsap';
+import * as videoPool from '@/lib/videoPool';
+import {
+  HOMEPAGE_ASCII_TARGETS,
+  computeExpectedReadyKeys,
+  getReadyKeys,
+} from '@/lib/introState';
+
+/**
+ * IntroOrchestrator — State machine that coordinates the homepage intro.
+ *
+ * Timeline (best case, webglReady ≤ 0.7s):
+ *   t=0.00  videoPool.warmupAll starts; AsciiCanvas instances init in parallel
+ *   t=0.05  GSAP: logo fill mask rect y: 21.03 -> 0 over 0.6s (power2.inOut)
+ *   t=0.65  fill done
+ *   t=0.70  minTimer done -> reveal (if webglReady also done)
+ *           -> GSAP: main-content clip-path circle(0%) -> circle(150%) over 0.4s
+ *           -> dispatches 'intro:revealed', removes intro-lock, sets sessionStorage.introSeen
+ *   t=1.10  reveal done -> GSAP: overlay opacity 1 -> 0 over 0.3s
+ *   t=1.40  -> dispatches 'intro:done'
+ *
+ * Hardcap: 2.5s. Even if webglReady never fires, reveal runs.
+ * Reduced-motion / session repeat: intro-lock is absent on mount, so
+ * runReveal fires synchronously with skipAnimation=true.
+ */
+
+const MIN_DISPLAY_MS = 700;
+const HARD_CAP_MS = 2500;
+const FILL_DURATION_S = 0.6;
+const FILL_DELAY_S = 0.05;
+const REVEAL_DURATION_S = 0.4;
+const OVERLAY_FADE_S = 0.3;
+
+interface IntroOrchestratorProps {
+  fillRectRef: RefObject<SVGRectElement | null>;
+  overlayRef: RefObject<HTMLDivElement | null>;
+  mainContentRef: RefObject<HTMLElement | null>;
+}
+
+export function IntroOrchestrator({
+  fillRectRef,
+  overlayRef,
+  mainContentRef,
+}: IntroOrchestratorProps) {
+  const disposedRef = useRef(false);
+
+  useEffect(() => {
+    disposedRef.current = false;
+
+    const html = document.documentElement;
+    const introActive = html.classList.contains('intro-lock');
+
+    // Skip case: reduced-motion or session repeat. The inline script in
+    // layout.tsx did not set intro-lock, so we fast-forward to reveal.
+    if (!introActive) {
+      runReveal({ skipAnimation: true });
+      return () => {
+        disposedRef.current = true;
+      };
+    }
+
+    // Begin parallel warmup of all 11 video URLs. Promise.allSettled means
+    // partial failure is tolerated — the orchestrator relies on per-canvas
+    // 'ascii:ready' events rather than this promise's resolution.
+    videoPool
+      .warmupAll(HOMEPAGE_ASCII_TARGETS.map((t) => t.textureUrl))
+      .then((results) => {
+        const failed = results
+          .map((r, i) => (r.status === 'rejected' ? HOMEPAGE_ASCII_TARGETS[i].key : null))
+          .filter((k): k is string => k !== null);
+        if (failed.length > 0) {
+          console.warn('[intro] videoPool partial failure:', failed);
+        }
+      });
+
+    // Logo fill animation — GSAP attr plugin animates the mask rect's y
+    const fillTween = gsap.to(fillRectRef.current, {
+      attr: { y: 0 },
+      duration: FILL_DURATION_S,
+      ease: 'power2.inOut',
+      delay: FILL_DELAY_S,
+    });
+
+    // WebGL readiness — aggregate via module-level getReadyKeys() (race-free)
+    const expectedKeys = computeExpectedReadyKeys();
+    const isAllReady = () => {
+      const ready = getReadyKeys();
+      for (const key of expectedKeys) {
+        if (!ready.has(key)) return false;
+      }
+      return true;
+    };
+
+    let readyResolve: (() => void) | null = null;
+    const webglReady = new Promise<void>((resolve) => {
+      if (isAllReady()) {
+        resolve();
+        return;
+      }
+      readyResolve = resolve;
+    });
+
+    const onAsciiReady = () => {
+      if (readyResolve && isAllReady()) {
+        const r = readyResolve;
+        readyResolve = null;
+        r();
+      }
+    };
+    window.addEventListener('ascii:ready', onAsciiReady);
+
+    // Race: (minTimer + webglReady) vs hardcap
+    const minTimer = new Promise<void>((r) => setTimeout(r, MIN_DISPLAY_MS));
+    const hardCap = new Promise<'hardcap'>((r) =>
+      setTimeout(() => r('hardcap'), HARD_CAP_MS),
+    );
+
+    Promise.race([
+      Promise.all([minTimer, webglReady]).then(() => 'ready' as const),
+      hardCap,
+    ]).then((reason) => {
+      if (disposedRef.current) return;
+      if (reason === 'hardcap') {
+        const ready = getReadyKeys();
+        console.warn('[intro] hardcap reached, forcing reveal', {
+          expected: expectedKeys.length,
+          ready: expectedKeys.filter((k) => ready.has(k)).length,
+        });
+      }
+      runReveal({ skipAnimation: false });
+    });
+
+    return () => {
+      disposedRef.current = true;
+      window.removeEventListener('ascii:ready', onAsciiReady);
+      fillTween.kill();
+    };
+
+    // runReveal is declared inside the effect so it closes over refs
+    // without needing useCallback dependencies.
+    function runReveal({ skipAnimation }: { skipAnimation: boolean }): void {
+      const markSeen = () => {
+        try {
+          sessionStorage.setItem('introSeen', '1');
+        } catch {
+          // private browsing — ignore, intro will still skip via fail-open
+        }
+      };
+
+      const unlock = () => {
+        html.classList.remove('intro-lock');
+        delete html.dataset.introActive;
+      };
+
+      if (skipAnimation) {
+        unlock();
+        markSeen();
+        // Fire on next tick so subscribers that mount later (e.g. the
+        // HeroSection effect) also see the event.
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent('intro:revealed'));
+          window.dispatchEvent(new CustomEvent('intro:done'));
+        });
+        return;
+      }
+
+      const main = mainContentRef.current;
+      const overlay = overlayRef.current;
+      if (!main || !overlay) return;
+
+      gsap.fromTo(
+        main,
+        {
+          clipPath: 'circle(0% at 50% 50%)',
+          WebkitClipPath: 'circle(0% at 50% 50%)',
+        },
+        {
+          clipPath: 'circle(150% at 50% 50%)',
+          WebkitClipPath: 'circle(150% at 50% 50%)',
+          duration: REVEAL_DURATION_S,
+          ease: 'power3.out',
+          onStart: () => {
+            unlock();
+            markSeen();
+            window.dispatchEvent(new CustomEvent('intro:revealed'));
+          },
+          onComplete: () => {
+            gsap.to(overlay, {
+              opacity: 0,
+              duration: OVERLAY_FADE_S,
+              onComplete: () => {
+                window.dispatchEvent(new CustomEvent('intro:done'));
+              },
+            });
+          },
+        },
+      );
+    }
+  }, [fillRectRef, overlayRef, mainContentRef]);
+
+  return null;
+}
