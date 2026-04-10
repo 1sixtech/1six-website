@@ -53,6 +53,32 @@ html.intro-lock body {
   -webkit-overflow-scrolling: auto;
 }
 
+/* ══════════════════════════════════════════════════════════
+   Intro overlay — clip-path gate on main-content
+   ══════════════════════════════════════════════════════════
+   While data-intro-active is set by the inline script, the main
+   content is clipped to a zero-radius circle at the viewport center.
+   IntroOrchestrator's GSAP timeline expands this to circle(150%) to
+   reveal the page. Both clip-path and -webkit-clip-path are declared
+   for Safari compatibility. */
+html[data-intro-active="true"] #main-content {
+  clip-path: circle(0% at 50% 50%);
+  -webkit-clip-path: circle(0% at 50% 50%);
+}
+
+.intro-overlay {
+  /* Hardware-accelerate the overlay so its eventual opacity fade is
+     composited rather than repainted. */
+  will-change: opacity;
+}
+
+.intro-logo-wrap {
+  /* Logo wrap exists as a positioning hook; sizing is on LogoFillSvg. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Hide scrollbar */
 html {
   scrollbar-width: none; /* Firefox */
