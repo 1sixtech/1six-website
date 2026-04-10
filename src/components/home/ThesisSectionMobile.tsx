@@ -10,59 +10,107 @@ import 'swiper/css';
 import 'swiper/css/effect-fade';
 
 /**
- * ThesisSectionMobile — Swiper vertical fade slider for mobile.
+ * ThesisSectionMobile — Swiper vertical fade with body scroll lock.
  *
- * Uses vertical direction so scrolling down/up naturally flips thesis pages,
- * matching the desktop UX. EffectFade provides the same crossfade transition.
+ * ── How it works ──
+ * 1. IntersectionObserver detects when thesis enters viewport center
+ * 2. Body scroll is locked (overflow:hidden) so the page stops here
+ * 3. Swiper handles vertical touch gestures for page-by-page transitions
+ * 4. At first/last slide edge, lock releases and page scroll resumes
  *
- * ── Why not rely on Swiper's releaseOnEdges? ──
- * iOS Safari has a known, unresolved bug where releaseOnEdges does NOT
- * release scroll control at slider edges on mobile (Swiper #6691, #7923,
- * confirmed broken on iOS 18.3.1 as of March 2025). Instead, we manually
- * detect edge-scroll via touch delta and programmatically scrollIntoView
- * to the adjacent section.
+ * ── Why body scroll lock instead of GSAP pin? ──
+ * GSAP pin uses position:fixed + pin-spacer DOM wrapper which:
+ *   - Conflicts with React's virtual DOM on hydration
+ *   - Requires normalizeScroll for iOS momentum (causes jank with WebGL)
+ *   - Has position:fixed hit-testing desync after scroll on iOS
+ * Body overflow:hidden achieves the same "freeze page here" effect
+ * without any DOM manipulation. Works on iOS 16.3+ (WebKit fixed it).
  *
- * ── Why not GSAP pin? ──
- * GSAP ScrollTrigger pin inserts a pin-spacer DOM wrapper and uses
- * position:fixed, which conflicts with React's virtual DOM on hydration
- * and with iOS Safari's compositor-thread momentum scroll. Swiper manages
- * its own container with touch-action CSS, avoiding both problems.
+ * ── Why not Swiper's releaseOnEdges? ──
+ * Broken on iOS Safari (Swiper #6691, #7923, unresolved as of 2025).
+ * We detect edge-scroll manually via touch delta.
  *
  * ── WebGL context management ──
- * Swiper fade keeps all slides in DOM with opacity:0. IntersectionObserver
- * considers opacity:0 elements "visible", so we control canvas lifecycle
- * via React conditional rendering (mount only active +-1 slides' canvases).
+ * Only mount canvas for active slide +-1 (React conditional rendering).
  */
 export function ThesisSectionMobile() {
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
-
-  // ── Manual edge-exit detection (replaces broken releaseOnEdges on iOS) ──
-  // Track touch start/end Y to detect "scroll past edge" gestures.
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const isLockedRef = useRef(false);
   const touchStartY = useRef(0);
-  const isExiting = useRef(false);
+  const isExitingRef = useRef(false);
+  // Store scroll position before lock to prevent iOS scroll-to-top
+  const savedScrollY = useRef(0);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
+    isExitingRef.current = false;
   }, []);
 
-  // Touch handlers for edge exit — registered on the section element
-  // (not Swiper) so they fire even when Swiper absorbs the gesture.
-  const sectionRef = useRef<HTMLDivElement>(null);
+  // ── Body scroll lock/unlock ──
+  const lockScroll = useCallback(() => {
+    if (isLockedRef.current) return;
+    isLockedRef.current = true;
+    savedScrollY.current = window.scrollY;
+    document.body.style.overflow = 'hidden';
+    // Prevent iOS from resetting scroll position when overflow changes
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${savedScrollY.current}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+  }, []);
 
+  const unlockScroll = useCallback(() => {
+    if (!isLockedRef.current) return;
+    isLockedRef.current = false;
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    // Restore scroll position that was saved before lock
+    window.scrollTo(0, savedScrollY.current);
+  }, []);
+
+  // ── IntersectionObserver: lock scroll when thesis enters viewport ──
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
 
-    const EDGE_THRESHOLD = 50; // px of overscroll needed to trigger exit
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          // Section is mostly visible — lock and snap to it
+          lockScroll();
+        }
+      },
+      { threshold: [0.6] },
+    );
+
+    observer.observe(section);
+
+    return () => {
+      observer.disconnect();
+      // Clean up lock on unmount
+      if (isLockedRef.current) unlockScroll();
+    };
+  }, [lockScroll, unlockScroll]);
+
+  // ── Edge exit: detect scroll past first/last slide ──
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const EDGE_THRESHOLD = 50;
 
     const onTouchStart = (e: TouchEvent) => {
       touchStartY.current = e.touches[0].clientY;
-      isExiting.current = false;
     };
 
     const onTouchEnd = (e: TouchEvent) => {
-      if (isExiting.current) return;
+      if (isExitingRef.current || !isLockedRef.current) return;
 
       const swiper = swiperRef.current;
       if (!swiper) return;
@@ -71,13 +119,21 @@ export function ThesisSectionMobile() {
 
       // Scrolled DOWN past last slide → exit to ThesisGraph
       if (swiper.activeIndex === TOTAL - 1 && deltaY > EDGE_THRESHOLD) {
-        isExiting.current = true;
-        document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
+        isExitingRef.current = true;
+        unlockScroll();
+        // Small delay to let scroll position restore, then scroll to next section
+        requestAnimationFrame(() => {
+          document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
+        });
       }
-      // Scrolled UP past first slide → exit to Hero (scroll up)
+
+      // Scrolled UP past first slide → exit back to Hero
       if (swiper.activeIndex === 0 && deltaY < -EDGE_THRESHOLD) {
-        isExiting.current = true;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        isExitingRef.current = true;
+        unlockScroll();
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
       }
     };
 
@@ -87,6 +143,19 @@ export function ThesisSectionMobile() {
     return () => {
       section.removeEventListener('touchstart', onTouchStart);
       section.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [unlockScroll]);
+
+  // Clean up on unmount (safety)
+  useEffect(() => {
+    return () => {
+      if (isLockedRef.current) {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+      }
     };
   }, []);
 
@@ -112,7 +181,6 @@ export function ThesisSectionMobile() {
         className="h-full w-full"
       >
         {THESIS_STATES.map((state, index) => {
-          // Only mount WebGL canvases for active slide and neighbors
           const isNearby = Math.abs(index - activeIndex) <= 1;
           return (
             <SwiperSlide key={state.id} className="!flex items-center justify-center">
@@ -120,7 +188,6 @@ export function ThesisSectionMobile() {
                 {isNearby ? (
                   state.mobileContent
                 ) : (
-                  // Placeholder: preserve layout without WebGL canvas
                   <div className="opacity-0" aria-hidden="true">
                     {state.mobileContent}
                   </div>
@@ -131,8 +198,8 @@ export function ThesisSectionMobile() {
         })}
       </Swiper>
 
-      {/* Vertical pagination dots — right side, matching desktop dot position */}
-      <div className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
+      {/* Pagination dots — bottom center (horizontal) */}
+      <div className="absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 gap-2">
         {THESIS_STATES.map((_, i) => (
           <button
             key={i}
