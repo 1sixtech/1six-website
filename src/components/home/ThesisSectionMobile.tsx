@@ -10,95 +10,124 @@ import 'swiper/css';
 import 'swiper/css/effect-fade';
 
 /**
- * ThesisSectionMobile — Swiper vertical fade with body scroll lock.
+ * ThesisSectionMobile — Swiper vertical fade with sentinel-based scroll lock.
  *
- * ── How it works ──
- * 1. IntersectionObserver detects when thesis enters viewport center
- * 2. Body scroll is locked (overflow:hidden) so the page stops here
- * 3. Swiper handles vertical touch gestures for page-by-page transitions
- * 4. At first/last slide edge, lock releases and page scroll resumes
+ * ── Flow ──
+ * 1. Top sentinel (0px div before section) leaves viewport while scrolling down
+ *    → section top is at viewport top → instant snap + body lock
+ * 2. Swiper handles vertical touch for page-by-page crossfade
+ * 3. Edge exit: last slide + swipe down → instant unlock + scroll to ThesisGraph
+ *    First slide + swipe up → instant unlock + scroll to Hero
+ * 4. Exit cooldown (800ms) prevents re-lock from stale IO callbacks
  *
- * ── Why body scroll lock instead of GSAP pin? ──
- * GSAP pin uses position:fixed + pin-spacer DOM wrapper which:
- *   - Conflicts with React's virtual DOM on hydration
- *   - Requires normalizeScroll for iOS momentum (causes jank with WebGL)
- *   - Has position:fixed hit-testing desync after scroll on iOS
- * Body overflow:hidden achieves the same "freeze page here" effect
- * without any DOM manipulation. Works on iOS 16.3+ (WebKit fixed it).
+ * ── Lock mechanism ──
+ * Primary: body overflow:hidden + position:fixed (preserves scroll position)
+ * Safari fallback: touchmove preventDefault on document during lock
+ * (iOS 16.3+ supports overflow:hidden on body, but belt-and-suspenders)
  *
- * ── Why not Swiper's releaseOnEdges? ──
- * Broken on iOS Safari (Swiper #6691, #7923, unresolved as of 2025).
- * We detect edge-scroll manually via touch delta.
- *
- * ── WebGL context management ──
- * Only mount canvas for active slide +-1 (React conditional rendering).
+ * ── WebGL ──
+ * Only active slide mounts canvas. +-1 neighbors use placeholder.
+ * More aggressive than desktop (which does +-1) to save mobile GPU.
  */
 export function ThesisSectionMobile() {
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
-  const isLockedRef = useRef(false);
-  const touchStartY = useRef(0);
-  const isExitingRef = useRef(false);
-  // Store scroll position before lock to prevent iOS scroll-to-top
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+
+  // State machine: 'idle' | 'locked' | 'exiting'
+  const stateRef = useRef<'idle' | 'locked' | 'exiting'>('idle');
   const savedScrollY = useRef(0);
+  const touchStartY = useRef(0);
+  const exitCooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
-    isExitingRef.current = false;
   }, []);
 
-  // ── Body scroll lock/unlock ──
+  // ── Safari fallback: block touchmove on body while locked ──
+  const bodyTouchHandler = useCallback((e: TouchEvent) => {
+    // Only block if the touch target is outside the Swiper container
+    const section = sectionRef.current;
+    if (section && !section.contains(e.target as Node)) {
+      e.preventDefault();
+    }
+  }, []);
+
+  // ── Lock: freeze page scroll at current position ──
   const lockScroll = useCallback(() => {
-    if (isLockedRef.current) return;
-    isLockedRef.current = true;
-    savedScrollY.current = window.scrollY;
+    if (stateRef.current === 'locked') return;
+    stateRef.current = 'locked';
+
+    // Snap thesis to viewport top (instant, no animation)
+    const section = sectionRef.current;
+    if (section) {
+      const sectionTop = section.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: sectionTop, behavior: 'auto' as ScrollBehavior });
+      savedScrollY.current = sectionTop;
+    }
+
+    // Primary lock
     document.body.style.overflow = 'hidden';
-    // Prevent iOS from resetting scroll position when overflow changes
     document.body.style.position = 'fixed';
     document.body.style.top = `-${savedScrollY.current}px`;
     document.body.style.left = '0';
     document.body.style.right = '0';
-  }, []);
 
+    // Safari fallback
+    document.addEventListener('touchmove', bodyTouchHandler, { passive: false });
+  }, [bodyTouchHandler]);
+
+  // ── Unlock: restore page scroll ──
   const unlockScroll = useCallback(() => {
-    if (!isLockedRef.current) return;
-    isLockedRef.current = false;
+    if (stateRef.current !== 'locked') return;
+    stateRef.current = 'exiting';
+
+    // Remove lock
     document.body.style.overflow = '';
     document.body.style.position = '';
     document.body.style.top = '';
     document.body.style.left = '';
     document.body.style.right = '';
-    // Restore scroll position that was saved before lock
+    document.removeEventListener('touchmove', bodyTouchHandler);
+
+    // Restore scroll position
     window.scrollTo(0, savedScrollY.current);
-  }, []);
 
-  // ── IntersectionObserver: lock scroll when thesis enters viewport ──
+    // Cooldown: prevent re-lock from stale IO callbacks
+    if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
+    exitCooldownTimer.current = setTimeout(() => {
+      stateRef.current = 'idle';
+    }, 800);
+  }, [bodyTouchHandler]);
+
+  // ── Sentinel observer: detect when thesis top reaches viewport top ──
   useEffect(() => {
-    const section = sectionRef.current;
-    if (!section) return;
+    const sentinel = topSentinelRef.current;
+    if (!sentinel) return;
 
+    // Observe sentinel. When it's NOT intersecting (scrolled above viewport),
+    // thesis top is at or past viewport top → lock.
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-          // Section is mostly visible — lock and snap to it
+        // Sentinel just left viewport (scrolling down) → lock
+        if (!entry.isIntersecting && stateRef.current === 'idle') {
           lockScroll();
         }
       },
-      { threshold: [0.6] },
+      { threshold: 0 },
     );
 
-    observer.observe(section);
+    observer.observe(sentinel);
 
     return () => {
       observer.disconnect();
-      // Clean up lock on unmount
-      if (isLockedRef.current) unlockScroll();
+      if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
     };
-  }, [lockScroll, unlockScroll]);
+  }, [lockScroll]);
 
-  // ── Edge exit: detect scroll past first/last slide ──
+  // ── Edge exit: touch delta detection at first/last slide ──
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -110,29 +139,29 @@ export function ThesisSectionMobile() {
     };
 
     const onTouchEnd = (e: TouchEvent) => {
-      if (isExitingRef.current || !isLockedRef.current) return;
+      if (stateRef.current !== 'locked') return;
 
       const swiper = swiperRef.current;
       if (!swiper) return;
 
       const deltaY = touchStartY.current - (e.changedTouches[0]?.clientY ?? touchStartY.current);
 
-      // Scrolled DOWN past last slide → exit to ThesisGraph
+      // DOWN past last slide → exit to ThesisGraph
       if (swiper.activeIndex === TOTAL - 1 && deltaY > EDGE_THRESHOLD) {
-        isExitingRef.current = true;
         unlockScroll();
-        // Small delay to let scroll position restore, then scroll to next section
         requestAnimationFrame(() => {
-          document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
+          const target = document.getElementById('thesis-graph');
+          if (target) {
+            target.scrollIntoView({ behavior: 'auto' as ScrollBehavior });
+          }
         });
       }
 
-      // Scrolled UP past first slide → exit back to Hero
+      // UP past first slide → exit to Hero
       if (swiper.activeIndex === 0 && deltaY < -EDGE_THRESHOLD) {
-        isExitingRef.current = true;
         unlockScroll();
         requestAnimationFrame(() => {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          window.scrollTo({ top: 0, behavior: 'auto' as ScrollBehavior });
         });
       }
     };
@@ -146,74 +175,80 @@ export function ThesisSectionMobile() {
     };
   }, [unlockScroll]);
 
-  // Clean up on unmount (safety)
+  // Clean up on unmount
   useEffect(() => {
     return () => {
-      if (isLockedRef.current) {
-        document.body.style.overflow = '';
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-      }
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.removeEventListener('touchmove', bodyTouchHandler);
+      if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
     };
-  }, []);
+  }, [bodyTouchHandler]);
 
   return (
-    <section
-      ref={sectionRef}
-      id="thesis"
-      className="relative h-dvh w-full overflow-hidden z-10"
-      style={{ backgroundColor: 'var(--color-card)' }}
-      aria-live="polite"
-    >
-      <Swiper
-        modules={[EffectFade]}
-        effect="fade"
-        fadeEffect={{ crossFade: true }}
-        direction="vertical"
-        slidesPerView={1}
-        speed={400}
-        loop={false}
-        allowTouchMove={true}
-        onSwiper={(swiper) => { swiperRef.current = swiper; }}
-        onSlideChange={handleSlideChange}
-        className="h-full w-full"
-      >
-        {THESIS_STATES.map((state, index) => {
-          const isNearby = Math.abs(index - activeIndex) <= 1;
-          return (
-            <SwiperSlide key={state.id} className="!flex items-center justify-center">
-              <div className="max-w-[1034px] px-[22px] text-center">
-                {isNearby ? (
-                  state.mobileContent
-                ) : (
-                  <div className="opacity-0" aria-hidden="true">
-                    {state.mobileContent}
-                  </div>
-                )}
-              </div>
-            </SwiperSlide>
-          );
-        })}
-      </Swiper>
+    <>
+      {/* Top sentinel — 0px element that triggers lock when it leaves viewport */}
+      <div ref={topSentinelRef} className="h-0 w-full" aria-hidden="true" />
 
-      {/* Pagination dots — bottom center (horizontal) */}
-      <div className="absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 gap-2">
-        {THESIS_STATES.map((_, i) => (
-          <button
-            key={i}
-            className="h-1.5 w-1.5 rounded-full transition-all duration-300 cursor-pointer"
-            style={{
-              backgroundColor: i === activeIndex ? 'var(--color-accent)' : 'var(--color-sub-text2)',
-              opacity: i === activeIndex ? 1 : 0.3,
-              transform: i === activeIndex ? 'scale(1.5)' : 'scale(1)',
-            }}
-            onClick={() => swiperRef.current?.slideTo(i)}
-            aria-label={`Go to section ${i + 1} of ${TOTAL}`}
-          />
-        ))}
-      </div>
-    </section>
+      <section
+        ref={sectionRef}
+        id="thesis"
+        className="relative h-dvh w-full overflow-hidden z-10"
+        style={{ backgroundColor: 'var(--color-card)' }}
+        aria-live="polite"
+      >
+        <Swiper
+          modules={[EffectFade]}
+          effect="fade"
+          fadeEffect={{ crossFade: true }}
+          direction="vertical"
+          slidesPerView={1}
+          speed={400}
+          loop={false}
+          allowTouchMove={true}
+          onSwiper={(swiper) => { swiperRef.current = swiper; }}
+          onSlideChange={handleSlideChange}
+          className="h-full w-full"
+        >
+          {THESIS_STATES.map((state, index) => {
+            // Aggressive: only active slide mounts WebGL canvas
+            const isActive = index === activeIndex;
+            return (
+              <SwiperSlide key={state.id} className="!flex items-center justify-center">
+                <div className="max-w-[1034px] px-[22px] text-center">
+                  {isActive ? (
+                    state.mobileContent
+                  ) : (
+                    <div className="opacity-0" aria-hidden="true">
+                      {state.mobileContent}
+                    </div>
+                  )}
+                </div>
+              </SwiperSlide>
+            );
+          })}
+        </Swiper>
+
+        {/* Pagination dots — bottom center */}
+        <div className="absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 gap-2">
+          {THESIS_STATES.map((_, i) => (
+            <button
+              key={i}
+              className="h-1.5 w-1.5 rounded-full transition-all duration-300 cursor-pointer"
+              style={{
+                backgroundColor: i === activeIndex ? 'var(--color-accent)' : 'var(--color-sub-text2)',
+                opacity: i === activeIndex ? 1 : 0.3,
+                transform: i === activeIndex ? 'scale(1.5)' : 'scale(1)',
+              }}
+              onClick={() => swiperRef.current?.slideTo(i)}
+              aria-label={`Go to section ${i + 1} of ${TOTAL}`}
+            />
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
