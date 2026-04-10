@@ -6,7 +6,8 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Observer } from 'gsap/Observer';
 import { useGSAP } from '@gsap/react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
-import { AsciiThesis } from '@/components/ascii/AsciiThesis';
+import { THESIS_STATES, TOTAL } from './thesisData';
+import { ThesisSectionMobile } from './ThesisSectionMobile';
 
 gsap.registerPlugin(ScrollTrigger, Observer, useGSAP);
 
@@ -31,283 +32,34 @@ if (typeof window !== 'undefined') {
     window.addEventListener('load', () => { _lastW = window.innerWidth; }, { once: true });
   }
 
-  // ── iOS momentum scroll interception (touch-only devices) ──
-  // iOS Safari drives momentum scroll on a native compositor thread
-  // (UIScrollView) that is completely outside WebKit's JS context:
-  //   1) The first touch that stops momentum is consumed by UIScrollView
-  //      and never dispatched as a DOM touchstart event (WebKit #174300)
-  //   2) preventDefault() from JS cannot interrupt compositor-driven momentum
-  //   3) position:fixed hit-testing desyncs after scroll until a touch re-syncs
-  //
-  // normalizeScroll intercepts ALL scroll input and replays it via JS,
-  // preventing the compositor from ever starting momentum. This MUST be
-  // activated BEFORE any gesture begins (at module load, not onEnter) —
-  // once compositor momentum starts, JS cannot reclaim control.
-  //
-  // Activation is deferred until intro-lock is released. normalizeScroll
-  // conflicts with intro-lock's overflow:hidden — if initialized while
-  // the viewport is non-scrollable, its internal Observer starts with
-  // stale scroll dimensions and blocks all scroll afterward.
-  //
-  // Known trade-off: all scroll goes through JS thread, which can cause
-  // micro-stutter if main thread is contended. On this site, thesis uses
-  // discrete page transitions (no continuous scroll to stutter) and WebGL
-  // contexts dispose when offscreen (reduced main-thread load).
-  //
-  // Previously tried alternatives that failed:
-  //   - onEnter-scoped normalizeScroll toggle (d15407a): too late, momentum
-  //     already running; internal Observer conflicts corrupted pin position
-  //   - section touchstart preventDefault (27fb73d): only catches touches
-  //     ON the section; Hero-originated momentum has no touchstart to catch
-  //   - CSS touch-action:none (thesis-touch-lock): only affects NEXT gesture,
-  //     not the current in-flight momentum (MDN: "changes during a gesture
-  //     do not affect the current gesture")
+  // ── Touch device: refresh ScrollTrigger after intro-lock removal ──
+  // Previously normalizeScroll(true) was activated here, which included a
+  // ScrollTrigger.refresh(true) as a side effect. With normalizeScroll
+  // removed (mobile now uses Swiper instead of GSAP pin), we still need
+  // the explicit refresh so ScrollRevealWrapper elements get correct
+  // trigger positions after intro-lock's overflow:hidden is removed.
   if (ScrollTrigger.isTouch === 1) {
     const html = document.documentElement;
-
-    const activateNormalizeScroll = () => {
-      ScrollTrigger.normalizeScroll(true);
-      // Recalculate all ScrollTrigger positions now that the page is scrollable.
-      // Safe mode (true) defers to a rAF tick, avoiding synchronous reflow jank.
-      ScrollTrigger.refresh(true);
-    };
-
     if (html.classList.contains('intro-lock')) {
-      // Wait for intro-lock removal (Hero scramble animation completion)
       const mo = new MutationObserver(() => {
         if (!html.classList.contains('intro-lock')) {
           mo.disconnect();
-          // Let the browser reflow after overflow:hidden removal
-          requestAnimationFrame(activateNormalizeScroll);
+          requestAnimationFrame(() => ScrollTrigger.refresh(true));
         }
       });
       mo.observe(html, { attributes: true, attributeFilter: ['class'] });
-    } else {
-      // Not on homepage or intro-lock already removed (e.g. back-navigation)
-      activateNormalizeScroll();
     }
   }
 }
 
-interface ThesisState {
-  id: string;
-  /** Desktop layout: inline ASCII within text flow */
-  desktopContent: React.ReactNode;
-  /** Mobile layout: ASCII as separate block, two-tier text sizing */
-  mobileContent: React.ReactNode;
-}
-
-/* ─── Desktop: Inline ASCII (same as before) ─── */
-function InlineAscii({ n, extend }: {
-  n: 1 | 2 | 3 | 4 | 5 | 6;
-  extend: 'up' | 'down';
-}) {
-  return (
-    <span
-      className="relative inline-block w-[110px] align-middle mx-2"
-      style={{ height: '1em' }}
-    >
-      <span
-        className="absolute inset-x-0 h-[110px] overflow-hidden"
-        style={extend === 'up' ? { bottom: 0 } : { top: 0 }}
-      >
-        <AsciiThesis stateNumber={n} />
-      </span>
-    </span>
-  );
-}
-
-/* ─── Mobile: Block-level ASCII art ─── */
-function MobileAscii({ n, align = 'center' }: {
-  n: 1 | 2 | 3 | 4 | 5 | 6;
-  align?: 'left' | 'center' | 'right';
-}) {
-  const justifyClass = align === 'left' ? 'justify-start' : align === 'right' ? 'justify-end' : 'justify-center';
-  return (
-    <div className={`flex ${justifyClass} w-full`}>
-      <div className="relative w-[76px] h-[76px] overflow-hidden">
-        <AsciiThesis stateNumber={n} />
-      </div>
-    </div>
-  );
-}
-
-/* ─── Shared sub-text style for mobile ─── */
-const subTextClass = "text-[var(--color-sub-text1)] text-[18px] leading-[1.25] tracking-[-0.36px]";
-
-const THESIS_STATES: ThesisState[] = [
-  {
-    id: 'thesis-01',
-    desktopContent: (
-      <>
-        <span>the internet was built on </span>
-        <InlineAscii n={1} extend="up" />
-        <span> an </span>
-        <span className="text-[var(--color-accent)]">ideal</span>
-        <span className="text-[var(--color-accent)]">:</span>
-        <br />
-        <span>a free and open space for information, ideas, and value.</span>
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <MobileAscii n={1} align="right" />
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          the internet was built on an <span className="text-[var(--color-accent)]">ideal:</span>
-        </p>
-        <p className={subTextClass}>
-          a free and open space for<br />information, ideas, and value.
-        </p>
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-02',
-    desktopContent: (
-      <>
-        <span>but that vision remains </span>
-        <InlineAscii n={2} extend="up" />
-        <span> </span>
-        <span className="text-[var(--color-accent)]">unfinished.</span>
-        <br />
-        <span>ownership is centralized. incentives are misaligned.</span>
-        <br />
-        <span>value is trapped in closed loops.</span>
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <MobileAscii n={2} align="right" />
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          but that vision remains <span className="text-[var(--color-accent)]">unfinished.</span>
-        </p>
-        <p className={subTextClass}>
-          ownership is centralized.<br />incentives are misaligned.<br />value is trapped in closed loops.
-        </p>
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-03',
-    desktopContent: (
-      <>
-        <span>blockchains are </span>
-        <InlineAscii n={3} extend="up" />
-        <span> the </span>
-        <span className="text-[var(--color-accent)]">missing piece.</span>
-        <br />
-        <span>the bridge to reclaim the internet&apos;s original promise.</span>
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <MobileAscii n={3} align="right" />
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          blockchains are the <span className="text-[var(--color-accent)]">missing piece.</span>
-        </p>
-        <p className={subTextClass}>
-          the bridge to reclaim the internet&apos;s<br />original promise.
-        </p>
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-04',
-    desktopContent: (
-      <>
-        <span>yet the technology is still early,</span>
-        <br />
-        <span>not even past the first </span>
-        <InlineAscii n={4} extend="down" />
-        <span> </span>
-        <span className="text-[var(--color-accent)]">16%</span>
-        <span> of adoption.</span>
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <p className={subTextClass}>
-          yet the technology is still early,<br />not even past the first
-        </p>
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          <span className="text-[var(--color-accent)]">16%</span> of adoption.
-        </p>
-        <MobileAscii n={4} align="left" />
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-05',
-    desktopContent: (
-      <>
-        <span>we are here to </span>
-        <InlineAscii n={5} extend="up" />
-        <span> </span>
-        <span className="text-[var(--color-accent)]">change</span>
-        <span> that.</span>
-        <br />
-        <span>to move blockchain from experiment to infrastructure.</span>
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <MobileAscii n={5} align="center" />
-        <p className={subTextClass}>
-          we are here to <span className="text-[var(--color-accent)]">change</span> that.<br />to move blockchain
-        </p>
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          from experiment to infrastructure.
-        </p>
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-06',
-    desktopContent: (
-      <>
-        <span>from possibility to default.</span>
-        <br />
-        <span>from the edges to </span>
-        <InlineAscii n={6} extend="down" />
-        <span> </span>
-        the <span className="text-[var(--color-accent)]">center</span> of the world.
-      </>
-    ),
-    mobileContent: (
-      <div className="flex flex-col items-center gap-1">
-        <p className={subTextClass}>
-          from possibility to default.<br />from the edges to
-        </p>
-        <p className="text-[24px] leading-[1.25] tracking-[-0.48px] text-[var(--color-text)]">
-          the <span className="text-[var(--color-accent)]">center</span> of the world.
-        </p>
-        <MobileAscii n={6} align="center" />
-      </div>
-    ),
-  },
-  {
-    id: 'thesis-07',
-    desktopContent: (
-      <>
-        <span>this is why we are </span>
-        <span className="text-[var(--color-accent)]">1six.</span>
-      </>
-    ),
-    mobileContent: (
-      <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-        this is why we are <span className="text-[var(--color-accent)]">1six.</span>
-      </p>
-    ),
-  },
-];
-
-const TOTAL = THESIS_STATES.length;
+// Data and helper components imported from shared thesisData.tsx
 
 export function ThesisSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
+  // ── Device detection (must resolve before any GSAP DOM manipulation) ──
+  // isMobile starts as null (unknown) to distinguish SSR/pre-hydration from
+  // actual desktop. GSAP setup is gated on isMobile !== null to prevent
+  // pin-spacer DOM insertion before we know whether to show Swiper instead.
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
   const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
@@ -317,6 +69,41 @@ export function ThesisSection() {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Mobile: use Swiper instead of GSAP pin (avoids iOS compositor conflicts).
+  const useMobileSwiper = isMobile === true && !prefersReducedMotion;
+
+  // Before device detection resolves, render a placeholder matching the
+  // section's visual footprint to prevent layout shift.
+  if (isMobile === null) {
+    return (
+      <section
+        id="thesis"
+        className="relative h-dvh w-full overflow-hidden z-10"
+        style={{ backgroundColor: 'var(--color-card)' }}
+      />
+    );
+  }
+
+  // Mobile path: render Swiper-based horizontal fade slider.
+  // This must happen BEFORE any GSAP refs/hooks to prevent GSAP from
+  // creating pin-spacer DOM wrappers that conflict with React's vDOM.
+  if (useMobileSwiper) {
+    return <ThesisSectionMobile />;
+  }
+
+  // ── Desktop path below (GSAP ScrollTrigger pin + Observer) ──
+  return <ThesisSectionDesktop isMobile={isMobile} prefersReducedMotion={prefersReducedMotion} />;
+}
+
+/** Desktop GSAP implementation — isolated to prevent hook count changes */
+function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
+  isMobile: boolean;
+  prefersReducedMotion: boolean;
+}) {
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   // Refs for Observer logic (no re-renders needed)
   const indexRef = useRef(0);
@@ -645,7 +432,7 @@ export function ThesisSection() {
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
 
-  // Keyboard navigation
+  // Keyboard navigation (desktop only)
   useEffect(() => {
     if (prefersReducedMotion) return;
 

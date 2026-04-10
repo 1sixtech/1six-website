@@ -1,6 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
+import {
+  emitHashScrollRequest,
+  isThesisPinReady,
+  scrollToHashTarget,
+  shouldWaitForThesisPin,
+} from '@/lib/hashScroll';
 
 /**
  * On mount: strip hash from the URL to prevent the browser's native
@@ -10,7 +16,7 @@ import { useEffect } from 'react';
  *
  * The hash is saved before removal so we can programmatically scroll
  * to it later. Programmatic scrollTo generates 'scroll' events (not
- * wheel/touch), bypassing the About section's GSAP Observer.
+ * wheel/touch), bypassing the Thesis section's gesture capture.
  */
 export function ScrollToTop() {
   useEffect(() => {
@@ -28,30 +34,30 @@ export function ScrollToTop() {
     window.scrollTo(0, 0);
 
     if (hash) {
-      // Poll for the target element and the GSAP pin spacer.
+      // Poll for the target element and, on desktop, the Thesis pin spacer.
       // Uses setInterval (not rAF) so it keeps trying even if the
       // main thread is busy with WebGL initialization.
       // Generous timeout (5s) covers slow mobile devices.
       const startTime = Date.now();
       const maxWait = 5000;
+      const waitForThesisPin = shouldWaitForThesisPin();
 
       const poll = setInterval(() => {
         const target = document.getElementById(hash);
-        const aboutEl = document.getElementById('about');
-        const hasPinSpacer = aboutEl?.parentElement?.classList.contains('pin-spacer');
+        const ready = !!target && (!waitForThesisPin || isThesisPinReady());
 
-        if (target && hasPinSpacer) {
+        if (ready) {
           clearInterval(poll);
-          const top = target.getBoundingClientRect().top + window.scrollY;
-          window.scrollTo({ top, behavior: 'auto' });
+          emitHashScrollRequest(hash);
+          scrollToHashTarget(hash);
           // Restore hash in URL after scroll
           history.replaceState(null, '', `#${hash}`);
         } else if (Date.now() - startTime > maxWait) {
           clearInterval(poll);
           // Fallback: scroll to target even without pin spacer
           if (target) {
-            const top = target.getBoundingClientRect().top + window.scrollY;
-            window.scrollTo({ top, behavior: 'auto' });
+            emitHashScrollRequest(hash);
+            scrollToHashTarget(hash);
             history.replaceState(null, '', `#${hash}`);
           }
         }

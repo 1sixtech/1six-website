@@ -216,12 +216,21 @@ export function AsciiCanvas({
         scale,
       });
 
-      // Bail if unmounted during async init
-      if (!mountedRef.current) {
+      // Bail if the component unmounted OR if destroyMosaic raced us while
+      // addModel was awaiting. mountedRef alone is not enough: destroyMosaic
+      // only clears mosaicRef.current (it never touches mountedRef), so a
+      // rapid Hero <-> Thesis toggle can leave mountedRef === true while our
+      // local `mosaic` has already been disposed by destroyMosaic. Trusting
+      // mountedRef in that state would send enableAsciiMosaicFilter to a
+      // disposed AscMosaic, whose internal filter reference is already null,
+      // making the ready-state poll time out after 5s.
+      if (!mountedRef.current || mosaicRef.current !== mosaic) {
         mosaic.stopAnimate();
         mosaic.dispose();
-        activeContextCount = Math.max(0, activeContextCount - 1);
-        mosaicRef.current = null;
+        if (mosaicRef.current === mosaic) {
+          activeContextCount = Math.max(0, activeContextCount - 1);
+          mosaicRef.current = null;
+        }
         return;
       }
 
@@ -242,6 +251,20 @@ export function AsciiCanvas({
         avoidRadius: mouseInteraction ? avoidRadius : undefined,
         avoidStrength: mouseInteraction ? avoidStrength : undefined,
       });
+
+      // Second race check: enableAsciiMosaicFilter internally polls for up
+      // to 5 seconds, and destroyMosaic can run at any point during that
+      // window. If we raced, discard this now-orphaned instance instead of
+      // calling animate() on a disposed renderer.
+      if (!mountedRef.current || mosaicRef.current !== mosaic) {
+        mosaic.stopAnimate();
+        mosaic.dispose();
+        if (mosaicRef.current === mosaic) {
+          activeContextCount = Math.max(0, activeContextCount - 1);
+          mosaicRef.current = null;
+        }
+        return;
+      }
 
       // Offset camera horizontally (e.g. to show right side of graph on mobile)
       if (cameraOffsetX !== 0) {
