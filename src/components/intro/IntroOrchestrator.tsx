@@ -49,6 +49,9 @@ export function IntroOrchestrator({
 
   useEffect(() => {
     disposedRef.current = false;
+    // Track the active reveal tween (clip-path or overlay fade) so the
+    // cleanup can kill it if the orchestrator unmounts mid-reveal.
+    let revealTween: gsap.core.Tween | null = null;
 
     const html = document.documentElement;
     const introActive = html.classList.contains('intro-lock');
@@ -137,6 +140,7 @@ export function IntroOrchestrator({
       disposedRef.current = true;
       window.removeEventListener('ascii:ready', onAsciiReady);
       fillTween.kill();
+      revealTween?.kill();
     };
 
     // runReveal is declared inside the effect so it closes over refs
@@ -159,8 +163,12 @@ export function IntroOrchestrator({
         unlock();
         markSeen();
         // Fire on next tick so subscribers that mount later (e.g. the
-        // HeroSection effect) also see the event.
+        // HeroSection effect) also see the event. Guard against
+        // StrictMode double-invoke: if the effect has been cleaned up
+        // by the time the microtask runs (second mount cycles through
+        // cleanup + re-mount very fast in dev), skip the dispatch.
         queueMicrotask(() => {
+          if (disposedRef.current) return;
           window.dispatchEvent(new CustomEvent('intro:revealed'));
           window.dispatchEvent(new CustomEvent('intro:done'));
         });
@@ -169,9 +177,22 @@ export function IntroOrchestrator({
 
       const main = mainContentRef.current;
       const overlay = overlayRef.current;
-      if (!main || !overlay) return;
+      if (!main || !overlay) {
+        // Defensive fallback: refs should be populated by the parent
+        // HomeIntroMount before this effect runs. If they're null for any
+        // reason, do NOT leave the intro stuck — unlock, mark seen, and
+        // dispatch both events immediately so downstream consumers can
+        // proceed. This path should never run in practice.
+        unlock();
+        markSeen();
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent('intro:revealed'));
+          window.dispatchEvent(new CustomEvent('intro:done'));
+        });
+        return;
+      }
 
-      gsap.fromTo(
+      revealTween = gsap.fromTo(
         main,
         {
           clipPath: 'circle(0% at 50% 50%)',
@@ -188,7 +209,7 @@ export function IntroOrchestrator({
             window.dispatchEvent(new CustomEvent('intro:revealed'));
           },
           onComplete: () => {
-            gsap.to(overlay, {
+            revealTween = gsap.to(overlay, {
               opacity: 0,
               duration: OVERLAY_FADE_S,
               onComplete: () => {
