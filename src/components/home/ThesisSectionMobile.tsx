@@ -10,133 +10,151 @@ import 'swiper/css';
 import 'swiper/css/effect-fade';
 
 /**
- * ThesisSectionMobile — Swiper vertical fade with sentinel-based scroll lock.
+ * ThesisSectionMobile — fullpage-style vertical slide with scroll capture.
  *
- * ── Flow ──
- * 1. Top sentinel (0px div before section) leaves viewport while scrolling down
- *    → section top is at viewport top → instant snap + body lock
- * 2. Swiper handles vertical touch for page-by-page crossfade
- * 3. Edge exit: last slide + swipe down → instant unlock + scroll to ThesisGraph
- *    First slide + swipe up → instant unlock + scroll to Hero
- * 4. Exit cooldown (800ms) prevents re-lock from stale IO callbacks
+ * ── Architecture ──
  *
- * ── Lock mechanism ──
- * Primary: body overflow:hidden + position:fixed (preserves scroll position)
- * Safari fallback: touchmove preventDefault on document during lock
- * (iOS 16.3+ supports overflow:hidden on body, but belt-and-suspenders)
+ *   Hero (normal scroll)
+ *     │ scroll down
+ *     ▼
+ *   ┌─ sentinel (h-0) ───────────────────────────┐
+ *   │  IO detects: sentinel left viewport         │
+ *   │  → scrollTo(thesis top, instant)            │
+ *   │  → capture touchmove on document            │
+ *   └────────────────────────────────────────────┘
+ *     │
+ *     ▼
+ *   ┌─ Thesis (100dvh, Swiper vertical + fade) ──┐
+ *   │  All page-level scroll is blocked via       │
+ *   │  touchmove.preventDefault() on document.    │
+ *   │  Swiper handles vertical swipe internally.  │
+ *   │                                             │
+ *   │  Slide 1 + swipe UP 50px  → release + Hero │
+ *   │  Slide 7 + swipe DOWN 50px → release + Graph│
+ *   └────────────────────────────────────────────┘
+ *     │
+ *     ▼
+ *   ThesisGraph (normal scroll resumes)
  *
- * ── WebGL ──
- * Only active slide mounts canvas. +-1 neighbors use placeholder.
- * More aggressive than desktop (which does +-1) to save mobile GPU.
+ * ── Why touchmove.preventDefault instead of body lock? ──
+ * body overflow:hidden + position:fixed has timing issues on iOS:
+ *   - Applying mid-momentum doesn't stop compositor-thread scroll
+ *   - scrollY desync between JS and compositor during smooth scroll
+ *   - position:fixed causes visible layout shift
+ * touchmove.preventDefault directly tells the browser "don't scroll"
+ * at the event level, before the compositor decides. This is what
+ * fullpage.js uses internally. It's synchronous and reliable.
+ *
+ * ── Re-entry from below ──
+ * A bottom sentinel before ThesisGraph detects upward scroll.
+ * When triggered: snap to thesis, show last slide, capture touch.
  */
 export function ThesisSectionMobile() {
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
-  // State machine: 'idle' | 'locked' | 'exiting'
-  const stateRef = useRef<'idle' | 'locked' | 'exiting'>('idle');
-  const savedScrollY = useRef(0);
+  // State: 'idle' (normal scroll) | 'captured' (touch events blocked)
+  // | 'exiting' (cooldown after release)
+  const stateRef = useRef<'idle' | 'captured' | 'exiting'>('idle');
   const touchStartY = useRef(0);
-  const exitCooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
   }, []);
 
-  // ── Safari fallback: block touchmove on body while locked ──
-  const bodyTouchHandler = useCallback((e: TouchEvent) => {
-    // Only block if the touch target is outside the Swiper container
-    const section = sectionRef.current;
-    if (section && !section.contains(e.target as Node)) {
-      e.preventDefault();
-    }
+  // ── Touch capture: block all page-level scrolling ──
+  // Registered on document with { passive: false } so preventDefault works.
+  // Only blocks touches OUTSIDE the Swiper container — Swiper still handles
+  // its own vertical swipe internally.
+  const preventPageScroll = useCallback((e: TouchEvent) => {
+    if (stateRef.current !== 'captured') return;
+    e.preventDefault();
   }, []);
 
-  // ── Lock: freeze page scroll at current position ──
-  const lockScroll = useCallback(() => {
-    if (stateRef.current === 'locked') return;
-    stateRef.current = 'locked';
+  // ── Capture: snap to thesis and block page scroll ──
+  const capture = useCallback((fromDirection: 'top' | 'bottom') => {
+    if (stateRef.current !== 'idle') return;
+    stateRef.current = 'captured';
 
-    // Smooth scroll thesis to viewport top, then lock after scroll completes
     const section = sectionRef.current;
-    if (section) {
-      const sectionTop = section.getBoundingClientRect().top + window.scrollY;
-      savedScrollY.current = sectionTop;
-      section.scrollIntoView({ behavior: 'smooth' });
+    if (!section) return;
 
-      // Wait for smooth scroll to finish before applying position:fixed lock
-      // (applying fixed mid-scroll would interrupt the animation)
-      const checkScrollDone = () => {
-        const currentY = window.scrollY;
-        const diff = Math.abs(currentY - sectionTop);
-        if (diff < 2) {
-          // Scroll arrived — apply lock
-          document.body.style.overflow = 'hidden';
-          document.body.style.position = 'fixed';
-          document.body.style.top = `-${sectionTop}px`;
-          document.body.style.left = '0';
-          document.body.style.right = '0';
-          document.addEventListener('touchmove', bodyTouchHandler, { passive: false });
-        } else {
-          requestAnimationFrame(checkScrollDone);
-        }
-      };
-      requestAnimationFrame(checkScrollDone);
+    // Instant snap to thesis top (no smooth — avoids momentum race)
+    const sectionTop = section.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: sectionTop, behavior: 'auto' as ScrollBehavior });
+
+    // Set correct starting slide based on entry direction
+    if (fromDirection === 'bottom') {
+      swiperRef.current?.slideTo(TOTAL - 1, 0); // instant, no animation
+      setActiveIndex(TOTAL - 1);
+    } else {
+      swiperRef.current?.slideTo(0, 0);
+      setActiveIndex(0);
     }
-  }, [bodyTouchHandler]);
 
-  // ── Unlock: restore page scroll ──
-  const unlockScroll = useCallback(() => {
-    if (stateRef.current !== 'locked') return;
+    // Block page scroll at document level
+    document.addEventListener('touchmove', preventPageScroll, { passive: false });
+  }, [preventPageScroll]);
+
+  // ── Release: restore page scroll ──
+  const release = useCallback(() => {
+    if (stateRef.current !== 'captured') return;
     stateRef.current = 'exiting';
 
-    // Remove lock
-    document.body.style.overflow = '';
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.left = '';
-    document.body.style.right = '';
-    document.removeEventListener('touchmove', bodyTouchHandler);
+    document.removeEventListener('touchmove', preventPageScroll);
 
-    // Restore scroll position
-    window.scrollTo(0, savedScrollY.current);
-
-    // Cooldown: prevent re-lock from stale IO callbacks
-    if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
-    exitCooldownTimer.current = setTimeout(() => {
+    // Cooldown prevents sentinel from re-triggering immediately
+    if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
+    cooldownTimer.current = setTimeout(() => {
       stateRef.current = 'idle';
-    }, 800);
-  }, [bodyTouchHandler]);
+    }, 1000);
+  }, [preventPageScroll]);
 
-  // ── Sentinel observer: detect when thesis top reaches viewport top ──
+  // ── Top sentinel: detect scroll down into thesis ──
   useEffect(() => {
     const sentinel = topSentinelRef.current;
     if (!sentinel) return;
 
-    // Observe sentinel. When it's NOT intersecting (scrolled above viewport),
-    // thesis top is at or past viewport top → lock.
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        // Sentinel just left viewport (scrolling down) → lock
+        // Sentinel left viewport (scrolled above) = thesis top at viewport top
         if (!entry.isIntersecting && stateRef.current === 'idle') {
-          lockScroll();
+          capture('top');
         }
       },
       { threshold: 0 },
     );
 
     observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [capture]);
 
-    return () => {
-      observer.disconnect();
-      if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
-    };
-  }, [lockScroll]);
+  // ── Bottom sentinel: detect scroll up into thesis from below ──
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel) return;
 
-  // ── Edge exit: touch delta detection at first/last slide ──
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        // Bottom sentinel entered viewport (scrolling up) = approaching thesis from below
+        if (entry.isIntersecting && stateRef.current === 'idle') {
+          capture('bottom');
+        }
+      },
+      { threshold: 0 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [capture]);
+
+  // ── Edge exit: swipe past first/last slide ──
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -148,24 +166,25 @@ export function ThesisSectionMobile() {
     };
 
     const onTouchEnd = (e: TouchEvent) => {
-      if (stateRef.current !== 'locked') return;
+      if (stateRef.current !== 'captured') return;
 
       const swiper = swiperRef.current;
       if (!swiper) return;
 
       const deltaY = touchStartY.current - (e.changedTouches[0]?.clientY ?? touchStartY.current);
 
-      // DOWN past last slide → smooth exit to ThesisGraph
+      // DOWN past last slide → exit to ThesisGraph
       if (swiper.activeIndex === TOTAL - 1 && deltaY > EDGE_THRESHOLD) {
-        unlockScroll();
+        release();
+        // Use rAF to ensure release() cleanup runs first
         requestAnimationFrame(() => {
           document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
         });
       }
 
-      // UP past first slide → smooth exit to Hero
+      // UP past first slide → exit to Hero
       if (swiper.activeIndex === 0 && deltaY < -EDGE_THRESHOLD) {
-        unlockScroll();
+        release();
         requestAnimationFrame(() => {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         });
@@ -179,24 +198,19 @@ export function ThesisSectionMobile() {
       section.removeEventListener('touchstart', onTouchStart);
       section.removeEventListener('touchend', onTouchEnd);
     };
-  }, [unlockScroll]);
+  }, [release]);
 
-  // Clean up on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.top = '';
-      document.body.style.left = '';
-      document.body.style.right = '';
-      document.removeEventListener('touchmove', bodyTouchHandler);
-      if (exitCooldownTimer.current) clearTimeout(exitCooldownTimer.current);
+      document.removeEventListener('touchmove', preventPageScroll);
+      if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     };
-  }, [bodyTouchHandler]);
+  }, [preventPageScroll]);
 
   return (
     <>
-      {/* Top sentinel — 0px element that triggers lock when it leaves viewport */}
+      {/* Top sentinel: triggers capture when scrolling down past it */}
       <div ref={topSentinelRef} className="h-0 w-full" aria-hidden="true" />
 
       <section
@@ -220,7 +234,7 @@ export function ThesisSectionMobile() {
           className="h-full w-full"
         >
           {THESIS_STATES.map((state, index) => {
-            // Aggressive: only active slide mounts WebGL canvas
+            // Only active slide mounts WebGL canvas (aggressive for mobile GPU)
             const isActive = index === activeIndex;
             return (
               <SwiperSlide key={state.id} className="!flex items-center justify-center">
@@ -255,6 +269,9 @@ export function ThesisSectionMobile() {
           ))}
         </div>
       </section>
+
+      {/* Bottom sentinel: triggers capture when scrolling up toward thesis */}
+      <div ref={bottomSentinelRef} className="h-0 w-full" aria-hidden="true" />
     </>
   );
 }
