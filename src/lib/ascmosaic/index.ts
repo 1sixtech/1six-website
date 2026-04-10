@@ -5,6 +5,7 @@ import {
 import { createTexturedMesh, TexturedMeshOptions } from './texturedMesh';
 import { OrbitControls, OrbitControlsOptions } from './orbitControls';
 import * as THREE from 'three';
+import * as videoPool from '@/lib/videoPool';
 
 /** AscMosaic 생성 옵션 */
 export interface AscMosaicOptions {
@@ -208,7 +209,8 @@ export class AscMosaic {
             if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
               const videoTexture = obj.material.map as THREE.VideoTexture;
               const video = videoTexture.image as HTMLVideoElement;
-              if (video) {
+              // Do NOT kill pooled videos — they are shared across sections.
+              if (video && !videoPool.isPooled(video)) {
                 video.pause();
                 video.src = '';
                 video.load();
@@ -723,7 +725,7 @@ export class AscMosaic {
             if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
               const videoTexture = obj.material.map as THREE.VideoTexture;
               const video = videoTexture.image as HTMLVideoElement;
-              if (video) {
+              if (video && !videoPool.isPooled(video)) {
                 video.pause();
                 video.src = '';
                 video.load();

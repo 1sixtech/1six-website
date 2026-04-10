@@ -28,6 +28,13 @@ export interface TexturedMeshOptions {
   width?: number;
   /** 평면 세로 (shape: plane) */
   height?: number;
+  /**
+   * Pre-warmed video element to reuse instead of fetching the URL.
+   * When provided (and its readyState >= HAVE_CURRENT_DATA), the texture
+   * wraps this element directly and skips the canplay wait.
+   * Used by videoPool integration to eliminate re-download latency.
+   */
+  existingVideo?: HTMLVideoElement;
 }
 
 const DEFAULT_TEXTURE_URL = '/resource/earth.jpg';
@@ -38,7 +45,18 @@ declare global {
   }
 }
 
-function createVideoTexture(videoUrl: string): Promise<THREE.VideoTexture> {
+function createVideoTexture(
+  videoUrl: string,
+  existingVideo?: HTMLVideoElement,
+): Promise<THREE.VideoTexture> {
+  // Fast path: reuse a pre-warmed video from videoPool
+  if (existingVideo && existingVideo.readyState >= 2) {
+    const texture = new THREE.VideoTexture(existingVideo);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return Promise.resolve(texture);
+  }
+
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     try {
@@ -178,7 +196,7 @@ export function createTexturedMesh(options: TexturedMeshOptions = {}): Promise<T
   const geometry = buildGeometry(shape, options);
 
   if (textureType === 'video') {
-    return createVideoTexture(textureUrl).then((texture) => {
+    return createVideoTexture(textureUrl, options.existingVideo).then((texture) => {
       const material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         map: texture,
