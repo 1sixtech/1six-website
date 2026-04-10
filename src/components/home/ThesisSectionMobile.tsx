@@ -59,23 +59,32 @@ export function ThesisSectionMobile() {
     if (stateRef.current === 'locked') return;
     stateRef.current = 'locked';
 
-    // Snap thesis to viewport top (instant, no animation)
+    // Smooth scroll thesis to viewport top, then lock after scroll completes
     const section = sectionRef.current;
     if (section) {
       const sectionTop = section.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo({ top: sectionTop, behavior: 'auto' as ScrollBehavior });
       savedScrollY.current = sectionTop;
+      section.scrollIntoView({ behavior: 'smooth' });
+
+      // Wait for smooth scroll to finish before applying position:fixed lock
+      // (applying fixed mid-scroll would interrupt the animation)
+      const checkScrollDone = () => {
+        const currentY = window.scrollY;
+        const diff = Math.abs(currentY - sectionTop);
+        if (diff < 2) {
+          // Scroll arrived — apply lock
+          document.body.style.overflow = 'hidden';
+          document.body.style.position = 'fixed';
+          document.body.style.top = `-${sectionTop}px`;
+          document.body.style.left = '0';
+          document.body.style.right = '0';
+          document.addEventListener('touchmove', bodyTouchHandler, { passive: false });
+        } else {
+          requestAnimationFrame(checkScrollDone);
+        }
+      };
+      requestAnimationFrame(checkScrollDone);
     }
-
-    // Primary lock
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${savedScrollY.current}px`;
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-
-    // Safari fallback
-    document.addEventListener('touchmove', bodyTouchHandler, { passive: false });
   }, [bodyTouchHandler]);
 
   // ── Unlock: restore page scroll ──
@@ -146,22 +155,19 @@ export function ThesisSectionMobile() {
 
       const deltaY = touchStartY.current - (e.changedTouches[0]?.clientY ?? touchStartY.current);
 
-      // DOWN past last slide → exit to ThesisGraph
+      // DOWN past last slide → smooth exit to ThesisGraph
       if (swiper.activeIndex === TOTAL - 1 && deltaY > EDGE_THRESHOLD) {
         unlockScroll();
         requestAnimationFrame(() => {
-          const target = document.getElementById('thesis-graph');
-          if (target) {
-            target.scrollIntoView({ behavior: 'auto' as ScrollBehavior });
-          }
+          document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
         });
       }
 
-      // UP past first slide → exit to Hero
+      // UP past first slide → smooth exit to Hero
       if (swiper.activeIndex === 0 && deltaY < -EDGE_THRESHOLD) {
         unlockScroll();
         requestAnimationFrame(() => {
-          window.scrollTo({ top: 0, behavior: 'auto' as ScrollBehavior });
+          window.scrollTo({ top: 0, behavior: 'smooth' });
         });
       }
     };
