@@ -80,20 +80,19 @@ export function ThesisSectionMobile() {
   }, []);
 
   // ── Capture: snap to thesis and block page scroll ──
-  const capture = useCallback((fromDirection: 'top' | 'bottom') => {
+  // sectionTopAbs: absolute Y of thesis top at the moment IO detected intersection.
+  // Passing this in avoids calling getBoundingClientRect() inside the callback,
+  // which would read a stale value after iOS momentum overshoots past the sentinel.
+  const capture = useCallback((fromDirection: 'top' | 'bottom', sectionTopAbs: number) => {
     if (stateRef.current !== 'idle') return;
     stateRef.current = 'captured';
 
-    const section = sectionRef.current;
-    if (!section) return;
-
-    // Instant snap to thesis top (no smooth — avoids momentum race)
-    const sectionTop = section.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: sectionTop, behavior: 'auto' as ScrollBehavior });
+    // Instant snap using the pre-computed position (no momentum-induced offset)
+    window.scrollTo({ top: sectionTopAbs, behavior: 'auto' as ScrollBehavior });
 
     // Set correct starting slide based on entry direction
     if (fromDirection === 'bottom') {
-      swiperRef.current?.slideTo(TOTAL - 1, 0); // instant, no animation
+      swiperRef.current?.slideTo(TOTAL - 1, 0);
       setActiveIndex(TOTAL - 1);
     } else {
       swiperRef.current?.slideTo(0, 0);
@@ -119,22 +118,26 @@ export function ThesisSectionMobile() {
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => {
       blockedSentinel.current = null;
-    }, 500);
+    }, 700);
   }, [preventPageScroll]);
 
   // ── Top sentinel: detect scroll down into thesis ──
+  // Sentinel sits directly above the thesis section, so when it leaves the
+  // viewport (scrolling down), thesis top is at the viewport top.
   useEffect(() => {
     const sentinel = topSentinelRef.current;
-    if (!sentinel) return;
+    const section = sectionRef.current;
+    if (!sentinel || !section) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        // Sentinel left viewport (scrolled above) = thesis top at viewport top
         if (!entry.isIntersecting
           && stateRef.current === 'idle'
           && blockedSentinel.current !== 'top') {
-          capture('top');
+          // Section top at IO detection time: sentinel bottom = section top
+          const sectionTopAbs = entry.boundingClientRect.bottom + window.scrollY;
+          capture('top', sectionTopAbs);
         }
       },
       { threshold: 0 },
@@ -145,21 +148,39 @@ export function ThesisSectionMobile() {
   }, [capture]);
 
   // ── Bottom sentinel: detect scroll up into thesis from below ──
+  // Sentinel sits directly after the thesis section, so when the user scrolls
+  // up from ThesisGraph it becomes visible from the bottom of the viewport.
+  //
+  // rootMargin '0px 0px -50% 0px' shrinks the effective bottom edge to the
+  // middle of the viewport. This means the bottom sentinel must travel up
+  // past the viewport midline before it's considered "intersecting" — so the
+  // user has to scroll back up ~half a viewport before capture triggers.
+  // Without this, an accidental tiny upward nudge after exiting down was
+  // enough to pull the user back into thesis (the "jump back" feeling).
+  //
+  // We also read the section's top from `entry.boundingClientRect` instead
+  // of calling getBoundingClientRect() inside the callback — IO's snapshot
+  // is from the moment it detected intersection, avoiding iOS momentum
+  // overshoot that would make a late getBoundingClientRect() read stale.
   useEffect(() => {
     const sentinel = bottomSentinelRef.current;
-    if (!sentinel) return;
+    const section = sectionRef.current;
+    if (!sentinel || !section) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        // Bottom sentinel entered viewport (scrolling up) = approaching thesis from below
         if (entry.isIntersecting
           && stateRef.current === 'idle'
           && blockedSentinel.current !== 'bottom') {
-          capture('bottom');
+          // Sentinel's top = section's bottom → subtract section height for section top
+          const sectionTopAbs = entry.boundingClientRect.top
+            + window.scrollY
+            - section.offsetHeight;
+          capture('bottom', sectionTopAbs);
         }
       },
-      { threshold: 0 },
+      { threshold: 0, rootMargin: '0px 0px -50% 0px' },
     );
 
     observer.observe(sentinel);
