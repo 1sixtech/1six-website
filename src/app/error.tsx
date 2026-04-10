@@ -1,7 +1,10 @@
 'use client';
 
+// The `error` prop is part of the Next.js error boundary contract but is
+// intentionally not surfaced to the user here — we show a generic message
+// rather than leak internal error details. The destructured type is kept
+// as documentation of the Next.js contract.
 export default function Error({
-  error,
   reset,
 }: {
   error: Error & { digest?: string };

@@ -66,15 +66,23 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
   }, [onComplete]);
 
   useEffect(() => {
+    // Capture the ref arrays at effect-setup time so the cleanup closure
+    // does not read `.current` at teardown (which React flags as unsafe
+    // because a ref can be reassigned mid-lifecycle). The arrays themselves
+    // are shared by identity with `timeoutsRef.current` / `intervalsRef.current`,
+    // so `.push` calls made later by `startScramble` are still captured here.
+    const timeouts = timeoutsRef.current;
+    const intervals = intervalsRef.current;
+
     // Schedule each character's scramble start
     DELAYS.forEach((delay, i) => {
       const t = setTimeout(() => startScramble(i), delay);
-      timeoutsRef.current.push(t);
+      timeouts.push(t);
     });
 
     return () => {
-      timeoutsRef.current.forEach(clearTimeout);
-      intervalsRef.current.forEach(clearInterval);
+      timeouts.forEach(clearTimeout);
+      intervals.forEach(clearInterval);
     };
   }, [startScramble]);
 
