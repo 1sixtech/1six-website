@@ -51,15 +51,17 @@ import 'swiper/css/effect-fade';
  * When triggered: snap to thesis, show last slide, capture touch.
  */
 export function ThesisSectionMobile() {
+  const CAPTURE_SUSPEND_MS = 1200;
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
-  const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
   // State: 'idle' (normal scroll) | 'captured' (touch blocked by us)
   const stateRef = useRef<'idle' | 'captured'>('idle');
   const touchStartY = useRef(0);
+  const prevScrollYRef = useRef(0);
+  const captureSuspendedUntilRef = useRef(0);
   // Boundary cooldown: block the sentinel on the edge we just crossed until the
   // smooth exit settles. This prevents the exit animation from immediately
   // re-triggering capture at the same boundary.
@@ -68,6 +70,10 @@ export function ThesisSectionMobile() {
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
+  }, []);
+
+  const suspendCapture = useCallback((duration = CAPTURE_SUSPEND_MS) => {
+    captureSuspendedUntilRef.current = Date.now() + duration;
   }, []);
 
   // ── Touch capture: block all page-level scrolling ──
@@ -89,6 +95,7 @@ export function ThesisSectionMobile() {
 
     // Instant snap using the pre-computed position (no momentum-induced offset)
     window.scrollTo({ top: sectionTopAbs, behavior: 'auto' as ScrollBehavior });
+    prevScrollYRef.current = sectionTopAbs;
 
     // Set correct starting slide based on entry direction
     if (fromDirection === 'bottom') {
@@ -101,7 +108,7 @@ export function ThesisSectionMobile() {
 
     // Block page scroll at document level
     document.addEventListener('touchmove', preventPageScroll, { passive: false });
-  }, []);
+  }, [preventPageScroll]);
 
   const stopCapture = useCallback((blockedBoundary: 'top' | 'bottom' | null) => {
     stateRef.current = 'idle';
@@ -114,7 +121,7 @@ export function ThesisSectionMobile() {
 
     cooldownTimer.current = setTimeout(() => {
       blockedSentinel.current = null;
-    }, 700);
+    }, CAPTURE_SUSPEND_MS);
   }, [preventPageScroll]);
 
   // ── Release: restore page scroll ──
@@ -123,11 +130,13 @@ export function ThesisSectionMobile() {
   const release = useCallback((exitDirection: 'down' | 'up') => {
     if (stateRef.current !== 'captured') return;
     stopCapture(exitDirection === 'down' ? 'bottom' : 'top');
-  }, [stopCapture]);
+    suspendCapture();
+  }, [stopCapture, suspendCapture]);
 
   const releaseForProgrammaticNavigation = useCallback(() => {
     stopCapture(null);
-  }, [stopCapture]);
+    suspendCapture();
+  }, [stopCapture, suspendCapture]);
 
   const smoothScrollToExit = useCallback((exitDirection: 'down' | 'up') => {
     if (exitDirection === 'down') {
@@ -142,7 +151,7 @@ export function ThesisSectionMobile() {
     }
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [preventPageScroll]);
+  }, []);
 
   // ── Top sentinel: detect scroll down into thesis ──
   // Sentinel sits directly above the thesis section, so when it leaves the
@@ -156,7 +165,9 @@ export function ThesisSectionMobile() {
       (entries) => {
         const entry = entries[0];
         if (!entry.isIntersecting
+          && entry.boundingClientRect.bottom < 0
           && stateRef.current === 'idle'
+          && Date.now() >= captureSuspendedUntilRef.current
           && blockedSentinel.current !== 'top') {
           // Section top at IO detection time: sentinel bottom = section top
           const sectionTopAbs = entry.boundingClientRect.bottom + window.scrollY;
@@ -170,44 +181,37 @@ export function ThesisSectionMobile() {
     return () => observer.disconnect();
   }, [capture]);
 
-  // ── Bottom sentinel: detect scroll up into thesis from below ──
-  // Sentinel sits directly after the thesis section, so when the user scrolls
-  // up from ThesisGraph it becomes visible from the bottom of the viewport.
-  //
-  // rootMargin '0px 0px -50% 0px' shrinks the effective bottom edge to the
-  // middle of the viewport. This means the bottom sentinel must travel up
-  // past the viewport midline before it's considered "intersecting" — so the
-  // user has to scroll back up ~half a viewport before capture triggers.
-  // Without this, an accidental tiny upward nudge after exiting down was
-  // enough to pull the user back into thesis (the "jump back" feeling).
-  //
-  // We also read the section's top from `entry.boundingClientRect` instead
-  // of calling getBoundingClientRect() inside the callback — IO's snapshot
-  // is from the moment it detected intersection, avoiding iOS momentum
-  // overshoot that would make a late getBoundingClientRect() read stale.
+  // ── Reverse re-entry from below: detect upward scroll crossing the threshold ──
+  // Using scroll deltas here avoids the "first intersect at 0px" edge case of a
+  // zero-height sentinel, which was too eager on mobile Safari.
   useEffect(() => {
-    const sentinel = bottomSentinelRef.current;
     const section = sectionRef.current;
-    if (!sentinel || !section) return;
+    if (!section) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (entry.isIntersecting
-          && stateRef.current === 'idle'
-          && blockedSentinel.current !== 'bottom') {
-          // Sentinel's top = section's bottom → subtract section height for section top
-          const sectionTopAbs = entry.boundingClientRect.top
-            + window.scrollY
-            - section.offsetHeight;
-          capture('bottom', sectionTopAbs);
-        }
-      },
-      { threshold: 0, rootMargin: '0px 0px -50% 0px' },
-    );
+    prevScrollYRef.current = window.scrollY;
 
-    observer.observe(sentinel);
-    return () => observer.disconnect();
+    const onScroll = () => {
+      const currentScrollY = window.scrollY;
+      const prevScrollY = prevScrollYRef.current;
+      prevScrollYRef.current = currentScrollY;
+
+      if (currentScrollY >= prevScrollY) return;
+      if (stateRef.current !== 'idle') return;
+      if (Date.now() < captureSuspendedUntilRef.current) return;
+      if (blockedSentinel.current === 'bottom') return;
+
+      const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
+      // Match the forward Hero -> Thesis handoff: only capture once Thesis
+      // fully occupies the viewport again (section top reaches viewport top).
+      const reverseCaptureThreshold = sectionTopAbs;
+
+      if (prevScrollY > reverseCaptureThreshold && currentScrollY <= reverseCaptureThreshold) {
+        capture('bottom', sectionTopAbs);
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, [capture]);
 
   // ── Edge exit: swipe past first/last slide ──
@@ -339,9 +343,6 @@ export function ThesisSectionMobile() {
           ))}
         </div>
       </section>
-
-      {/* Bottom sentinel: triggers capture when scrolling up toward thesis */}
-      <div ref={bottomSentinelRef} className="h-0 w-full" aria-hidden="true" />
     </>
   );
 }

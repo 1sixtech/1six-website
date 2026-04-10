@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
-import { isThesisPinReady, scrollToHashTarget, shouldWaitForThesisPin } from '@/lib/hashScroll';
+import {
+  emitHashScrollRequest,
+  isThesisPinReady,
+  scrollToHashTarget,
+  shouldWaitForThesisPin,
+} from '@/lib/hashScroll';
 
 /**
  * On mount: strip hash from the URL to prevent the browser's native
@@ -43,6 +48,7 @@ export function ScrollToTop() {
 
         if (ready) {
           clearInterval(poll);
+          emitHashScrollRequest(hash);
           scrollToHashTarget(hash);
           // Restore hash in URL after scroll
           history.replaceState(null, '', `#${hash}`);
@@ -50,6 +56,7 @@ export function ScrollToTop() {
           clearInterval(poll);
           // Fallback: scroll to target even without pin spacer
           if (target) {
+            emitHashScrollRequest(hash);
             scrollToHashTarget(hash);
             history.replaceState(null, '', `#${hash}`);
           }

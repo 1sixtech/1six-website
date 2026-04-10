@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['10.96.231.6', '192.168.0.108'],
   transpilePackages: ['three'],
   images: {
     formats: ['image/webp', 'image/avif'],
