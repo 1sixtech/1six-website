@@ -25,6 +25,20 @@
   - cross-route 이동은 `router.push('/#hash', { scroll: false })`로 단일화
   - `ScrollToTop`은 `#thesis` pin-spacer readiness를 기준으로 polling하도록 수정
 
+### 20. 초기 로드 오발 capture와 exit/nav 중 재캡처 억제 보강
+- **증상**:
+  - 홈 첫 로드 직후 Hero가 아니라 Thesis 첫 페이지로 즉시 끌려감
+  - 메뉴 이동이나 smooth exit 도중에도 sentinel/threshold가 다시 살아나 첫 페이지나 마지막 페이지로 재캡처될 수 있었음
+- **원인**:
+  - top sentinel IO가 "viewport를 벗어남"이 아니라 "현재 intersecting이 아님"만 보고 즉시 capture
+  - programmatic hash scroll과 exit smooth scroll 중에도 capture 조건이 계속 활성 상태였음
+  - bottom re-entry는 zero-height sentinel의 0px 경계 first-intersect 특성 때문에 지나치게 예민했음
+- **수정**:
+  - top sentinel은 `entry.boundingClientRect.bottom < 0`일 때만 capture하도록 보강
+  - exit 및 programmatic nav 시 `CAPTURE_SUSPEND_MS = 1200` 동안 capture 전체를 억제
+  - reverse re-entry는 bottom sentinel IO 대신 `window.scrollY` crossing 기반 threshold 검출로 변경
+  - `ScrollToTop`도 초기 hash 랜딩 전에 `HASH_SCROLL_REQUEST_EVENT`를 발행해 동일 억제 경로를 사용
+
 ## 현재 코드 상태 (`8b9312e`)
 
 ThesisSection은 **데스크톱/모바일 완전 분리** 아키텍처:
