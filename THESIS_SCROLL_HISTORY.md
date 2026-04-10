@@ -1,5 +1,30 @@
 # ThesisSection Scroll — 문제 히스토리 및 현재 상태
 
+## 업데이트 (`2026-04-10`)
+
+### 18. 마지막 슬라이드 하향 탈출 시 bottom sentinel 재캡처 차단
+- **증상**: thesis-07에서 아래로 강하게 스와이프해도 `ThesisGraph`로 빠지지 않고 Thesis에 붙잡히는 느낌.
+- **원인**:
+  - `release('down')`가 bottom sentinel이 아니라 top sentinel만 막고 있었음
+  - 동시에 `scrollIntoView({ behavior: 'smooth' })`가 `#thesis-graph`를 viewport top에 정렬하면서 thesis 바로 아래의 bottom sentinel을 다시 intersect 상태로 만듦
+  - 결과적으로 smooth exit 중 bottom sentinel이 다시 `capture('bottom')`을 실행
+- **수정**:
+  - 하향 탈출 시 bottom sentinel 자체를 cooldown으로 잠금
+  - `scrollIntoView()` 대신 `window.scrollTo(graphTop + 1, 'smooth')`로 종료 위치를 `ThesisGraph` 내부 1px까지 넘김
+  - sentinel이 viewport 바깥으로 빠진 뒤에만 역방향 재진입이 가능하도록 조정
+
+### 19. 모바일 햄버거 메뉴 Product 이동 시 Thesis capture 해제 + hash 이동 경로 통합
+- **증상**: 모바일 메뉴에서 `PRODUCTS`를 눌러도 Thesis에 남아 있거나, home hash 이동이 일관되지 않음.
+- **원인**:
+  - `Header`가 same-page hash 이동 시 Thesis 모바일 capture 상태를 해제하지 않음
+  - `ScrollToTop`이 여전히 존재하지 않는 `#about` pin-spacer를 기다리고 있어 direct hash/home re-entry가 5초 fallback로 밀릴 수 있었음
+  - same-page / cross-route hash 이동 로직이 서로 다른 코드 경로로 분기되어 동작이 갈라져 있었음
+- **수정**:
+  - `HASH_SCROLL_REQUEST_EVENT`를 추가해 hash 이동 직전에 `ThesisSectionMobile`이 touch capture를 해제하도록 변경
+  - hash scroll 계산을 `src/lib/hashScroll.ts`로 공통화
+  - cross-route 이동은 `router.push('/#hash', { scroll: false })`로 단일화
+  - `ScrollToTop`은 `#thesis` pin-spacer readiness를 기준으로 polling하도록 수정
+
 ## 현재 코드 상태 (`8b9312e`)
 
 ThesisSection은 **데스크톱/모바일 완전 분리** 아키텍처:
