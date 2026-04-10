@@ -52,7 +52,16 @@ import 'swiper/css/effect-fade';
  */
 export function ThesisSectionMobile() {
   const CAPTURE_SUSPEND_MS = 1200;
-  const HASH_CAPTURE_ALIGNMENT_TOLERANCE = 1;
+  // Pixel gap allowed between window.scrollY and sectionTopAbs when a hash
+  // nav finishes before pending-hash capture will fire. Must absorb
+  // subpixel rounding from getBoundingClientRect()/scrollY (1-2 device px
+  // at 2x/3x DPR) plus small layout shifts from ScrollTrigger.refresh()
+  // and iOS dynamic address bar. 1px was too tight (hash captures silent-
+  // failed on mobile Safari when subpixel rounding pushed the value by
+  // a single pixel). 4px is the smallest value that reliably survives
+  // observed rounding without accidentally capturing when the user is
+  // near-but-not-at thesis top.
+  const HASH_CAPTURE_ALIGNMENT_TOLERANCE = 4;
   const [activeIndex, setActiveIndex] = useState(0);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
