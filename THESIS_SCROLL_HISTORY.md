@@ -1,36 +1,86 @@
 # ThesisSection Scroll — 문제 히스토리 및 현재 상태
 
-## 현재 코드 상태 (`22559bb`)
+## 현재 코드 상태 (`8b9312e`)
 
 ThesisSection은 **데스크톱/모바일 완전 분리** 아키텍처:
 
 - **데스크톱 (768px+):** 기존 GSAP ScrollTrigger `pin: true` + Observer로 discrete page-by-page crossfade 전환 (7페이지). 코드 무변경, 100% 정상 작동.
-- **모바일 (767px-):** `ThesisSectionMobile` 컴포넌트 — Swiper.js vertical + EffectFade + body scroll lock. GSAP pin/Observer/normalizeScroll 일체 미사용.
+- **모바일 (767px-):** `ThesisSectionMobile` 컴포넌트 — Swiper.js vertical + EffectFade + sentinel 기반 touchmove capture. GSAP pin/Observer/normalizeScroll 일체 미사용.
 
-### 모바일 아키텍처 상세
+### 모바일 현재 아키텍처 상세 (`8b9312e`)
 
 ```
-page scroll → Hero → 스크롤 다운 → Thesis 섹션 60% 보임
-                                      ↓
-                            IntersectionObserver (threshold: 0.6)
-                                      ↓
-                       body overflow:hidden + position:fixed
-                       (페이지 스크롤 완전 잠금)
-                       savedScrollY로 스크롤 위치 보존
-                                      ↓
-                       Swiper vertical + EffectFade
-                       아래 스와이프 → 다음 페이지 (crossfade)
-                       위 스와이프 → 이전 페이지 (crossfade)
-                                      ↓
-                       마지막 슬라이드 + 아래 50px 이상 → unlock + scrollIntoView(#thesis-graph)
-                       첫 슬라이드 + 위 50px 이상 → unlock + scrollTo(0)
+Hero (normal page scroll)
+  │ scroll down
+  ▼
+┌ top sentinel (h-0, directly above thesis) ─────────┐
+│  IO threshold:0, no rootMargin                      │
+│  sentinel leaves viewport → capture('top', coords)  │
+│  entry.boundingClientRect.bottom = section top      │
+└────────────────────────────────────────────────────┘
+  │
+  ▼
+┌ capture('top' | 'bottom', sectionTopAbs) ──────────┐
+│  1) stateRef = 'captured'                            │
+│  2) window.scrollTo(sectionTopAbs, 'auto')  ← instant │
+│  3) swiper.slideTo(dir==='bottom'?TOTAL-1:0, 0)      │
+│  4) document.addEventListener('touchmove',           │
+│        preventPageScroll, {passive:false})           │
+└────────────────────────────────────────────────────┘
+  │
+  ▼
+┌ Thesis (100dvh, Swiper vertical + fade) ───────────┐
+│  stateRef === 'captured' →                           │
+│    document touchmove.preventDefault() blocks        │
+│    all page-level scroll (fullpage.js pattern).      │
+│  Swiper handles internal vertical swipes for         │
+│    page-by-page crossfade (7 slides).                │
+│  Only ACTIVE slide mounts WebGL canvas               │
+│    (others use opacity:0 placeholder).               │
+│                                                      │
+│  Edge exit (touchend on section):                    │
+│    Slide 0  + swipe UP   > 50px → release('up')     │
+│    Slide N-1 + swipe DOWN > 50px → release('down')  │
+└────────────────────────────────────────────────────┘
+  │
+  ▼
+┌ release(exitDirection) ────────────────────────────┐
+│  1) stateRef = 'idle'                                │
+│  2) document.removeEventListener('touchmove', ...)   │
+│  3) blockedSentinel = exitDir==='down' ? 'top':'bot' │
+│  4) setTimeout(() => blockedSentinel=null, 700ms)    │
+└────────────────────────────────────────────────────┘
+  │
+  ▼
+┌ smooth scroll to Hero (exit up) or                  │
+│ smooth scroll to #thesis-graph (exit down)          │
+└────────────────────────────────────────────────────┘
+  │
+  ▼
+ThesisGraph (normal page scroll)
+  │ scroll up (reverse re-entry)
+  ▼
+┌ bottom sentinel (h-0, directly below thesis) ──────┐
+│  IO threshold:0, rootMargin: '0px 0px -50% 0px'     │
+│  → sentinel must scroll up past viewport MIDLINE    │
+│    before fire (not just bottom edge)               │
+│  → ThesisGraph must be ~half-visible before         │
+│    re-capture happens (delays premature re-entry)   │
+│  sectionTopAbs = entry.top + scrollY - offsetHeight │
+│    (IO snapshot, avoids iOS momentum overshoot)     │
+│  → capture('bottom', sectionTopAbs)                  │
+└────────────────────────────────────────────────────┘
 ```
 
-- **디바이스 감지:** `ThesisSection`이 parent로, `isMobile` state가 `null`(SSR) → `true/false`(client) 순서로 결정. null일 때는 빈 placeholder 렌더링하여 GSAP pin-spacer DOM 조작 방지.
+### 핵심 설계 포인트
+
+- **Device split:** `ThesisSection` parent가 `isMobile` state(null→bool)로 라우팅. `isMobile === null` 동안 empty placeholder 렌더링하여 GSAP pin-spacer DOM 조작 방지.
 - **데이터 공유:** `thesisData.tsx`에서 `THESIS_STATES`, `InlineAscii`, `MobileAscii`, `subTextClass` export. 두 컴포넌트에서 공유.
-- **WebGL 관리:** active slide +-1만 canvas 마운트 (React 조건부 렌더링). Swiper fade의 opacity:0 슬라이드에서 IntersectionObserver가 "visible"로 판단하는 문제를 우회.
+- **Scroll capture vs body lock:** `position:fixed` + `overflow:hidden`이 아닌 `document.addEventListener('touchmove', preventDefault, {passive:false})` 사용. iOS momentum race 없고 DOM 조작 없음.
 - **normalizeScroll:** 완전 제거. 대신 intro-lock 해제 시 `ScrollTrigger.refresh(true)` 명시적 호출 (ScrollRevealWrapper 동작 보장).
-- **pagination dots:** 하단 중앙, 수평 배치 (커스텀 React 버튼).
+- **WebGL:** active slide만 mount (모바일 GPU 절약, +-1보다 공격적).
+- **Direction-aware cooldown:** exit 방향 반대의 sentinel만 700ms 잠금. 즉시 reverse re-entry 허용.
+- **IO entry coords:** capture 시 `getBoundingClientRect()` 대신 `entry.boundingClientRect` 사용. iOS momentum overshoot으로 인한 좌표 오차 제거.
 
 ---
 
@@ -39,186 +89,266 @@ page scroll → Hero → 스크롤 다운 → Thesis 섹션 60% 보임
 ### Phase 1: 데스크톱 GSAP 문제 (해결됨, 모바일 분리 전)
 
 #### 1. 데스크톱 wheel freeze (치명적)
-- **증상**: 데스크톱에서 thesis 진입 후 wheel 스크롤로 페이지 전환이 전혀 안 됨. 키보드(ArrowDown)는 작동.
-- **원인**: Two-Observer 패턴(`ffff820`)에서 viewport-level `preventScroll` Observer가 wheel 이벤트를 먼저 소비하여, section-level `intentObserver`에 이벤트가 도달하지 못함.
-- **해결**: `d3a0e7c`에서 Two-Observer를 Single Observer로 통합하여 이벤트 채널 충돌 제거.
-- **현재 상태**: ✅ 해결됨
+- **증상**: 데스크톱에서 thesis 진입 후 wheel 스크롤로 페이지 전환이 전혀 안 됨. 키보드는 작동.
+- **원인**: Two-Observer 패턴(`ffff820`)에서 viewport-level `preventScroll` Observer가 wheel 이벤트를 먼저 소비.
+- **해결**: `d3a0e7c`에서 Single Observer로 통합.
+- **상태**: ✅ 해결됨
 
-#### 2. 여러 페이지 동시 스킵 (데스크톱 + 모바일)
-- **증상**: 강한 trackpad fling이나 빠른 swipe 시 thesis 페이지가 2-3개씩 건너뜀.
-- **원인**: `onComplete`에서 Observer disable/re-enable 시 150ms cooldown이 trackpad momentum(~500ms-1.5s)보다 짧아, 잔여 momentum 이벤트가 다음 전환을 즉시 트리거.
-- **해결**: `1dd6f11`에서 onComplete에서 Observer를 disable하지 않도록 변경. `COOLDOWN_MS = 400` time-based debounce로 momentum 흡수.
-- **현재 상태**: ✅ 해결됨
+#### 2. 여러 페이지 동시 스킵
+- **증상**: 강한 trackpad fling이나 빠른 swipe 시 2-3 페이지 건너뜀.
+- **원인**: `onComplete`에서 Observer disable/re-enable 시 150ms cooldown이 trackpad momentum(~500ms-1.5s)보다 짧음.
+- **해결**: `1dd6f11`에서 disable 제거 + `COOLDOWN_MS = 400` time-based debounce.
+- **상태**: ✅ 해결됨
 
 #### 3. Hero ↔ Thesis 중간에서 스크롤 멈춤
-- **증상**: Hero에서 thesis로 스크롤하다 중간에 멈추면, native scroll이 차단되어 더 이상 이동 불가.
-- **원인**: always-on Observer(`18e889e`)가 `preventDefault: true`로 pin 범위 밖에서도 wheel/touch 이벤트를 차단.
-- **해결**: `1dd6f11`에서 Observer를 onEnter/onLeave lifecycle으로 전환 (pin 시에만 enable). 수동 touch/wheel 리스너가 `sectionActiveRef` 조건부로 대체.
-- **현재 상태**: ✅ 해결됨
+- **증상**: 중간에서 멈추면 native scroll 차단되어 이동 불가.
+- **원인**: always-on Observer(`18e889e`)가 `preventDefault: true`로 pin 범위 밖에서도 차단.
+- **해결**: `1dd6f11`에서 lifecycle 전환 + sectionActiveRef 조건부.
+- **상태**: ✅ 해결됨
 
 #### 4. 데스크톱 마지막 페이지에서 탈출 불가
-- **증상**: thesis-07에서 아래로 스크롤해도 ThesisGraph로 넘어가지 않음.
-- **원인**: (a) `+1px` offset이 pin-spacer reflow에 흡수되어 `onLeave` 미발동, (b) boundary exit에서 `sectionActiveRef = false` 설정 후 safety timeout이 이를 복구하지 않아 영구 데드락.
-- **해결**: `1dd6f11`에서 offset을 `+50px`로 증가 + safety timeout에서 `sectionActiveRef` + Observer 복구 로직 추가.
-- **현재 상태**: ✅ 해결됨
+- **증상**: thesis-07에서 아래로 스크롤해도 ThesisGraph로 안 넘어감.
+- **원인**: `+1px` offset이 pin-spacer reflow에 흡수 + safety timeout 미복구.
+- **해결**: `1dd6f11`에서 offset `+50px` + safety timeout 복구 로직.
+- **상태**: ✅ 해결됨
 
 #### 5. 경계 탈출 시 bounce-back
-- **증상**: thesis 마지막에서 탈출 후 macOS/iOS elastic bounce로 다시 thesis로 끌려들어감.
 - **원인**: `onEnterBack`에 bounce-back 보호 없음.
-- **해결**: `18e889e`에서 `exitingRef` 도입 (이벤트 기반 — `onLeave` fire 시 해제, safety timeout에서도 해제하여 데드락 방지).
-- **현재 상태**: ✅ 해결됨
+- **해결**: `18e889e`에서 `exitingRef` 도입.
+- **상태**: ✅ 해결됨
 
-#### 6. 경계 탈출 시 "한 번 먹히는" 느낌
-- **증상**: 마지막/첫 페이지에서 탈출 시 swipe가 한 번 소비되는 듯한 딜레이.
-- **원인**: `requestAnimationFrame`으로 `scrollTo`를 1프레임 defer하여 16ms 공백 발생.
-- **해결**: `d15407a`에서 rAF 제거, `scrollTo` 즉시 실행.
-- **현재 상태**: ✅ 해결됨
+#### 6. 경계 탈출 시 "한 번 먹히는" 딜레이
+- **원인**: `requestAnimationFrame`으로 `scrollTo` 1프레임 defer.
+- **해결**: `d15407a`에서 rAF 제거.
+- **상태**: ✅ 해결됨
 
 #### 7. 하단 레이어 bleed-through
-- **증상**: thesis 보는 중 하단에 ThesisGraph 디자인이 비쳐 보임.
-- **원인**: section에 `overflow: hidden`과 `z-index` 미설정, pin-spacer에 배경색 없음.
-- **해결**: `d3a0e7c`에서 section에 `overflow-hidden z-10`, globals.css에 `.pin-spacer { background-color }` 추가.
-- **현재 상태**: ✅ 해결됨
+- **원인**: section에 `overflow: hidden`/`z-index` 미설정.
+- **해결**: `d3a0e7c`에서 `overflow-hidden z-10` + `.pin-spacer` 배경색.
+- **상태**: ✅ 해결됨
 
-#### 8. iOS 첫 swipe 무시 (터치해야 작동 시작)
-- **증상**: iPhone에서 Hero→Thesis 스크롤 후, 첫 swipe가 무시되고 한 번 터치해야 그 다음부터 작동.
-- **원인**: iOS UIScrollView가 compositor thread에서 momentum scroll을 실행. 첫 touch는 iOS가 momentum 정지용으로 소비 (WebKit #174300).
-- **해결**: `5624ab5`에서 module-level `ScrollTrigger.normalizeScroll(true)` 활성화.
-- **현재 상태**: ✅ 해결됨 (데스크톱). 모바일은 Swiper 전환으로 우회.
-
-### Phase 2: 모바일 분리 작업 (현재 진행중)
-
-#### 9. GSAP pin-spacer DOM + React hydration 충돌
-- **증상**: 모바일에서 웹사이트 진입 시 Thesis가 바로 표시되고 Hero가 보이지 않음. "something went wrong" 에러. 에셋 미로딩, 스와이프 미동작.
-- **원인**: `isMobile`이 `false`(SSR 기본값)로 시작 → GSAP ScrollTrigger가 pin-spacer DOM 래퍼 생성 → useEffect에서 `isMobile=true`로 변경 → React가 GSAP 조작 DOM을 ThesisSectionMobile로 교체 시도 → `removeChild` DOMException.
-- **해결**: `6a1a73f`에서 ThesisSection을 parent(디바이스 감지) + ThesisSectionDesktop(GSAP hooks)로 분리. `isMobile`을 `null`로 시작하여 SSR 시 빈 placeholder, 디바이스 감지 후 올바른 경로만 마운트.
-- **현재 상태**: ✅ 해결됨
-
-#### 10. 모바일 수평 스와이프 UX 문제
-- **증상**: 수평 스와이프는 thesis의 "아래로 읽어 내려가는" 스토리텔링에 맞지 않음. 사용자가 아래로 스크롤하면 자연스럽게 페이지가 넘어가야 함.
-- **해결**: `f57f6e8`에서 Swiper direction을 `horizontal` → `vertical`로 변경.
-- **현재 상태**: ✅ 해결됨
-
-#### 11. 모바일에서 Thesis 섹션이 스크롤에 관통됨
-- **증상**: Hero에서 스크롤 다운하면 Thesis 첫 페이지만 스쳐 지나가고 바로 아래로 넘어감. 스크롤이 Thesis에서 멈추지 않음.
-- **원인**: Swiper vertical이 100dvh 섹션으로 DOM에 있지만, 페이지 레벨 momentum 스크롤이 Swiper 컨테이너를 관통. GSAP pin이 해결하던 "일정 포인트에서 스크롤 멈춤" 기능이 없었음.
-- **해결**: `22559bb`에서 IntersectionObserver(threshold: 0.6) + body scroll lock 패턴 도입. Thesis가 뷰포트에 60% 이상 보이면 `document.body.style.overflow = 'hidden'` + `position: fixed`로 페이지 스크롤 잠금. Swiper가 수직 터치 제스처 처리.
-- **현재 상태**: ⏳ 실기기 테스트 필요
+#### 8. iOS 첫 swipe 무시
+- **원인**: iOS UIScrollView compositor momentum. 첫 touch는 momentum 정지용.
+- **해결**: `5624ab5`에서 module-level `normalizeScroll(true)` 활성화.
+- **상태**: ✅ 해결됨 (데스크톱). 모바일은 Swiper로 우회.
 
 ---
 
-## 현재 남아있는 문제 / 검증 필요
+### Phase 2: 모바일 분리 작업
 
-### A. body scroll lock이 iOS Safari에서 정상 동작하는지
-- `overflow: hidden` + `position: fixed` 패턴이 iOS 16.3+에서 정상 동작하는 것은 커뮤니티에서 확인됨
-- 하지만 실기기 테스트 필요: Hero → Thesis 진입 시 스크롤이 실제로 멈추는지, 스크롤 위치 보존이 정상인지
-- **상태**: ❓ 미확인
+#### 9. 모바일 전용 분리 시작
+- **커밋**: `018dd79` - "feat: replace mobile GSAP scroll-trap with Swiper horizontal fade"
+- **시도**: Swiper horizontal + EffectFade로 모바일 전용 컴포넌트 생성.
+- **결과**: 빌드 통과. 하지만 수평 스와이프가 thesis의 "아래로 읽는" 스토리텔링에 부자연스러움. SSR hydration 시 GSAP pin-spacer와 React vDOM 충돌로 "something went wrong" 에러 발생.
+- **상태**: ❌ hydration 충돌 버그
 
-### B. Swiper vertical + body lock 상태에서 슬라이드 전환
-- body가 locked 상태에서 Swiper의 touch event handling이 정상 동작하는지
-- crossfade 애니메이션이 부드러운지 (normalizeScroll 없이 jank 없어야 함)
-- **상태**: ❓ 미확인
+#### 10. GSAP pin-spacer + React hydration 충돌 수정
+- **커밋**: `6a1a73f` - "fix: prevent GSAP pin-spacer DOM conflict on mobile hydration"
+- **증상**: 모바일 첫 진입 시 Hero 안 보이고 Thesis 바로 표시. "something went wrong" 에러. 에셋 미로딩.
+- **원인**: `isMobile`이 `false`(SSR 기본값)로 시작 → GSAP pin-spacer DOM 생성 → useEffect에서 `isMobile=true`로 변경 → React가 GSAP 조작 DOM 교체 시도 → `removeChild` DOMException.
+- **해결**: ThesisSection을 parent(디바이스 감지) + ThesisSectionDesktop(GSAP hooks)로 분리. `isMobile`을 `null`로 시작하여 SSR 시 빈 placeholder, 감지 후 올바른 경로만 마운트.
+- **상태**: ✅ 해결됨
 
-### C. Edge exit (마지막/첫 슬라이드 탈출)
-- 마지막 슬라이드에서 아래로 50px+ 스와이프 시 unlock + ThesisGraph로 smooth scroll
-- 첫 슬라이드에서 위로 50px+ 스와이프 시 unlock + Hero(top)로 smooth scroll
-- Swiper의 `releaseOnEdges`가 iOS에서 깨져있어 직접 구현했으므로, 실기기 동작 확인 필요
-- **상태**: ❓ 미확인
+#### 11. 수평 스와이프 UX 문제
+- **커밋**: `f57f6e8` - "fix: switch mobile thesis to vertical swipe with manual edge exit"
+- **증상**: 수평 스와이프가 thesis의 스토리텔링에 부자연스러움.
+- **해결**: Swiper direction을 `horizontal` → `vertical`로 변경. Swiper releaseOnEdges가 iOS에서 깨져있어(#6691, #7923), 직접 touchStart/touchEnd delta로 edge exit 감지.
+- **상태**: ✅ 해결됨 (UX 개선). 하지만 다음 문제 발생.
 
-### D. re-entry (다시 Thesis로 돌아올 때)
-- ThesisGraph에서 위로 스크롤해서 다시 Thesis에 진입할 때 IntersectionObserver가 다시 lock을 걸는지
-- 이 때 activeIndex가 올바르게 유지되는지 (마지막 슬라이드 상태에서 진입?)
-- **상태**: ❓ 미확인
+#### 12. 페이지 스크롤이 Thesis를 관통함 (첫 시도)
+- **커밋**: `22559bb` - "fix: add body scroll lock so thesis stops page scroll on mobile"
+- **증상**: Hero에서 스크롤 다운하면 Thesis 첫 페이지만 스쳐 지나가고 바로 Products까지 넘어감. Swiper vertical이 100dvh 섹션으로 DOM에 있지만 페이지 레벨 momentum이 관통.
+- **해결 시도**: IntersectionObserver(threshold: 0.6) + body scroll lock. `document.body.style.overflow = 'hidden'` + `position: fixed`로 페이지 스크롤 잠금.
+- **결과**: 부분 해결되었지만 새 문제들 발생:
+  - 60% threshold가 부정확 (어색한 위치에서 lock)
+  - 탈출 후 40% 남은 thesis로 re-lock 발생
+  - smooth scroll이 "점프" UX
+  - body lock과 smooth scroll 간 race condition
+- **상태**: ❌ 부분 해결, 새 문제 발생
 
-### E. 데스크톱 regression
-- ThesisSectionDesktop이 기존과 동일하게 동작하는지 (pin, crossfade, keyboard nav, dot click)
-- normalizeScroll 제거 후 데스크톱에서 부작용 없는지 (데스크톱은 `ScrollTrigger.isTouch !== 1`이므로 영향 없어야 함)
+#### 13. Sentinel 기반 lock으로 전환 (두 번째 시도)
+- **커밋**: `9693a5a` - "fix: sentinel-based scroll lock with Safari fallback and exit cooldown"
+- **변경**:
+  - IO threshold:0.6 → sentinel 기반 (thesis top = viewport top일 때 lock)
+  - smooth → `behavior: 'auto'` (instant)
+  - body overflow:hidden + touchmove preventDefault Safari fallback 추가
+  - exit cooldown 800ms로 re-lock 방지
+  - WebGL active +-1 → active only
+- **결과**: re-lock 문제 해결. 하지만 여전히 body lock과 smooth scroll 간 타이밍 문제.
+- **상태**: ❌ 부분 해결
+
+#### 14. Smooth transitions 시도
+- **커밋**: `613d9cb` - "fix: smooth transitions for thesis entry and exit on mobile"
+- **시도**: 진입/탈출 모두 `behavior: 'smooth'` + rAF 폴링으로 scroll 완료 대기 후 body lock 적용.
+- **문제**: smooth scroll 중 iOS compositor momentum이 JS와 동기화 안 됨. `window.scrollY` 갱신 race condition. rAF 폴링이 completion을 놓침.
+- **상태**: ❌ 실패
+
+#### 15. 전체 아키텍처 교체 — touchmove preventDefault capture
+- **커밋**: `aa3f932` - "fix: replace body lock with touchmove preventDefault capture"
+- **근본 재설계**: body lock 폐기. fullpage.js 패턴으로 전환.
+- **핵심 변경**:
+  - `body overflow:hidden + position:fixed` → `document.addEventListener('touchmove', preventPageScroll, {passive:false})`
+  - 이벤트 레벨에서 동기적 스크롤 차단 (compositor 결정 전)
+  - `top sentinel` + `bottom sentinel` 두 개로 양방향 capture
+  - Swiper는 자기 컨테이너 내부 터치만 처리
+  - 진입 시 `scrollTo(sectionTop, 'auto')` + 즉시 touchmove capture
+  - 탈출 시 touchmove capture 해제 + smooth scroll to adjacent section
+- **결과**: 첫 순방향(Hero → Thesis) 플로우가 완벽하게 작동. 사용자 피드백: "야야야야야 좋다!!!!"
+- **상태**: ✅ 대부분 해결. 역방향 플로우에 문제 남음.
+
+#### 16. 역방향 재진입 시 cooldown 문제
+- **커밋**: `a179588` - "fix: direction-aware cooldown for reliable reverse scroll re-entry"
+- **증상**: 아래로 탈출(Thesis → Graph) 후 1000ms 동안 모든 sentinel 차단. 사용자가 빠르게 방향 바꿔 위로 스크롤해도 bottom sentinel이 blocked 상태라서 thesis 재진입 불가.
+- **해결**: cooldown을 방향별로 분리.
+  - `release('down')` → top sentinel만 blocked. bottom sentinel은 즉시 open.
+  - `release('up')` → bottom sentinel만 blocked. top sentinel은 즉시 open.
+  - state machine 단순화: `'idle' | 'captured'` (exiting 제거)
+  - cooldown 1000ms → 500ms
+- **상태**: ✅ 재진입 가능. 하지만 역방향 점프 느낌 발생.
+
+#### 17. 역방향 재진입 시 "점프" 느낌
+- **커밋**: `8b9312e` - "fix: delay reverse re-entry + use IO entry coords to smooth thesis jump"
+- **증상**: ThesisGraph에서 위로 스크롤 시 Thesis로 "순간이동"하는 느낌.
+- **첫 원인 추측 (실패)**: `behavior: 'auto'`가 유일한 원인이라고 단정 → 사용자 지적으로 수정. 레이아웃상 sectionTopAbs 이동 거리가 거의 0이어야 함 (thesis/graph 둘 다 h-dvh).
+- **재분석 (사용자 지적 반영)**: 단일 원인이 아니라 여러 요인의 조합.
+  - **주요 원인 1**: bottom sentinel이 thesis section 바로 아래(0px gap)에 있어서, ThesisGraph로 나가자마자 작은 위 스와이프에도 즉시 fire. "방금 나갔는데 다시 끌려들어간다"는 감각.
+  - **주요 원인 2**: `capture` 내부에서 `section.getBoundingClientRect()` 호출 → iOS momentum overshoot으로 실제 위치와 차이. IO 콜백 실행 시점에는 이미 추가 이동된 상태.
+  - **보조 원인**: 500ms cooldown이 smooth scroll 애니메이션과 경계.
+- **해결**:
+  1. **bottom sentinel에 rootMargin** `'0px 0px -50% 0px'` — ThesisGraph가 절반 이상 보일 때까지 fire 지연. 작은 위 스와이프로는 재진입 안 됨.
+  2. **IO entry.boundingClientRect 사용** — `getBoundingClientRect()` 호출 대신 IO가 감지한 순간의 좌표 사용. momentum overshoot 오차 제거.
+  3. **capture() 시그니처 변경** — `capture(direction, sectionTopAbs)` — 각 sentinel이 자기 좌표를 계산해 전달.
+  4. **cooldown 500 → 700ms** — smooth scroll 애니메이션 settle 여유.
+- **상태**: ⏳ 실기기 테스트 필요
+
+---
+
+## 현재 남아있는 / 검증 필요한 항목
+
+### A. 역방향 점프 완화 효과 확인 (`8b9312e`)
+- bottom sentinel rootMargin이 "너무 이른 재진입"을 실제로 막는지
+- IO entry 좌표가 `getBoundingClientRect()` 오차를 실제로 제거하는지
 - **상태**: ❓ 실기기 테스트 필요
+
+### B. Swiper slideTo(TOTAL-1, 0) 즉시 전환
+- capture 시 slideTo가 애니메이션 없이 즉시 마지막 슬라이드로 전환됨
+- 시각적 "순간이동" 요소로 남아있을 가능성 (조사만 하고 수정 안 함)
+- **상태**: ❓ 필요 시 fade 애니메이션 추가 검토
+
+### C. Edge exit swipe threshold (50px)
+- 현재 `EDGE_THRESHOLD = 50`
+- 실기기에서 편한지, 너무 예민/둔감하지 않은지 검증 필요
+- **상태**: ❓ 실기기 튜닝 필요
+
+### D. 데스크톱 regression
+- ThesisSectionDesktop이 기존과 동일하게 동작하는지
+- normalizeScroll 제거 후 데스크톱 영향 없는지 (데스크톱은 `ScrollTrigger.isTouch !== 1`이므로 영향 없어야 함)
+- **상태**: ❓ 확인 필요
 
 ---
 
 ## 핵심 아키텍처 결정 로그
 
 ### 왜 모바일을 분리했는가
+30개 이상 웹 리소스 + Codex 세컨드 오피니언 + 2라운드 eng review 결론:
+1. iOS Safari compositor-thread scroll과 JS scroll interception은 근본적으로 충돌
+2. Pinned scroll-trap은 모바일에서 잘못된 interaction primitive
+3. NNGroup: scroll hijacking은 모바일 UX 저해. 하지만 thesis는 스토리텔링 핵심.
+4. 해결: 데스크톱 코드 무변경 + 모바일은 scroll capture + Swiper vertical fade로 동일 경험을 다른 메커니즘으로 구현.
 
-30개 이상의 웹 리소스 조사 + Codex 세컨드 오피니언 + 2라운드 eng review를 거친 결론:
+### 왜 body lock이 아닌 touchmove capture인가
+`22559bb` ~ `613d9cb`에서 body `overflow:hidden + position:fixed` 시도했으나:
+- iOS compositor momentum이 비동기 lock 적용 전에 관통
+- smooth scroll 중 `window.scrollY` JS-compositor 비동기화
+- `position:fixed`로 레이아웃 shift
+→ `aa3f932`에서 fullpage.js 패턴(`document.addEventListener('touchmove', preventDefault, {passive:false})`)으로 전환. 이벤트 레벨 동기 차단. DOM 조작 없음.
 
-1. **iOS Safari의 compositor-thread scroll은 JS scroll interception과 근본적으로 충돌.** normalizeScroll로 해결하면 모든 스크롤이 JS thread를 경유하여 WebGL과 결합 시 jank 발생.
-2. **Pinned scroll-trap은 모바일에서 잘못된 interaction primitive.** GSAP pin의 `position:fixed` + pin-spacer DOM 래퍼는 React hydration과 충돌하고, iOS의 hit-testing 비동기화 문제를 야기.
-3. **NNGroup 연구:** scroll hijacking은 모바일에서 특히 UX 저해. 하지만 thesis는 핵심 스토리텔링이므로 "한 페이지씩 넘기는 경험" 자체는 유지해야 함.
-4. **해결:** 데스크톱 코드 무변경 + 모바일은 body scroll lock + Swiper vertical fade로 동일한 "스크롤하면 멈추고 페이지 전환" 경험을 구현하되, GSAP pin 없이.
-
-### 시도했던 접근들과 결과
-
-| 커밋 | 접근 | 결과 |
-|------|------|------|
-| `018dd79` | Swiper horizontal + EffectFade | ✅ 빌드 통과, ❌ 수평 스와이프가 스토리텔링에 부자연스러움 |
-| `6a1a73f` | ThesisSection parent/desktop 분리 | ✅ GSAP hydration 충돌 해결 |
-| `f57f6e8` | Swiper vertical + manual edge exit | ✅ 수직 UX, ❌ 페이지 스크롤이 Thesis를 관통 |
-| `22559bb` | IO + body scroll lock + Swiper vertical | ⏳ 실기기 테스트 필요 |
+### 왜 sentinel 기반인가
+IntersectionObserver `threshold: 0.6` 등 비율 기반은 "정확히 thesis top에서 lock"을 보장 못 함. sentinel(0px h-0 요소)을 thesis section 바로 위/아래 배치하면 IO가 fire하는 순간 기하학적으로 정확한 위치. rootMargin으로 fire 시점 조정 가능.
 
 ### Swiper releaseOnEdges iOS 버그
-
-- Swiper #6691: vertical slider에서 마지막 슬라이드 도달 후 스크롤이 릴리즈되지 않음 (iOS)
-- Swiper #7923: 2025년 3월 보고, iOS 18.3.1, Swiper 11.2.5에서 재현
-- **해결:** releaseOnEdges에 의존하지 않고, 직접 touchStart/touchEnd delta로 edge exit 감지
+- #6691, #7923: iOS에서 작동 안 함 (2025년 3월 미해결)
+- **해결**: releaseOnEdges 사용 안 하고 직접 touchStart/touchEnd delta로 edge exit 감지
 
 ---
 
 ## 커밋 히스토리 (thesis scroll 관련, 시간순)
 
+### Phase 1: 데스크톱 GSAP (Phase 2 이전)
 | 커밋 | 설명 | 결과 |
 |------|------|------|
-| `a3714a9` | wheelSpeed:-1 + callback swap으로 iOS touch 방향 수정 | 방향 정상화 |
-| `721296c` | always-on Observer + sectionActiveRef gate + 수동 touch/wheel 리스너 | 조건부 preventDefault 작동, 하지만 momentum 관통 |
-| `447c95b` | touchstart preventDefault 추가 (compositor 시작 방지) | 부분 개선 |
-| `b68ba61` | 전역 normalizeScroll(true) 도입 | iOS momentum 해결 ✅, header 깨짐 |
+| `a3714a9` | wheelSpeed:-1 + callback swap | iOS touch 방향 수정 |
+| `721296c` | always-on Observer + sectionActiveRef | 조건부 preventDefault |
+| `447c95b` | touchstart preventDefault | 부분 개선 |
+| `b68ba61` | 전역 normalizeScroll(true) | iOS momentum 해결, header 깨짐 |
 | `20b362e` | normalizeScroll intro-lock defer | intro-lock 충돌 해결 |
-| `f6dab2c` | anticipatePin:1, cooldown 400ms, refresh(true) | overshoot/stutter 개선 |
-| `ffff820` | normalizeScroll 제거, Two-Observer 패턴 | jank 해결 ✅, desktop freeze 발생 ❌ |
-| `7152bef` | Two-Observer 개선 (onChangeY 제거, cooldown 증가) | 부분 개선 |
-| `d3a0e7c` | Single Observer + disable/enable flush | freeze 해결 ✅, mobile touch leak ❌ |
-| `18e889e` | always-on Observer + exitingRef + time debounce + thesis-touch-lock | touch leak 해결 ✅, pin 밖 차단 ❌ |
-| `1dd6f11` | enable/disable lifecycle (onComplete에서 안 함) + safety timeout 복구 | pin 밖 차단 해결 ✅, iOS momentum 미해결 |
-| `d15407a` | scoped normalizeScroll toggle + rAF 제거 | 새 버그 발생 (페이지 스킵) ❌ |
-| `27fb73d` | normalizeScroll 제거 + 수동 touchstart preventDefault | iOS momentum 미해결 |
-| `5624ab5` | module-level normalizeScroll(true) + intro-lock defer | **iOS momentum 해결 ✅, jank 부작용** |
+| `f6dab2c` | anticipatePin:1, cooldown 400ms | overshoot 개선 |
+| `ffff820` | Two-Observer 패턴 | jank 해결, freeze ❌ |
+| `7152bef` | Two-Observer 개선 | 부분 개선 |
+| `d3a0e7c` | Single Observer + disable/enable | freeze 해결, touch leak ❌ |
+| `18e889e` | always-on Observer + exitingRef | touch leak 해결, pin 밖 차단 ❌ |
+| `1dd6f11` | enable/disable lifecycle | pin 밖 차단 해결 |
+| `d15407a` | scoped normalizeScroll + rAF 제거 | 페이지 스킵 ❌ |
+| `27fb73d` | normalizeScroll 제거 + touchstart | iOS momentum 미해결 |
+| `5624ab5` | module-level normalizeScroll(true) | iOS momentum ✅, jank |
 | `b98377e` | momentum config (0.3초 cap) | 더 심각한 문제 ❌ |
-| `5e78c2f` | momentum config revert | normalizeScroll(true) 기본 — Phase 1 마지막 상태 |
-| `018dd79` | **모바일 분리: Swiper horizontal + EffectFade** | 수평 UX 부자연스러움 |
-| `6a1a73f` | **ThesisSection parent/desktop 분리** (hydration fix) | ✅ GSAP DOM 충돌 해결 |
-| `f57f6e8` | **Swiper vertical + manual edge exit** | ❌ 페이지 스크롤 관통 |
-| `22559bb` | **IO + body scroll lock + Swiper vertical** | ⏳ 실기기 테스트 필요 |
+| `5e78c2f` | momentum config revert | Phase 1 마지막 |
+
+### Phase 2: 모바일 분리
+| 커밋 | 설명 | 결과 |
+|------|------|------|
+| `018dd79` | Swiper horizontal + EffectFade | 수평 UX 부자연, hydration 버그 |
+| `6a1a73f` | ThesisSection parent/desktop 분리 | hydration 충돌 해결 |
+| `f57f6e8` | Swiper vertical + manual edge exit | 스크롤 관통 ❌ |
+| `22559bb` | body scroll lock (threshold 0.6) | 관통 부분 해결, 타이밍 버그 |
+| `9693a5a` | sentinel 기반 + Safari fallback | re-lock 해결, 여전히 lock 타이밍 |
+| `613d9cb` | smooth transitions | smooth race condition ❌ |
+| `aa3f932` | **touchmove preventDefault capture** | **순방향 완벽** ✅ |
+| `a179588` | direction-aware cooldown | reverse re-entry 가능 |
+| `8b9312e` | **rootMargin + IO entry coords** | 역방향 점프 완화 ⏳ |
 
 ---
 
-## 리서치 소스 요약 (50+개)
+## 리서치 소스 요약 (60+개)
 
 ### iOS Safari 스크롤 메커니즘
-- iOS Safari momentum scroll은 compositor thread(UIScrollView)에서 실행, JS 개입 불가
-- `touchstart` preventDefault로 momentum 시작을 차단할 수 있으나, 이미 시작된 momentum은 중단 불가
-- iOS 15+에서 touchmove preventDefault 동작이 불안정, `touch-action: none` CSS 권장
-- `overscroll-behavior: none`을 iOS Safari가 무시함 (WebKit #176454)
-- `overflow: hidden`이 body에서 iOS 16.3+부터 정상 동작 (이전 버전은 깨짐)
+- iOS momentum scroll은 compositor thread (UIScrollView)에서 실행. JS 개입 불가.
+- `touchstart` preventDefault로 momentum 시작 차단 가능. 이미 시작된 momentum은 불가.
+- iOS 15+에서 touchmove preventDefault 동작 불안정. `touch-action: none` CSS 권장.
+- `overscroll-behavior: none`을 iOS가 무시 (WebKit #176454).
+- `overflow: hidden`이 body에서 iOS 16.3+부터 정상. 이전 버전은 깨짐.
+- **중요**: `touchmove.preventDefault({passive:false})`는 이벤트 레벨 동기 차단. iOS에서 신뢰 가능.
 
 ### GSAP + iOS
-- normalizeScroll은 실험적(experimental) 기능, 매 2번째 touchmove를 건너뛰는 내부 로직
-- ScrollTrigger pin이 iOS에서 jitter/jumpy 현상 빈번 (position:fixed + compositor 충돌)
-- GSAP 포럼에서 모바일 pin 사용 시 가장 많이 추천되는 패턴: 데스크톱/모바일 완전 분리
+- normalizeScroll은 실험적. 매 2번째 touchmove skip. 모든 scroll JS thread 경유.
+- ScrollTrigger pin이 iOS에서 jitter 빈번. position:fixed + compositor 충돌.
+- 모바일 pin 사용 시 가장 많이 추천되는 패턴: 데스크톱/모바일 완전 분리.
 
 ### Swiper.js
-- `releaseOnEdges`: iOS에서 깨짐 (#6691, #7923, 2025년 3월 미해결)
+- `releaseOnEdges`: iOS 버그 (#6691, #7923, 2025년 3월 미해결)
 - `touchReleaseOnEdges`: v9 이후 동작 안 함 (#6381)
-- vertical + fade 조합은 지원되지만, 페이지 스크롤과의 공존이 어려움
+- vertical + fade 지원되지만 페이지 스크롤 공존 어려움.
+- **결론**: releaseOnEdges 의존 금지. 직접 touch delta 계산.
+
+### fullpage.js 패턴 (핵심 참고)
+- `touchstart` + `touchmove` 이벤트에서 직접 `preventDefault()` 호출
+- `overflow:hidden`/`position:fixed` 사용 안 함
+- 이벤트 레벨 동기 차단이 가장 신뢰 가능
+- `setAllowScrolling(false)` API로 scroll 상태 관리
 
 ### UX 리서치
-- NNGroup: scroll hijacking은 모바일에서 control, freedom, discoverability 모두 위협
-- 하지만 "한 페이지씩 넘기는" 패턴 자체는 스토리텔링에 효과적 (scrolljack과는 구분)
-- 모바일에서 "adaptive complexity" (데스크톱과 다른 구현)가 업계 표준
+- NNGroup: scroll hijacking은 control/freedom/discoverability 저해
+- 하지만 "한 페이지씩 넘기는" 스토리텔링 패턴은 효과적 (scrolljack과 구분)
+- "adaptive complexity" (데스크톱/모바일 다른 구현)가 업계 표준
 
 ### CSS scroll-snap
 - WebKit #243582: 빠른 flick 시 끝까지 날아감 (미해결)
-- mandatory vs proximity: proximity가 더 안전하지만 fullpage에는 부적합
+- 모바일 fullpage에 부적합
+
+### IntersectionObserver
+- `entry.boundingClientRect`: IO가 감지한 순간의 좌표 (snapshot)
+- 콜백 실행 시점과 감지 시점 사이 iOS momentum 오차 가능
+- `rootMargin`으로 fire 시점 조정 가능 ('0px 0px -50% 0px' = viewport bottom 50% 위로)
 
 ---
 
@@ -226,17 +356,65 @@ page scroll → Hero → 스크롤 다운 → Thesis 섹션 60% 보임
 
 | 파일 | 역할 |
 |------|------|
-| `src/components/home/ThesisSection.tsx` | Parent (디바이스 감지 + 라우팅) + ThesisSectionDesktop (GSAP pin) |
-| `src/components/home/ThesisSectionMobile.tsx` | 모바일 전용: Swiper vertical + body scroll lock |
+| `src/components/home/ThesisSection.tsx` | Parent 디바이스 감지 + ThesisSectionDesktop (GSAP pin) |
+| `src/components/home/ThesisSectionMobile.tsx` | 모바일: Swiper vertical + sentinel + touchmove capture |
 | `src/components/home/thesisData.tsx` | 공유 데이터: THESIS_STATES, InlineAscii, MobileAscii |
 | `src/components/home/ThesisGraph.tsx` | id="thesis-graph" (exit scrollIntoView target) |
-| `src/app/globals.css` | thesis-touch-lock, pin-spacer 배경색 |
+| `src/app/globals.css` | intro-lock, .pin-spacer 배경색 |
 | `src/hooks/useScrollReveal.ts` | normalizeScroll 관련 pollRef fallback |
+
+---
+
+## 실패했던 접근법 목록 (같은 실수 반복 방지)
+
+1. **body `overflow: hidden` + `position: fixed`** (`22559bb`, `9693a5a`, `613d9cb`)
+   - iOS compositor momentum이 lock 적용 전에 관통
+   - smooth scroll 중 `window.scrollY` JS-compositor 비동기
+   - → touchmove capture로 전환 (`aa3f932`)
+
+2. **`behavior: 'smooth'` 진입 + rAF 폴링 lock** (`613d9cb`)
+   - smooth scroll 중 iOS momentum race
+   - rAF 폴링이 completion 감지 실패
+   - → instant snap + 즉시 capture (`aa3f932`)
+
+3. **IntersectionObserver threshold 0.6** (`22559bb`)
+   - 부정확한 트리거 위치
+   - 탈출 후 40% 남은 섹션으로 re-trigger
+   - → sentinel 기반 (`9693a5a`)
+
+4. **단일 cooldown 전체 sentinel 차단** (`aa3f932`)
+   - 역방향 re-entry 불가능
+   - → direction-aware cooldown (`a179588`)
+
+5. **capture 내부에서 `getBoundingClientRect()`** (`aa3f932` ~ `a179588`)
+   - iOS momentum overshoot으로 좌표 오차
+   - → IO entry.boundingClientRect 사용 (`8b9312e`)
+
+6. **bottom sentinel이 section 바로 아래 (0px gap, no rootMargin)** (`aa3f932` ~ `a179588`)
+   - 너무 이른 reverse re-entry (작은 위 스와이프에도 fire)
+   - → rootMargin `'0px 0px -50% 0px'` (`8b9312e`)
+
+7. **Swiper `releaseOnEdges`** (시도 전 리서치로 제외)
+   - iOS Safari 버그 (#6691, #7923, 미해결)
+   - → 직접 touchStart/touchEnd delta 감지
+
+8. **GSAP `normalizeScroll(true)`** (Phase 1에서 반복 시도)
+   - iOS momentum 해결하지만 JS thread 부하로 WebGL jank
+   - → 모바일에서 완전 제거, 데스크톱만 유지
 
 ---
 
 ## 다음 단계
 
-1. **iPhone 실기기에서 `22559bb` 테스트** — body scroll lock이 iOS Safari에서 정상 동작하는지
-2. **검증 항목:** Hero → Thesis 진입 시 스크롤 멈춤, 7페이지 수직 전환, edge exit, re-entry
-3. **실패 시 대안:** Approach B (GSAP pin 유지 + no normalizeScroll + touch-action:none) 또는 Approach C (순수 JS touchmove preventDefault + CSS transition)
+1. **iPhone 실기기에서 `8b9312e` 테스트**
+   - [ ] Hero → Thesis 순방향 매끄러운지
+   - [ ] Thesis 7페이지 수직 스와이프 동작
+   - [ ] 마지막 슬라이드 → ThesisGraph smooth exit
+   - [ ] ThesisGraph → 위로 스크롤 → Thesis 재진입 "점프감" 제거 확인
+   - [ ] Thesis 첫 슬라이드 → Hero smooth exit
+   - [ ] 데스크톱 regression 없음 확인
+
+2. **실패 시 조사 대상**
+   - bottom sentinel `rootMargin`을 `-70%`로 더 지연?
+   - Swiper `slideTo(idx, 0)` 즉시 전환 대신 짧은 fade?
+   - capture 시 scroll velocity 측정해서 overshoot 예측 보정?
