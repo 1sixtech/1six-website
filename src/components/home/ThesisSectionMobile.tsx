@@ -56,10 +56,14 @@ export function ThesisSectionMobile() {
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
-  // State: 'idle' (normal scroll) | 'captured' (touch events blocked)
-  // | 'exiting' (cooldown after release)
-  const stateRef = useRef<'idle' | 'captured' | 'exiting'>('idle');
+  // State: 'idle' (normal scroll) | 'captured' (touch blocked by us)
+  const stateRef = useRef<'idle' | 'captured'>('idle');
   const touchStartY = useRef(0);
+  // Direction-aware cooldown: only blocks the sentinel we just exited toward.
+  // Exit down → block top sentinel (so scrolling toward Graph doesn't re-capture)
+  // Exit up → block bottom sentinel (so scrolling toward Hero doesn't re-capture)
+  // The OTHER sentinel stays unblocked for immediate reverse re-entry.
+  const blockedSentinel = useRef<'top' | 'bottom' | null>(null);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
@@ -101,17 +105,21 @@ export function ThesisSectionMobile() {
   }, [preventPageScroll]);
 
   // ── Release: restore page scroll ──
-  const release = useCallback(() => {
+  // exitDirection: which way we're exiting — blocks THAT sentinel during cooldown
+  // so the OTHER sentinel can still capture for immediate reverse re-entry.
+  const release = useCallback((exitDirection: 'down' | 'up') => {
     if (stateRef.current !== 'captured') return;
-    stateRef.current = 'exiting';
+    stateRef.current = 'idle';
 
     document.removeEventListener('touchmove', preventPageScroll);
 
-    // Cooldown prevents sentinel from re-triggering immediately
+    // Block only the sentinel in the exit direction to prevent re-capture
+    // during the smooth scroll. The opposite sentinel stays open.
+    blockedSentinel.current = exitDirection === 'down' ? 'top' : 'bottom';
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => {
-      stateRef.current = 'idle';
-    }, 1000);
+      blockedSentinel.current = null;
+    }, 500);
   }, [preventPageScroll]);
 
   // ── Top sentinel: detect scroll down into thesis ──
@@ -123,7 +131,9 @@ export function ThesisSectionMobile() {
       (entries) => {
         const entry = entries[0];
         // Sentinel left viewport (scrolled above) = thesis top at viewport top
-        if (!entry.isIntersecting && stateRef.current === 'idle') {
+        if (!entry.isIntersecting
+          && stateRef.current === 'idle'
+          && blockedSentinel.current !== 'top') {
           capture('top');
         }
       },
@@ -143,7 +153,9 @@ export function ThesisSectionMobile() {
       (entries) => {
         const entry = entries[0];
         // Bottom sentinel entered viewport (scrolling up) = approaching thesis from below
-        if (entry.isIntersecting && stateRef.current === 'idle') {
+        if (entry.isIntersecting
+          && stateRef.current === 'idle'
+          && blockedSentinel.current !== 'bottom') {
           capture('bottom');
         }
       },
@@ -175,8 +187,7 @@ export function ThesisSectionMobile() {
 
       // DOWN past last slide → exit to ThesisGraph
       if (swiper.activeIndex === TOTAL - 1 && deltaY > EDGE_THRESHOLD) {
-        release();
-        // Use rAF to ensure release() cleanup runs first
+        release('down');
         requestAnimationFrame(() => {
           document.getElementById('thesis-graph')?.scrollIntoView({ behavior: 'smooth' });
         });
@@ -184,7 +195,7 @@ export function ThesisSectionMobile() {
 
       // UP past first slide → exit to Hero
       if (swiper.activeIndex === 0 && deltaY < -EDGE_THRESHOLD) {
-        release();
+        release('up');
         requestAnimationFrame(() => {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         });
