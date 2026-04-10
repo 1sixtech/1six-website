@@ -421,26 +421,34 @@ export function ThesisSectionMobile() {
           className="h-full w-full"
         >
           {THESIS_STATES.map((state, index) => {
-            // NOTE on WebGL mounting: the `isActive` gate below is VISUAL only.
-            // `state.mobileContent` (including `<MobileAscii>` → `<AsciiCanvas>`)
-            // is rendered in BOTH branches — the inactive branch just wraps it in
-            // `opacity-0`. AsciiCanvas uses an IntersectionObserver with
-            // `rootMargin: '200px'`, which is geometric and ignores opacity, so
-            // all 6 canvases initialize concurrently whenever thesis is in view.
-            // We rely on AsciiCanvas's `MAX_ACTIVE_CONTEXTS = 10` global budget
-            // for headroom. True single-canvas mounting would require a real
-            // unmount of inactive subtrees, which would introduce a visible
-            // re-init delay on every slide change — avoid unless iPhone-verified.
+            // WebGL mounting via isNearby gate (Phase 2, see design spec §6.2-6.3):
+            //
+            // Previously all 6 slides mounted MobileAscii → AsciiCanvas
+            // concurrently, consuming 6 WebGL contexts on mobile even though
+            // only one was visible at a time. With the intro preload in
+            // place, all 6 videos are pre-warmed in videoPool regardless.
+            //
+            // Now only the active slide and its immediate neighbors render
+            // MobileAscii. Non-nearby slides render an aria-hidden empty
+            // placeholder that preserves the Swiper slide footprint without
+            // spinning up a canvas.
+            //
+            // Swiper crossfade is 400ms; new canvas init with a warmed
+            // video is ~50-150ms, comfortably under the fade window.
             const isActive = index === activeIndex;
+            const isNearby = Math.abs(index - activeIndex) <= 1;
             return (
               <SwiperSlide key={state.id} className="!flex items-center justify-center">
                 <div className="max-w-[1034px] px-[22px] text-center">
-                  {isActive ? (
-                    state.mobileContent
-                  ) : (
-                    <div className="opacity-0" aria-hidden="true">
+                  {isNearby ? (
+                    <div
+                      className={isActive ? '' : 'opacity-0'}
+                      aria-hidden={!isActive}
+                    >
                       {state.mobileContent}
                     </div>
+                  ) : (
+                    <div className="opacity-0" aria-hidden="true" />
                   )}
                 </div>
               </SwiperSlide>
