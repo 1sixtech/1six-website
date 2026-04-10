@@ -55,10 +55,11 @@ if (typeof window !== 'undefined') {
 // Data and helper components imported from shared thesisData.tsx
 
 export function ThesisSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
+  // ── Device detection (must resolve before any GSAP DOM manipulation) ──
+  // isMobile starts as null (unknown) to distinguish SSR/pre-hydration from
+  // actual desktop. GSAP setup is gated on isMobile !== null to prevent
+  // pin-spacer DOM insertion before we know whether to show Swiper instead.
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
   const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
@@ -69,12 +70,40 @@ export function ThesisSection() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Mobile: use Swiper-based horizontal slide experience instead of GSAP pin.
-  // This avoids iOS Safari's compositor-thread scroll conflicts entirely.
-  // Cannot early-return here (Rules of Hooks — hooks below would be skipped
-  // when isMobile changes from false to true). Conditional rendering at the
-  // bottom of the component instead.
-  const useMobileSwiper = isMobile && !prefersReducedMotion;
+  // Mobile: use Swiper instead of GSAP pin (avoids iOS compositor conflicts).
+  const useMobileSwiper = isMobile === true && !prefersReducedMotion;
+
+  // Before device detection resolves, render a placeholder matching the
+  // section's visual footprint to prevent layout shift.
+  if (isMobile === null) {
+    return (
+      <section
+        id="thesis"
+        className="relative h-dvh w-full overflow-hidden z-10"
+        style={{ backgroundColor: 'var(--color-card)' }}
+      />
+    );
+  }
+
+  // Mobile path: render Swiper-based horizontal fade slider.
+  // This must happen BEFORE any GSAP refs/hooks to prevent GSAP from
+  // creating pin-spacer DOM wrappers that conflict with React's vDOM.
+  if (useMobileSwiper) {
+    return <ThesisSectionMobile />;
+  }
+
+  // ── Desktop path below (GSAP ScrollTrigger pin + Observer) ──
+  return <ThesisSectionDesktop isMobile={isMobile} prefersReducedMotion={prefersReducedMotion} />;
+}
+
+/** Desktop GSAP implementation — isolated to prevent hook count changes */
+function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
+  isMobile: boolean;
+  prefersReducedMotion: boolean;
+}) {
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   // Refs for Observer logic (no re-renders needed)
   const indexRef = useRef(0);
@@ -269,7 +298,7 @@ export function ThesisSection() {
   }, []);
 
   useGSAP(() => {
-    if (prefersReducedMotion || useMobileSwiper) return;
+    if (prefersReducedMotion) return;
 
     const section = sectionRef.current;
     if (!section) return;
@@ -405,7 +434,7 @@ export function ThesisSection() {
 
   // Keyboard navigation (desktop only)
   useEffect(() => {
-    if (prefersReducedMotion || useMobileSwiper) return;
+    if (prefersReducedMotion) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!sectionActiveRef.current) return;
@@ -428,11 +457,6 @@ export function ThesisSection() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [prefersReducedMotion, gotoPage]);
-
-  // Mobile Swiper path — all hooks above still execute (Rules of Hooks safe)
-  if (useMobileSwiper) {
-    return <ThesisSectionMobile />;
-  }
 
   if (prefersReducedMotion) {
     return (
