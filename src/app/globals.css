@@ -94,6 +94,24 @@ html.thesis-touch-lock {
   overscroll-behavior: none !important;
 }
 
+/* Thesis mobile Swiper pagination dots */
+.thesis-mobile-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-sub-text2);
+  opacity: 0.3;
+  margin: 0 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.thesis-mobile-dot-active {
+  opacity: 1;
+  background-color: var(--color-accent);
+  transform: scale(1.5);
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
