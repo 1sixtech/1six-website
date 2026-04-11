@@ -24,4 +24,5 @@ vite.config.ts.timestamp-*
 .next/
 .gstack/
 .claude/
+.context/
 *.tsbuildinfo
