@@ -149,6 +149,35 @@ export function ThesisSectionMobile() {
     stateRef.current = 'captured';
     pendingHashCaptureRef.current = false;
 
+    // Clear any stale suspend window left over from a prior operation.
+    //
+    // Why this matters (Codex review):
+    //
+    //   The hamburger-menu Thesis-nav path calls suspendCapture() BEFORE
+    //   the hashScroll runs, which sets captureSuspendedUntilRef to
+    //   now+CAPTURE_SUSPEND_MS. Then the scroll event handler's pending-
+    //   hash branch calls capture() as soon as the scroll lands, typically
+    //   within 50–100 ms. At that moment captureSuspendedUntilRef is
+    //   still in the future (~1100 ms remaining). If we leave it as-is
+    //   and the user exits upward immediately (release('up')) and then
+    //   fast-scrolls back down, the forward-crossing check sees the stale
+    //   suspend window and silently rejects the re-capture — even though
+    //   the exit path no longer sets its own cooldown. The crossing is
+    //   one-shot (edge-triggered on `prev < cached && current >= cached`)
+    //   so a missed crossing cannot be replayed — the user scrolls past
+    //   Thesis uncaptured until the next reload.
+    //
+    //   Once we have successfully reached the 'captured' state, any prior
+    //   suspend window has served its purpose (it bridged the window
+    //   between the programmatic scroll and the capture itself), and
+    //   future captures should be governed by future release() calls, not
+    //   by a stale absolute-timestamp value from a different operation.
+    captureSuspendedUntilRef.current = 0;
+    if (suspendTimerRef.current) {
+      clearTimeout(suspendTimerRef.current);
+      suspendTimerRef.current = null;
+    }
+
     // Step 1: cancel Android compositor momentum via layout change.
     // Also set the data-thesis-captured attribute that the globals.css
     // rules key off:
@@ -266,12 +295,53 @@ export function ThesisSectionMobile() {
   }, [preventPageScroll]);
 
   // ── Release: restore page scroll ──
-  // exitDirection: which way we're exiting — blocks THAT boundary sentinel
-  // while the smooth exit scroll is still moving past it.
+  //
+  // exitDirection determines whether we need a re-entry cooldown:
+  //
+  //   DOWN → ThesisGraph:
+  //     After release, smoothScrollToExit('down') animates from thesisTop
+  //     to `graphTop + 1`. The +1 is deliberately ONE pixel past the
+  //     bottom boundary so the top sentinel never reappears during the
+  //     animation — but the user can still reverse direction mid-
+  //     animation and scroll back UP past thesis bottom, which would
+  //     satisfy the reverse-crossing condition and immediately re-capture
+  //     them at slide 7. That bouncy re-capture is what the cooldown was
+  //     designed to prevent, so we keep both guards (blockedSentinel
+  //     'bottom' + suspendCapture) for downward exits.
+  //
+  //   UP → Hero:
+  //     After release, smoothScrollToExit('up') animates from thesisTop
+  //     to 0. During this monotonically-decreasing scroll the forward-
+  //     crossing branch (which only runs on `currentScrollY > prevScrollY`)
+  //     is never entered, and the reverse branch requires
+  //     `prev > cachedTopAbs` which cannot hold when we start AT
+  //     cachedTopAbs and move upward from there. So the animation itself
+  //     cannot trigger any crossing — the previous cooldown was guarding
+  //     against a race that does not exist.
+  //
+  //     The bug this fix closes: after exiting upward, if the user
+  //     fast-scrolled back down within the 1200 ms suspend window
+  //     (extremely plausible — smooth scroll to Hero takes ~500 ms, user
+  //     reaction + fast swipe another ~300-500 ms, well inside the
+  //     window), the forward-crossing check's edge-triggered
+  //     `prev < cached && current >= cached` would fire once and be
+  //     silently rejected by the guard. There is no replay, so the
+  //     miss is permanent — Thesis slides past uncaptured until the next
+  //     reload. See the root-cause analysis that produced this fix.
+  //
+  //     Fix: release('up') leaves the suspend window alone (no new
+  //     cooldown) and passes null to stopCapture so the top sentinel is
+  //     not blocked either. Forward re-entry is immediately available
+  //     on the very next downward scroll event, which is the expected
+  //     behaviour for a user who deliberately reversed direction.
   const release = useCallback((exitDirection: 'down' | 'up') => {
     if (stateRef.current !== 'captured') return;
-    stopCapture(exitDirection === 'down' ? 'bottom' : 'top');
-    suspendCapture();
+    if (exitDirection === 'down') {
+      stopCapture('bottom');
+      suspendCapture();
+    } else {
+      stopCapture(null);
+    }
   }, [stopCapture, suspendCapture]);
 
   const releaseForProgrammaticNavigation = useCallback(() => {
@@ -368,10 +438,22 @@ export function ThesisSectionMobile() {
           && entry.boundingClientRect.bottom < 0
           && stateRef.current === 'idle'
           && Date.now() >= captureSuspendedUntilRef.current
-          && blockedSentinel.current !== 'top') {
-          // Section top at IO detection time: sentinel bottom = section top
-          const sectionTopAbs = entry.boundingClientRect.bottom + window.scrollY;
-          capture('top', sectionTopAbs);
+          && blockedSentinel.current !== 'top'
+          // Ignore intersection changes triggered by the menu's scroll lock
+          // (body.position:fixed). See onScroll guard below for details.
+          && document.documentElement.dataset.menuOpen !== '1') {
+          // Mirror the scroll-event crossing paths: use the cached
+          // sectionTopAbs rather than recomputing from the IO entry. On
+          // Android Chrome IO is throttled during inertia; the entry's
+          // boundingClientRect snapshot and the callback-time scrollY are
+          // from different moments, so `rect.bottom + scrollY` is off by
+          // hundreds of pixels. The cache is recomputed off the scroll path
+          // at layout-stable moments only. If the cache is not yet
+          // populated (very early mount), bail and let the scroll-event
+          // crossing path handle the capture.
+          const cached = sectionTopAbsRef.current;
+          if (cached == null) return;
+          capture('top', cached);
         }
       },
       { threshold: 0 },
@@ -420,6 +502,27 @@ export function ThesisSectionMobile() {
     prevScrollYRef.current = window.scrollY;
 
     const onScroll = () => {
+      // Ignore synthetic scroll events emitted while the hamburger menu's
+      // scroll-lock is active. Header uses the standard iOS lock pattern
+      // (body.position:fixed + top:-\${scrollY}px); the instant the lock
+      // is applied the browser fires a phantom scroll event where
+      // window.scrollY drops to 0. Without this guard the reverse-crossing
+      // branch below sees prev=prevScrollY > cachedTopAbs and curr=0 and
+      // fires capture('bottom', cachedTopAbs), locking the entire page at
+      // thesis-scroll-lock which never releases (the subsequent close
+      // event is blocked by the stateRef !== 'idle' guard). The
+      // restoration scrollTo fired by Header when the menu closes also
+      // goes through this path, so the flag must stay set until AFTER
+      // the restore event — see Header.tsx unlockScroll for the lifecycle.
+      //
+      // We deliberately early-return BEFORE updating prevScrollYRef so
+      // prevScrollY stays anchored to the user's real scroll position.
+      // Otherwise, updating prev to 0 during the lock would leave prev=0
+      // and curr=1625 on the restoration event, which the forward-crossing
+      // branch would interpret as a legitimate fast scroll-down and fire
+      // capture('top') — exchanging one false capture for another.
+      if (document.documentElement.dataset.menuOpen === '1') return;
+
       const currentScrollY = window.scrollY;
       const prevScrollY = prevScrollYRef.current;
       prevScrollYRef.current = currentScrollY;
