@@ -63,6 +63,11 @@ export function ThesisSectionMobile() {
   // near-but-not-at thesis top.
   const HASH_CAPTURE_ALIGNMENT_TOLERANCE = 4;
   const [activeIndex, setActiveIndex] = useState(0);
+  // Mirror of stateRef in React state so the Swiper `allowTouchMove` prop
+  // can reflect capture status. Kept in sync with stateRef inside
+  // capture() / stopCapture() — treated as a lag-tolerant view, not the
+  // source of truth. The ref is still what all internal logic consults.
+  const [isCaptured, setIsCaptured] = useState(false);
   const swiperRef = useRef<SwiperType | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -152,7 +157,17 @@ export function ThesisSectionMobile() {
     window.scrollTo({ top: sectionTopAbs, behavior: 'auto' as ScrollBehavior });
     prevScrollYRef.current = sectionTopAbs;
 
-    // Step 3: set correct starting slide based on entry direction.
+    // Step 3: set correct starting slide based on entry direction and
+    // ENABLE Swiper touch. Before capture, Swiper's allowTouchMove is
+    // false so Thesis slides cannot be swiped while the section is
+    // only partially on screen — in that window the user's touch falls
+    // through to native page scroll. The instance property is flipped
+    // directly so it takes effect on this frame, and the React state
+    // is updated for the next render so the prop value stays in sync.
+    if (swiperRef.current) {
+      swiperRef.current.allowTouchMove = true;
+    }
+    setIsCaptured(true);
     if (fromDirection === 'bottom') {
       swiperRef.current?.slideTo(TOTAL - 1, 0);
       setActiveIndex(TOTAL - 1);
@@ -206,6 +221,16 @@ export function ThesisSectionMobile() {
     // scrollTo, so there is no race.
     document.documentElement.classList.remove('thesis-scroll-lock');
     document.removeEventListener('touchmove', preventPageScroll);
+    // Disable Swiper touch gestures again — same reason as the enable in
+    // capture(). While the user is scrolling past Thesis in either
+    // direction, Swiper must not consume the touch; the touch has to
+    // fall through to native page scroll so Hero / ThesisGraph can
+    // scroll normally. Direct instance property flip for immediate
+    // effect plus React state for the next render.
+    if (swiperRef.current) {
+      swiperRef.current.allowTouchMove = false;
+    }
+    setIsCaptured(false);
 
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     blockedSentinel.current = blockedBoundary;
@@ -553,8 +578,24 @@ export function ThesisSectionMobile() {
           slidesPerView={1}
           speed={400}
           loop={false}
-          allowTouchMove={true}
-          onSwiper={(swiper) => { swiperRef.current = swiper; }}
+          // Swiper touch gestures are gated on capture state. While Thesis
+          // is only partially on screen (Hero still visible above it),
+          // Swiper must not receive swipe gestures — otherwise a swipe
+          // inside the partially-visible Thesis area is interpreted as a
+          // slide change instead of a page scroll, and the user gets
+          // stuck with the page half-way between Hero and Thesis.
+          // capture() flips this to true once the section is fully on
+          // screen and locked; stopCapture() flips it back to false.
+          allowTouchMove={isCaptured}
+          onSwiper={(swiper) => {
+            swiperRef.current = swiper;
+            // Defensive: React's allowTouchMove prop is the source of
+            // truth, but some Swiper versions only apply it on the next
+            // tick. Set the instance property directly so the very
+            // first touch that lands on the not-yet-captured slide is
+            // guaranteed to be ignored by Swiper.
+            swiper.allowTouchMove = false;
+          }}
           onSlideChange={handleSlideChange}
           className="h-full w-full"
         >
