@@ -17,7 +17,6 @@ export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
 
   return (
     <AsciiCanvas
-      eager
       textureUrl="/resource/Source_Team symbol.mp4"
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"

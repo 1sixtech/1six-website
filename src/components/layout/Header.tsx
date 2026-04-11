@@ -18,11 +18,16 @@ const NAV_ITEMS = [
 
 export function Header() {
   const headerRef = useRef<HTMLElement>(null);
-  const isVisible = useScrollReveal();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const hasScrolled = useScrollReveal();
+  // On the home route the header is hidden until first scroll (tied to the
+  // intro reveal experience). On all other routes it should be visible from
+  // first paint — there is no intro sequence to coordinate with.
+  const isHomeRoute = pathname === '/';
+  const isVisible = !isHomeRoute || hasScrolled;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // --- Scroll lock refs and helpers (declared before handleNavClick) ---
   const scrollYRef = useRef(0);
@@ -178,7 +183,7 @@ export function Header() {
         ref={headerRef}
         className="fixed top-0 left-0 right-0 z-50 h-[54px] md:h-[45px]"
         style={{
-          transform: 'translateY(-100%)',
+          transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)',
           backgroundColor: 'var(--color-header-bg)',
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
