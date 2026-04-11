@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { IntroOverlay } from './IntroOverlay';
 import { IntroOrchestrator } from './IntroOrchestrator';
+import { teardownVideoPool } from '@/lib/videoPool';
 
 /**
  * HomeIntroMount — Client wrapper mounted in the root layout. Renders
@@ -38,6 +39,34 @@ export function HomeIntroMount() {
       mainContentRef.current = document.getElementById('main-content') as HTMLElement | null;
     }
   }
+
+  // Route-leave safety net — closes the "user clicks Header About during
+  // the 1.8s hero scramble in skip mode" stuck-lock bug.
+  //
+  // Normal flow: HeroSection.unlockPage() removes `intro-lock` when the
+  // scramble completes (or its 2.5s fallback fires). That is the happy
+  // path and still owns the unlock for both full and skip modes.
+  //
+  // Edge case: in skip mode, body.pointer-events is `auto` (by design —
+  // skip mode should feel fast) so the Header's `<Link href="/about">`
+  // is clickable during the scramble. If the user clicks it, Next.js
+  // unmounts HeroSection which cancels the 2.5s fallback timer, and
+  // NOTHING removes the class — every downstream page inherits
+  // `overflow: hidden !important` until a full reload.
+  //
+  // Fix: whenever this component sees the user leave `/`, clear the
+  // class. This runs after HeroSection's unmount cleanup, so normal
+  // unlock wins the race and this is a no-op on the happy path.
+  // Also teardown the videoPool on route-leave to release the pooled
+  // HTMLVideoElements (see videoPool.ts for the lifecycle contract).
+  useEffect(() => {
+    if (pathname !== '/') {
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.remove('intro-lock');
+      }
+      teardownVideoPool();
+    }
+  }, [pathname]);
 
   if (pathname !== '/') return null;
 

@@ -232,15 +232,15 @@ export function IntroOrchestrator({
         delete html.dataset.introActive;
       };
 
-      // Remove the hard scroll/touch lock. intro-lock blocks overflow,
-      // pointer events, and touch actions. In normal mode we keep it ON
-      // until HeroSection's scramble completes (HeroSection's unlockPage()
-      // does this via the StaggeredScramble onComplete callback). In
-      // skip / fallback paths where the orchestrator owns the full
-      // unlock, this function is called here directly.
-      const unlockScroll = () => {
-        html.classList.remove('intro-lock');
-      };
+      // NOTE: the orchestrator deliberately does NOT own intro-lock
+      // removal. HeroSection.unlockPage() (via StaggeredScramble's
+      // onComplete, or its 2.5s safety fallback) is the sole owner in both
+      // modes — this keeps the lock active during the hero scramble so the
+      // user cannot scroll past "we haven't crossed the 16% yet." before
+      // the 16% has finished scrambling. A route-leave safety net in
+      // HomeIntroMount clears a genuinely stuck lock if HeroSection never
+      // unmounts normally (e.g. the user clicks Header About mid-scramble
+      // in skip mode, which this review fix closes).
 
       // Hide the overlay instantly (no GSAP). Used by the skip path and
       // the null-ref fallback path — both need the overlay gone but
@@ -291,14 +291,23 @@ export function IntroOrchestrator({
       if (!main || !overlay) {
         // Defensive fallback: refs should be populated by the parent
         // HomeIntroMount before this effect runs. If they're null for any
-        // reason, do NOT leave the intro stuck — fully unlock, mark seen,
-        // and dispatch both events immediately so downstream consumers can
-        // proceed. This path should never run in practice.
+        // reason, do NOT leave the intro stuck — drop the clip-path gate,
+        // hide the overlay, mark seen, and dispatch both events so
+        // downstream consumers can proceed. This path should never run in
+        // practice.
+        //
+        // We deliberately do NOT call unlockScroll() here. HeroSection owns
+        // intro-lock removal (via unlockPage() from the scramble onComplete
+        // or its 2.5s safety fallback) in both modes; calling unlockScroll
+        // from the defensive path would race HeroSection's scramble and let
+        // the user scroll past "we haven't crossed the 16% yet." before the
+        // 16% has even rendered. The route-leave cleanup in HomeIntroMount
+        // is the global safety net against a genuine stuck lock.
         removeCssGate();
-        unlockScroll();
         hideOverlayInstant();
         markSeen();
         queueMicrotask(() => {
+          if (disposedRef.current) return;
           window.dispatchEvent(new CustomEvent('intro:revealed'));
           window.dispatchEvent(new CustomEvent('intro:done'));
         });
