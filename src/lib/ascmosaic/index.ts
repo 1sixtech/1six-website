@@ -8,11 +8,13 @@ import * as THREE from 'three';
 // Cross-layer coupling: ascmosaic is a self-contained WebGL library, but
 // this project shares HTMLVideoElement instances via a global pool so
 // multiple sections can reuse pre-warmed videos. The dispose paths below
-// need to know which videos are pooled (shared) vs. owned (one-off) so
-// they don't kill videos still in use by other sections. If ascmosaic is
-// ever extracted as a standalone library, convert to an injected
-// `shouldDispose: (video: HTMLVideoElement) => boolean` predicate on
-// AscMosaicOptions instead of importing the pool directly.
+// route pooled videos through videoPool.release() (refcounted pause)
+// instead of the normal kill path (pause + src reset + load), so shared
+// videos survive section unmounts AND stop decoding when no live consumer
+// remains. Non-pooled videos still get the full teardown. If ascmosaic is
+// ever extracted as a standalone library, convert to injected predicates
+// on AscMosaicOptions (`isShared: (v) => boolean`, `onRelease: (v) => void`)
+// instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
 /** AscMosaic 생성 옵션 */
@@ -217,11 +219,18 @@ export class AscMosaic {
             if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
               const videoTexture = obj.material.map as THREE.VideoTexture;
               const video = videoTexture.image as HTMLVideoElement;
-              // Do NOT kill pooled videos — they are shared across sections.
-              if (video && !videoPool.isPooled(video)) {
-                video.pause();
-                video.src = '';
-                video.load();
+              if (video) {
+                if (videoPool.isPooled(video)) {
+                  // Pooled videos are shared — decrement refcount so
+                  // the pool can pause the element when no live
+                  // VideoTexture references it anymore.
+                  videoPool.release(video);
+                } else {
+                  // One-off: fully tear down.
+                  video.pause();
+                  video.src = '';
+                  video.load();
+                }
               }
               videoTexture.dispose();
             }

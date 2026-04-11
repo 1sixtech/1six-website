@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// See the cross-layer coupling note in ascmosaic/index.ts — same
+// justification applies here. The fast path needs to tell the pool
+// "a new consumer is using this video" so refcounted release works.
+import { acquire as acquirePooledVideo } from '@/lib/videoPool';
 
 export type TexturedMeshShape = 'sphere' | 'cube' | 'plane' | 'glb';
 
@@ -50,17 +54,21 @@ function createVideoTexture(
   existingVideo?: HTMLVideoElement,
 ): Promise<THREE.VideoTexture> {
   // Fast path: reuse a pre-warmed video from videoPool.
-  // Defensively resume playback — Safari Low Power Mode and backgrounded
-  // tab heuristics can pause muted videos even though the pool left them
-  // playing. A fire-and-forget play() ensures the VideoTexture sees frame
-  // updates. The catch is intentional: if play() rejects (e.g. user
-  // interaction required) we let the texture show the last decoded frame
-  // rather than throwing — the lazy path below would have failed here too.
+  // acquirePooledVideo() bumps the pool's refcount AND resumes playback
+  // (the pool leaves warmed videos paused after the initial prime — see
+  // videoPool.ts lifecycle contract). The matching release() is called
+  // from AscMosaic's dispose paths when the containing mosaic is
+  // unmounted, so the refcount cleanly tracks active consumers.
+  //
+  // Safari Low Power Mode and backgrounded tab heuristics can still
+  // reject play() inside acquire(); if that happens the VideoTexture
+  // shows the last decoded frame rather than throwing — the lazy path
+  // below would have failed on the same policy anyway.
   if (existingVideo && existingVideo.readyState >= 2) {
     const texture = new THREE.VideoTexture(existingVideo);
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    void existingVideo.play().catch(() => {});
+    acquirePooledVideo(existingVideo);
     return Promise.resolve(texture);
   }
 
