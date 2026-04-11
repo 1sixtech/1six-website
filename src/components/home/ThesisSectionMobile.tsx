@@ -666,8 +666,26 @@ export function ThesisSectionMobile() {
             // video is ~50-150ms, comfortably under the fade window.
             const isActive = index === activeIndex;
             const isNearby = Math.abs(index - activeIndex) <= 1;
+            // Layout strategy: anchor slide content to a fixed top offset
+            // (38vh) instead of vertically centering it. Each slide has a
+            // different intrinsic content height (slides 1,3,5 are 189px,
+            // slide 2 is 212px, slides 4,6 are 159px), and vertical
+            // centering produces different top positions per slide —
+            // which the user sees as the content "jumping" vertically
+            // during a Swiper fade transition. Anchoring to the top
+            // keeps the TOP of every slide's content at the same Y, so
+            // transitions do not visually shift the icon/text band.
+            //
+            // Slide 7 ("this is why we are 1six.") is the single-line
+            // punchline and gets its own vertical-center treatment so
+            // the closer text sits at the visual middle of the viewport
+            // as intended.
+            const isFinalSlide = index === TOTAL - 1;
+            const slideLayoutClass = isFinalSlide
+              ? '!flex items-center justify-center'
+              : '!flex items-start justify-center pt-[38vh]';
             return (
-              <SwiperSlide key={state.id} className="!flex items-center justify-center">
+              <SwiperSlide key={state.id} className={slideLayoutClass}>
                 <div className="max-w-[1034px] px-[22px] text-center">
                   {isNearby ? (
                     <div

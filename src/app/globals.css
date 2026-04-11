@@ -184,42 +184,6 @@ html:not([data-thesis-captured='1']) #thesis .swiper-vertical {
   touch-action: pan-y !important;
 }
 
-/* Thesis captured-state viewport-height freeze.
-   During the captured state the section is rendered as `h-dvh`, which is
-   the dynamic viewport height. On Android Chrome the dynamic value
-   oscillates as the browser UI (URL bar, tab bar) collapses or expands
-   while the user interacts with the page. Those height changes
-   propagate to the section's height, which propagates to Swiper's
-   `.swiper-wrapper` and slide heights, which causes a visible vertical
-   shift during a mid-slide transition (e.g. slide 2 → 3). iOS Safari
-   has the same underlying behavior, but its current dynamic viewport
-   semantics hide it from the user in the normal flow.
-
-   Freeze the section height to the LARGE viewport unit during the
-   captured state. Unit semantics per MDN:
-     - `100dvh` — DYNAMIC: tracks the currently-visible viewport.
-       Matches `visualViewport.height`. Oscillates with browser UI.
-     - `100lvh` — LARGE: matches the viewport WITH browser UI HIDDEN.
-       Stable across a session. This is the primitive we want.
-     - `100vh`  — fallback for browsers that predate `lvh` (Chrome
-       ≥ 108 / Safari 16.4 ship `lvh`, older versions use `vh`, which
-       in WebKit historically behaves like the large viewport and in
-       Blink became the large viewport in Chrome 108).
-
-   By sizing the section to `100lvh`/`100vh` we guarantee the content
-   stays anchored to the same document-relative position regardless of
-   browser UI toggling. When the URL bar is visible, a thin strip of
-   section is below the visible area — this is acceptable for the
-   Thesis content which is vertically centered with plenty of margin.
-   The pagination dots at `bottom-8` are positioned relative to the
-   section bottom, so they sit at the bottom of the LARGE viewport
-   and may briefly be behind the nav bar while the URL bar is showing.
-   This is the same trade-off `h-dvh` would make anyway (Swiper renders
-   before Chrome animates the UI). */
-html[data-thesis-captured='1'] #thesis {
-  height: 100vh !important;
-  height: 100lvh !important;
-}
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
