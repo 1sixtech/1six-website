@@ -2,6 +2,8 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import * as videoPool from '@/lib/videoPool';
+import { markAsciiReady } from '@/lib/introState';
 
 /**
  * AsciiCanvas — React wrapper for the AscMosaic Three.js/WebGL library
@@ -79,11 +81,21 @@ interface AsciiCanvasProps {
   eager?: boolean;
   /** Called once when the mosaic finishes initializing and starts animating */
   onReady?: () => void;
+  /**
+   * Stable key used by the intro orchestration to identify this canvas.
+   * When provided, videoPool is checked for a pre-warmed video element,
+   * and on ready the 'ascii:ready' event fires with this key in the detail.
+   * Required for homepage canvases; unused on /about.
+   */
+  preloadKey?: string;
 }
 
-// Global WebGL context counter to enforce budget
+// Global WebGL context counter to enforce budget.
+// 14 is chosen as a safety margin below WebKit's empirical 16-context limit
+// while accommodating the homepage's 11 homepage-target pre-warm + headroom
+// for context-loss recovery. See design spec §6.2.
 let activeContextCount = 0;
-const MAX_ACTIVE_CONTEXTS = 10;
+const MAX_ACTIVE_CONTEXTS = 14;
 
 // Global initialization queue — prevents multiple WebGL contexts from
 // initializing simultaneously on page mount/back-navigation, which causes
@@ -137,6 +149,7 @@ export function AsciiCanvas({
   cameraOffsetX = 0,
   eager = false,
   onReady,
+  preloadKey,
 }: AsciiCanvasProps) {
   // Default: no auto-rotation for planes
   const resolvedAutoRotate = autoRotate ?? (shape !== 'plane');
@@ -177,6 +190,12 @@ export function AsciiCanvas({
       return; // Skip, too many active contexts
     }
 
+    // Hoisted so the catch block can clean up the partially-constructed
+    // mosaic. Originally declared inside the try, which made the catch
+    // block blind to a failed instance and leaked activeContextCount +
+    // mosaicRef (Codex review C3).
+    let mosaic: InstanceType<(typeof import('@/lib/ascmosaic'))['AscMosaic']> | null = null;
+
     try {
       // Remove any leftover canvases from previous instances
       container.querySelectorAll('canvas').forEach(c => c.remove());
@@ -184,7 +203,7 @@ export function AsciiCanvas({
       // Dynamic import to avoid SSR issues with Three.js
       const { AscMosaic } = await import('@/lib/ascmosaic');
 
-      const mosaic = new AscMosaic(container, {
+      mosaic = new AscMosaic(container, {
         orthographic,
         autoRotate: resolvedAutoRotate,
       });
@@ -206,7 +225,12 @@ export function AsciiCanvas({
         mosaic.setRenderScale(renderScale);
       }
 
-      // Add model with texture (supports both image and video)
+      // Add model with texture (supports both image and video).
+      // For video textures, try the videoPool first — if a warmed element
+      // exists, AscMosaic reuses it and skips the network fetch path.
+      const existingVideo = resolvedTextureType === 'video'
+        ? videoPool.get(textureUrl)
+        : undefined;
       await mosaic.addModel({
         shape,
         textureUrl,
@@ -214,6 +238,7 @@ export function AsciiCanvas({
         width: planeWidth,
         height: planeHeight,
         scale,
+        existingVideo,
       });
 
       // Bail if the component unmounted OR if destroyMosaic raced us while
@@ -276,10 +301,45 @@ export function AsciiCanvas({
       mosaic.animate();
       setIsInitialized(true);
       onReady?.();
+      if (preloadKey) {
+        markAsciiReady(preloadKey);
+      }
     } catch (err) {
       console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
+      // Init-failure cleanup (Codex review C3 + C4).
+      //
+      // C3: if `mosaic` was constructed before the throw (addModel,
+      //     enableAsciiMosaicFilter, or a race check failed), we leaked
+      //     the WebGL context + activeContextCount + mosaicRef until the
+      //     component unmounted. Since the `mosaicRef.current` guard at
+      //     the top of initMosaic blocks retries, that leak was
+      //     permanent for the canvas's lifetime and would eventually
+      //     exhaust MAX_ACTIVE_CONTEXTS across failures. Dispose the
+      //     instance, clear the ref, and decrement the counter.
+      //
+      // C4: also fire markAsciiReady so the IntroOrchestrator does not
+      //     wait the full 2.5s hardcap for a canvas that has no chance
+      //     of ever marking ready. A silent fast-forward to reveal with
+      //     the fallback visual (loading skeleton / blue material) is
+      //     strictly better UX than an extra ~1.3s of stuck intro.
+      if (mosaic) {
+        try {
+          mosaic.stopAnimate();
+          mosaic.dispose();
+        } catch {
+          // Best-effort cleanup — disposing a partially-constructed
+          // mosaic may hit null references internally. Ignore.
+        }
+        if (mosaicRef.current === mosaic) {
+          activeContextCount = Math.max(0, activeContextCount - 1);
+          mosaicRef.current = null;
+        }
+      }
+      if (preloadKey) {
+        markAsciiReady(preloadKey);
+      }
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX, preloadKey]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;

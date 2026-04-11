@@ -29,6 +29,22 @@ export function Header() {
   // When true, the scroll lock effect skips its unlock (handleNavClick did it)
   const manualUnlockRef = useRef(false);
 
+  // Menu scroll-lock interacts with ThesisSectionMobile via an html dataset
+  // marker. Setting body.position:fixed + top:-\${scrollY}px is the standard
+  // iOS menu-lock pattern, but it has a hidden side effect: the browser
+  // emits a synthetic scroll event where window.scrollY instantly drops from
+  // the saved value to 0 (because body is no longer in document flow).
+  //
+  // ThesisSectionMobile's onScroll handler interprets that phantom event as
+  // a legitimate reverse-crossing (prev=1625 > cached=812, curr=0 <= cached)
+  // and fires capture('bottom', cached), adding html.thesis-scroll-lock and
+  // locking the entire page — the bug that was reported on 2026-04-11.
+  //
+  // Fix: set documentElement.dataset.menuOpen='1' BEFORE the body lock so
+  // the mobile scroll handler can ignore the phantom event, and clear it
+  // AFTER the restore scroll event fires so the unlock path is filtered too.
+  const MENU_OPEN_ATTR = 'menuOpen';
+
   const unlockScroll = useCallback((restoreScroll: boolean) => {
     document.body.style.position = '';
     document.body.style.top = '';
@@ -36,9 +52,21 @@ export function Header() {
     document.body.style.right = '';
     if (restoreScroll) {
       const savedY = scrollYRef.current;
+      // Two-stage rAF: the inner frame runs AFTER the restoration scrollTo
+      // has been dispatched, so dataset.menuOpen is still set during the
+      // event's onScroll handler and the guard can filter it.
       requestAnimationFrame(() => {
         window.scrollTo(0, savedY);
+        requestAnimationFrame(() => {
+          delete document.documentElement.dataset[MENU_OPEN_ATTR];
+        });
       });
+    } else {
+      // Manual unlock path (handleNavClick) does NOT restore scroll — the
+      // caller scrolls programmatically to a hash target instead. Clear the
+      // flag immediately so the hash-scroll event is NOT filtered and can
+      // reach the pending-hash-capture branch in ThesisSectionMobile.
+      delete document.documentElement.dataset[MENU_OPEN_ATTR];
     }
   }, []);
 
@@ -100,16 +128,26 @@ export function Header() {
   // Scroll lock: freeze body in place while menu is open.
   // Uses position:fixed instead of overflow:hidden to avoid
   // interfering with GSAP ScrollTrigger pin calculations.
+  //
+  // See `unlockScroll` comment for the menu-open dataset flag lifecycle —
+  // the flag must be SET before the body lock (so the phantom scrollY=0
+  // event emitted by position:fixed is filtered by ThesisSectionMobile's
+  // onScroll guard) and CLEARED after the restore scrollTo (so the
+  // restoration event is also filtered).
   useEffect(() => {
     if (menuOpen) {
       scrollYRef.current = window.scrollY;
+      // Must run BEFORE body.position:fixed so the phantom scroll event is
+      // filtered at its source.
+      document.documentElement.dataset[MENU_OPEN_ATTR] = '1';
       document.body.style.position = 'fixed';
       document.body.style.top = `-${scrollYRef.current}px`;
       document.body.style.left = '0';
       document.body.style.right = '0';
     } else {
       if (manualUnlockRef.current) {
-        // handleNavClick already unlocked — skip
+        // handleNavClick already unlocked AND already cleared the dataset
+        // flag (via unlockScroll(false)). Just reset the sentinel.
         manualUnlockRef.current = false;
       } else {
         unlockScroll(true);

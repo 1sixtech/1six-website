@@ -57,6 +57,8 @@ export function AsciiProductCanvas({ product }: AsciiProductProps) {
       planeWidth={4}
       planeHeight={4}
       renderScale={2}
+      preloadKey={product}
+      eager
     />
   );
 }

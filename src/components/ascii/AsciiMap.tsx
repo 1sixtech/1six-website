@@ -62,6 +62,8 @@ export function AsciiMapCanvas() {
       maxBrightness={76}
       planeWidth={PLANE_W}
       planeHeight={PLANE_H}
+      preloadKey="map"
+      eager
     />
   );
 }

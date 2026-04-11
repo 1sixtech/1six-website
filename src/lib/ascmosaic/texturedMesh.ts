@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// See the cross-layer coupling note in ascmosaic/index.ts — same
+// justification applies here. The fast path needs to tell the pool
+// "a new consumer is using this video" so refcounted release works.
+import { acquire as acquirePooledVideo } from '@/lib/videoPool';
 
 export type TexturedMeshShape = 'sphere' | 'cube' | 'plane' | 'glb';
 
@@ -28,6 +32,13 @@ export interface TexturedMeshOptions {
   width?: number;
   /** 평면 세로 (shape: plane) */
   height?: number;
+  /**
+   * Pre-warmed video element to reuse instead of fetching the URL.
+   * When provided (and its readyState >= HAVE_CURRENT_DATA), the texture
+   * wraps this element directly and skips the canplay wait.
+   * Used by videoPool integration to eliminate re-download latency.
+   */
+  existingVideo?: HTMLVideoElement;
 }
 
 const DEFAULT_TEXTURE_URL = '/resource/earth.jpg';
@@ -38,7 +49,29 @@ declare global {
   }
 }
 
-function createVideoTexture(videoUrl: string): Promise<THREE.VideoTexture> {
+function createVideoTexture(
+  videoUrl: string,
+  existingVideo?: HTMLVideoElement,
+): Promise<THREE.VideoTexture> {
+  // Fast path: reuse a pre-warmed video from videoPool.
+  // acquirePooledVideo() bumps the pool's refcount AND resumes playback
+  // (the pool leaves warmed videos paused after the initial prime — see
+  // videoPool.ts lifecycle contract). The matching release() is called
+  // from AscMosaic's dispose paths when the containing mosaic is
+  // unmounted, so the refcount cleanly tracks active consumers.
+  //
+  // Safari Low Power Mode and backgrounded tab heuristics can still
+  // reject play() inside acquire(); if that happens the VideoTexture
+  // shows the last decoded frame rather than throwing — the lazy path
+  // below would have failed on the same policy anyway.
+  if (existingVideo && existingVideo.readyState >= 2) {
+    const texture = new THREE.VideoTexture(existingVideo);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    acquirePooledVideo(existingVideo);
+    return Promise.resolve(texture);
+  }
+
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     try {
@@ -178,7 +211,7 @@ export function createTexturedMesh(options: TexturedMeshOptions = {}): Promise<T
   const geometry = buildGeometry(shape, options);
 
   if (textureType === 'video') {
-    return createVideoTexture(textureUrl).then((texture) => {
+    return createVideoTexture(textureUrl, options.existingVideo).then((texture) => {
       const material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         map: texture,

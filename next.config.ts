@@ -12,13 +12,18 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
-  allowedDevOrigins: ['10.96.231.6', '192.168.0.108'],
+  allowedDevOrigins: ['10.96.231.6', '172.30.1.74'],
   transpilePackages: ['three'],
   images: {
     formats: ['image/webp', 'image/avif'],
   },
   experimental: {
-    optimizePackageImports: ['gsap', 'three'],
+    // NOTE: 'gsap' was removed from optimizePackageImports because Turbopack's
+    // barrel-file tree-shaker strips GSAP's internal ticker and plugin
+    // registrations, leaving tweens that never tick and plugins (CSSPlugin,
+    // AttrPlugin) that never register. Without this, the intro logo fill
+    // animation silently never runs. Three is still safe.
+    optimizePackageImports: ['three'],
   },
   redirects: async () => [
     {
