@@ -114,19 +114,45 @@ export function ThesisSectionMobile() {
   }, []);
 
   // ── Capture: snap to thesis and block page scroll ──
-  // sectionTopAbs: absolute Y of thesis top at the moment IO detected intersection.
-  // Passing this in avoids calling getBoundingClientRect() inside the callback,
-  // which would read a stale value after iOS momentum overshoots past the sentinel.
+  //
+  // sectionTopAbs is a pre-computed absolute Y of thesis top. The caller
+  // must have derived this WITHOUT calling getBoundingClientRect() from
+  // inside a scroll handler (see commit 8b9312e + history doc §2.9 for
+  // why — iOS returns stale rects during momentum).
+  //
+  // Sequence (the ORDER matters):
+  //   1. Add `.thesis-scroll-lock` — sets `overflow: hidden` on html+body.
+  //      On Android Chrome this is the ONLY reliable way to cancel a
+  //      compositor-driven inertial scroll animation; Chrome ignores
+  //      programmatic `window.scrollTo` while the compositor animation
+  //      is running. Setting overflow:hidden is a layout change that
+  //      synchronously cancels the animation so the scrollTo on the
+  //      next line can actually land. On iPhone the existing touchmove
+  //      preventDefault mechanism already blocks momentum — overflow:
+  //      hidden is additive there and doesn't conflict (iOS 16.3+
+  //      honours html-level overflow:hidden).
+  //   2. window.scrollTo(sectionTopAbs) — snaps the viewport to the
+  //      computed Thesis top. Works on both platforms now that
+  //      Android's animation has been cancelled.
+  //   3. Swiper slideTo — sets the correct starting slide.
+  //   4. document touchmove listener — keeps iPhone's
+  //      fullpage.js-pattern scroll block in place as a belt-and-
+  //      suspenders fallback against any future iOS version that
+  //      starts ignoring html overflow:hidden.
   const capture = useCallback((fromDirection: 'top' | 'bottom', sectionTopAbs: number) => {
     if (stateRef.current !== 'idle') return;
     stateRef.current = 'captured';
     pendingHashCaptureRef.current = false;
 
-    // Instant snap using the pre-computed position (no momentum-induced offset)
+    // Step 1: cancel Android compositor momentum via layout change.
+    document.documentElement.classList.add('thesis-scroll-lock');
+
+    // Step 2: instant snap to the pre-computed position (no momentum-
+    // induced offset, and now reliably honoured on Android).
     window.scrollTo({ top: sectionTopAbs, behavior: 'auto' as ScrollBehavior });
     prevScrollYRef.current = sectionTopAbs;
 
-    // Set correct starting slide based on entry direction
+    // Step 3: set correct starting slide based on entry direction.
     if (fromDirection === 'bottom') {
       swiperRef.current?.slideTo(TOTAL - 1, 0);
       setActiveIndex(TOTAL - 1);
@@ -135,7 +161,7 @@ export function ThesisSectionMobile() {
       setActiveIndex(0);
     }
 
-    // Block page scroll at document level
+    // Step 4: document-level touchmove block (iPhone belt-and-suspenders).
     document.addEventListener('touchmove', preventPageScroll, { passive: false });
   }, [preventPageScroll]);
 
@@ -174,6 +200,11 @@ export function ThesisSectionMobile() {
 
   const stopCapture = useCallback((blockedBoundary: 'top' | 'bottom' | null) => {
     stateRef.current = 'idle';
+    // Release the Android overflow lock so the smooth exit scrollTo (kicked
+    // off by the caller via smoothScrollToExit) can actually move the page.
+    // Removing the class is synchronous and takes effect before the next
+    // scrollTo, so there is no race.
+    document.documentElement.classList.remove('thesis-scroll-lock');
     document.removeEventListener('touchmove', preventPageScroll);
 
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
@@ -493,6 +524,10 @@ export function ThesisSectionMobile() {
   useEffect(() => {
     return () => {
       document.removeEventListener('touchmove', preventPageScroll);
+      // Defensive: if the component unmounts mid-capture (e.g. route change
+      // while scroll is locked), make sure the html class is cleared so the
+      // next page does not inherit `overflow: hidden`.
+      document.documentElement.classList.remove('thesis-scroll-lock');
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
     };

@@ -137,6 +137,30 @@ html.thesis-touch-lock {
   overscroll-behavior: none !important;
 }
 
+/* Thesis mobile capture lock — applied by ThesisSectionMobile's capture() for
+   the duration of the 'captured' state. This cancels Android Chrome's
+   compositor-driven momentum scroll, which ignores programmatic
+   `window.scrollTo` while an inertia animation is active. Applying
+   `overflow: hidden` via CSS is a layout-level change that synchronously
+   stops the compositor animation so the subsequent scrollTo can land on
+   the Thesis top.
+   On iPhone this is additive: touchmove preventDefault (the existing
+   fullpage.js pattern) continues to block page scroll, and overflow:hidden
+   just keeps the viewport locked at the target. touch-action is deliberately
+   NOT set here because Swiper's slide gestures need the container to
+   receive touch events inside its own pan-y channel — touch-action: none
+   on body would block Swiper's swipe detection. pointer-events is also
+   NOT set because Swiper's pagination dots need to remain clickable. */
+html.thesis-scroll-lock {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+html.thesis-scroll-lock body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  -webkit-overflow-scrolling: auto;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
