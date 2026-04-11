@@ -151,27 +151,20 @@ export function ThesisSectionMobile() {
 
     // Step 1: cancel Android compositor momentum via layout change.
     // Also set the data-thesis-captured attribute that the globals.css
-    // touch-action override keys off. In the uncaptured state the
-    // override re-enables native pan-y on the Swiper element so a swipe
-    // on a partially-visible Thesis area falls through to page scroll;
-    // in the captured state the attribute is set and the override no
-    // longer matches, so Swiper's default pan-x behaviour takes over and
-    // Swiper can own the gesture.
-    //
-    // Freeze the section height to the current visual viewport height so
-    // a dynamic address-bar collapse/expand during the captured state
-    // does not churn the section's height. See THESIS_SCROLL_HISTORY.md
-    // + globals.css `html[data-thesis-captured='1'] #thesis` for the
-    // CSS side of this. `visualViewport.height` is the most accurate
-    // measurement of the actual visible area; innerHeight is the
-    // fallback for browsers without visualViewport (rare on mobile but
-    // worth defending).
-    const vv = window.visualViewport;
-    const capturedHeight = Math.round(vv ? vv.height : window.innerHeight);
-    document.documentElement.style.setProperty(
-      '--thesis-captured-h',
-      `${capturedHeight}px`,
-    );
+    // rules key off:
+    //   - touch-action override: in the uncaptured state the override
+    //     re-enables native pan-y on the Swiper element so a swipe on a
+    //     partially-visible Thesis area falls through to page scroll;
+    //     in the captured state the attribute is set and the override
+    //     no longer matches, so Swiper's default pan-x behaviour takes
+    //     over and Swiper can own the gesture.
+    //   - height freeze: globals.css sizes #thesis to `100lvh` (large
+    //     viewport height — stable across browser UI animations)
+    //     while this attribute is set, overriding `h-dvh` which tracks
+    //     the dynamic viewport. This prevents Android Chrome's address
+    //     bar auto-collapse during a Swiper fade transition from
+    //     re-centering the slide content in the enlarged viewport,
+    //     which the user saw as a visible shift on the 2→3 transition.
     document.documentElement.classList.add('thesis-scroll-lock');
     document.documentElement.dataset.thesisCaptured = '1';
 
@@ -246,14 +239,10 @@ export function ThesisSectionMobile() {
     // off by the caller via smoothScrollToExit) can actually move the page.
     // Removing the class is synchronous and takes effect before the next
     // scrollTo, so there is no race. Also drop the thesisCaptured data
-    // attribute so the touch-action: pan-y override in globals.css starts
-    // matching again on the next gesture, re-enabling native scroll
-    // through the (still-present) Swiper element. And clear the
-    // captured-height CSS variable so the section returns to `h-dvh` on
-    // the next reflow.
+    // attribute so the globals.css rules stop matching — touch-action
+    // returns to pan-y and the section height returns to `h-dvh`.
     document.documentElement.classList.remove('thesis-scroll-lock');
     delete document.documentElement.dataset.thesisCaptured;
-    document.documentElement.style.removeProperty('--thesis-captured-h');
     document.removeEventListener('touchmove', preventPageScroll);
     // Disable Swiper touch gestures again — same reason as the enable in
     // capture(). While the user is scrolling past Thesis in either
@@ -609,14 +598,11 @@ export function ThesisSectionMobile() {
     return () => {
       document.removeEventListener('touchmove', preventPageScroll);
       // Defensive: if the component unmounts mid-capture (e.g. route change
-      // while scroll is locked), make sure the html class + dataset + CSS
-      // variable are all cleared so the next page does not inherit
-      // `overflow: hidden`, the captured-state marker that the CSS
-      // touch-action override checks against, nor the frozen section
-      // height.
+      // while scroll is locked), make sure the html class + dataset are
+      // cleared so the next page does not inherit `overflow: hidden`
+      // nor the captured-state marker that the CSS rules check against.
       document.documentElement.classList.remove('thesis-scroll-lock');
       delete document.documentElement.dataset.thesisCaptured;
-      document.documentElement.style.removeProperty('--thesis-captured-h');
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
     };
