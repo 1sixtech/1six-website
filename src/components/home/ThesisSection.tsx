@@ -361,67 +361,72 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
     });
     stRef.current = st;
 
-    // ── Observer: enabled only during pin ──
+    // ── Observer: TOUCH ONLY, enabled only during pin ──
+    //
+    // Wheel navigation used to go through Observer (type: 'wheel,touch',
+    // onUp/onDown), but Observer debounces its callbacks via rAF and —
+    // more importantly — tracks gestures across its own event accumulators.
+    // In practice that meant the first wheel event after `onEnter` enabled
+    // Observer was sometimes swallowed: the gesture that carried the user
+    // from Hero into Thesis was treated as already-acknowledged, and the
+    // user had to pause and scroll AGAIN before the first page advance
+    // fired. See the commit that introduced this split for the bug report.
+    //
+    // The fix: handle wheel events directly (see `onWheel` below), and
+    // leave Observer to handle touch gestures only. Touch still needs
+    // Observer because Observer.create takes care of the pointer/touch
+    // axis locking and sign conventions we rely on for mobile momentum.
+    //
     // Lifecycle: disabled by default → enabled on onEnter/onEnterBack →
     // disabled on onLeave/onLeaveBack or boundary exit.
     //
-    // preventDefault is FALSE on the Observer itself. Native scroll
-    // prevention is handled by manual event listeners below (touchstart,
-    // touchmove, wheel) which conditionally call preventDefault only
-    // when sectionActiveRef is true. This solves three problems:
-    //
-    // 1. Pin-outside blocking (18e889e bug): Observer preventDefault:true
-    //    blocked scroll even before pin activated. Manual listeners +
-    //    sectionActiveRef gate prevent this — scroll works normally
-    //    outside pin range.
-    //
-    // 2. iOS compositor momentum (b68ba61 problem): iOS Safari decides
-    //    to start compositor-driven momentum scroll at touchstart time.
-    //    By calling preventDefault on touchstart (before the browser
-    //    commits to scrolling), we prevent UIScrollView from ever
-    //    starting momentum. normalizeScroll tried to intercept already-
-    //    running momentum (too late); this prevents it from starting.
-    //
-    // 3. Mobile touch leak (d3a0e7c bug): manual listeners are always
-    //    registered on the section element regardless of Observer
-    //    enable/disable state. Even during onComplete (when Observer
-    //    stays enabled but animatingRef blocks callbacks), the manual
-    //    listeners keep calling preventDefault on touch events.
-    //
-    // wheelSpeed:-1 inverts ONLY wheel deltas. Combined with swapped
-    // callbacks this normalises both input methods:
-    //   Desktop wheel: inverted by wheelSpeed × swapped cb = no net change
-    //   iOS touch:     only swapped cb = fixes the inverted direction
+    // For touch on iOS, the reason preventDefault lives on the manual
+    // listeners (not on Observer via preventDefault: true) is:
+    //   1. Pin-outside blocking (18e889e): Observer preventDefault:true
+    //      blocked scroll before pin activated. Manual listeners gated
+    //      on sectionActiveRef don't.
+    //   2. iOS compositor momentum (b68ba61): iOS commits to compositor
+    //      scroll at touchSTART. preventDefault on touchstart (not just
+    //      touchmove) is what actually prevents UIScrollView from ever
+    //      starting momentum.
     const observer = Observer.create({
       target: section,
-      type: 'wheel,touch',
+      type: 'touch',
       tolerance: 10,
       preventDefault: false,
       lockAxis: true,
-      wheelSpeed: -1,
       onUp: () => gotoPage(1),
       onDown: () => gotoPage(-1),
     });
     observerRef.current = observer;
     observer.disable(); // starts disabled; onEnter/onEnterBack will enable
 
-    // ── Manual event listeners for conditional scroll prevention ──
-    // Registered directly on the section element with { passive: false }
-    // so preventDefault() is honoured by the browser.
+    // ── Manual wheel listener: navigation + scroll prevention ──
     //
-    // On iOS Safari, preventDefault on touchSTART is critical — it tells
-    // the browser NOT to commit to compositor-thread scrolling. Without
-    // this, momentum scroll is driven by UIScrollView on the compositor
-    // thread, completely outside JS context, and the first touch after
-    // entering thesis only stops momentum (not a swipe).
-    // See commit 447c95b for the original implementation of this pattern.
+    // Handles both jobs in one listener:
+    //   - Prevents the browser from scrolling while the section is pinned.
+    //   - Advances pages on each wheel gesture, debounced by COOLDOWN_MS
+    //     inside gotoPage so momentum events don't stampede.
+    //
+    // Why not Observer for wheel? Observer's rAF-debounced gesture
+    // detection sometimes eats the first advance when onEnter fires mid-
+    // gesture (see Observer comment above). A direct listener fires on
+    // every wheel event synchronously, and gotoPage's own guards
+    // (animatingRef, COOLDOWN_MS) handle gesture-level debouncing.
+    //
+    // Magnitude threshold of 10 filters out trackpad noise without
+    // missing real scroll events.
+    const WHEEL_DELTA_THRESHOLD = 10;
+    const onWheel = (e: WheelEvent) => {
+      if (!sectionActiveRef.current) return;
+      e.preventDefault();
+      if (Math.abs(e.deltaY) < WHEEL_DELTA_THRESHOLD) return;
+      gotoPage(e.deltaY > 0 ? 1 : -1);
+    };
     const onTouchStart = (e: TouchEvent) => {
       if (sectionActiveRef.current) e.preventDefault();
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (sectionActiveRef.current) e.preventDefault();
-    };
-    const onWheel = (e: WheelEvent) => {
       if (sectionActiveRef.current) e.preventDefault();
     };
     section.addEventListener('touchstart', onTouchStart, { passive: false });

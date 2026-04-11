@@ -47,10 +47,27 @@ html.intro-lock {
 }
 html.intro-lock body {
   overflow: hidden !important;
-  pointer-events: none !important;
   touch-action: none;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: auto;
+}
+/* pointer-events:none is ONLY applied during the full intro (while the
+   logo overlay is on-screen). In skip mode the overlay is suppressed
+   via display:none below, so blocking clicks on the page underneath
+   would be surprising — skip mode should feel fast even though scroll
+   is still locked during the 1.8 s scramble.                         */
+html.intro-lock[data-intro-active='true'] body {
+  pointer-events: none !important;
+}
+
+/* Skip mode (prefers-reduced-motion or sessionStorage.introSeen === '1'):
+   never render the fill overlay. The intro-lock class is still applied
+   to block scroll during the hero scramble, but there is no logo
+   animation to show, so the overlay must be hidden BEFORE first paint —
+   the orchestrator's hideOverlayInstant runs in useEffect, one frame
+   too late and produces a visible flash of the dim logo silhouette.   */
+html[data-intro-skip='true'] .intro-overlay {
+  display: none !important;
 }
 
 /* ══════════════════════════════════════════════════════════

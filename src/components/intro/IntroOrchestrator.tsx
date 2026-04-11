@@ -12,19 +12,29 @@ import {
 /**
  * IntroOrchestrator — State machine that coordinates the homepage intro.
  *
- * Timeline (best case, webglReady ≤ 0.7s):
+ * Timeline (full intro, best case webglReady ≤ 0.7s):
  *   t=0.00  videoPool.warmupAll starts; AsciiCanvas instances init in parallel
- *   t=0.05  GSAP: logo fill mask rect y: 21.03 -> 0 over 0.6s (power2.inOut)
- *   t=0.65  fill done
- *   t=0.70  minTimer done -> reveal (if webglReady also done)
- *           -> GSAP: main-content clip-path circle(0%) -> circle(150%) over 0.4s
- *           -> dispatches 'intro:revealed', removes intro-lock, sets sessionStorage.introSeen
- *   t=1.10  reveal done -> GSAP: overlay opacity 1 -> 0 over 0.3s
- *   t=1.40  -> dispatches 'intro:done'
+ *   t=0.05  logo fill mask rect y: 21.03 -> 0 over 0.95s (power2.inOut)
+ *   t=1.00  fill done
+ *   t=1.20  minTimer done -> reveal (if webglReady also done)
+ *           -> GSAP: main-content clip-path circle(0%) -> circle(150%) over 0.5s
+ *           -> dispatches 'intro:revealed', sets sessionStorage.introSeen
+ *   t=1.70  reveal done -> GSAP: overlay opacity 1 -> 0 over 0.3s
+ *   t=2.00  -> dispatches 'intro:done'
  *
  * Hardcap: 2.5s. Even if webglReady never fires, reveal runs.
- * Reduced-motion / session repeat: intro-lock is absent on mount, so
- * runReveal fires synchronously with skipAnimation=true.
+ *
+ * intro-lock is set by the inline script in layout.tsx in BOTH modes and
+ * is the sole responsibility of HeroSection's unlockPage() to remove
+ * (via the StaggeredScramble onComplete callback or the 2.5 s safety
+ * fallback). This keeps the lock active during the hero scramble in
+ * skip mode too, so the user cannot scroll past "we haven't crossed
+ * the 16% yet." before the 16% has finished scrambling.
+ *
+ * Reduced-motion / session repeat (skip mode): data-intro-active is NOT
+ * set, so this effect takes the early-return skip path below. The
+ * overlay is additionally hidden via CSS (data-intro-skip) so no logo
+ * flash is visible.
  */
 
 // Timing — tuned so that even on a warm-cache reload (where webglReady
@@ -48,6 +58,13 @@ const FILL_DELAY_S = 0.05;
 const REVEAL_DURATION_S = 0.5;
 const OVERLAY_FADE_S = 0.3;
 
+// Initial y of the fill rect (matches LogoFillSvg rect y). At start, the
+// rect sits entirely below the logo viewBox so the overlay reveals 0% of
+// the accent-filled logo. As y tweens to 0 the rect climbs up and the
+// masked accent fill rises from the bottom.
+const FILL_START_Y = 21.03;
+const FILL_END_Y = 0;
+
 interface IntroOrchestratorProps {
   fillRectRef: RefObject<SVGRectElement | null>;
   overlayRef: RefObject<HTMLDivElement | null>;
@@ -68,10 +85,15 @@ export function IntroOrchestrator({
     let revealTween: gsap.core.Tween | null = null;
 
     const html = document.documentElement;
-    const introActive = html.classList.contains('intro-lock');
+    // Full intro runs only when the inline script set data-intro-active=true.
+    // intro-lock by itself is NOT a reliable full-vs-skip signal — as of the
+    // inline-script rework, intro-lock is now applied in BOTH modes to block
+    // scroll during the hero scramble (see layout.tsx). The two modes are
+    // distinguished by the data attribute.
+    const introActive = html.dataset.introActive === 'true';
 
-    // Skip case: reduced-motion or session repeat. The inline script in
-    // layout.tsx did not set intro-lock, so we fast-forward to reveal.
+    // Skip case: reduced-motion or session repeat. data-intro-active was not
+    // set by the inline script, so we fast-forward to reveal.
     if (!introActive) {
       runReveal({ skipAnimation: true });
       return () => {
@@ -100,12 +122,40 @@ export function IntroOrchestrator({
         }
       });
 
-    // Logo fill animation — GSAP attr plugin animates the mask rect's y
-    const fillTween = gsap.to(fillRectRef.current, {
-      attr: { y: 0 },
+    // ── Logo fill animation ──
+    //
+    // Tween the mask rect's y attribute from 21.03 (logo fully hidden)
+    // to 0 (logo fully filled) via a GSAP proxy-object tween.
+    //
+    // Why NOT `gsap.to(rect, { attr: { y: 0 } })`?
+    //
+    // `attr` is provided by GSAP's AttrPlugin, which Turbopack's
+    // tree-shaker strips from the bundle: the plugin's module-level
+    // `gsap.registerPlugin(AttrPlugin)` side effect is dead-code-
+    // eliminated. When AttrPlugin is absent GSAP silently falls
+    // through and sets the target property at the END of the
+    // duration with no interpolation — the fill "runs" but nothing
+    // animates, so the user sees the dim silhouette for the entire
+    // duration and then a sudden jump to fully filled.
+    //
+    // A plain object passed to `gsap.to()` goes through GSAP core's
+    // property tweener, which doesn't require any plugin. We then
+    // mirror the proxy's interpolated value onto the SVG attribute in
+    // the onUpdate callback. No plugin, no tree-shake fragility.
+    const fillProxy = { y: FILL_START_Y };
+    const fillRect = fillRectRef.current;
+    if (fillRect) fillRect.setAttribute('y', String(FILL_START_Y));
+    const fillTween = gsap.to(fillProxy, {
+      y: FILL_END_Y,
       duration: FILL_DURATION_S,
       ease: 'power2.inOut',
       delay: FILL_DELAY_S,
+      onUpdate: () => {
+        // Re-read the ref every frame — cheap, and safe against the
+        // DOM node being re-mounted (e.g. React StrictMode dev cycle).
+        const el = fillRectRef.current;
+        if (el) el.setAttribute('y', String(fillProxy.y));
+      },
     });
 
     // WebGL readiness — aggregate via module-level getReadyKeys() (race-free)
@@ -204,12 +254,23 @@ export function IntroOrchestrator({
       };
 
       if (skipAnimation) {
-        // Skip mode = reduced-motion OR session repeat. The inline script
-        // did NOT set intro-lock, so scroll is already unlocked. But the
-        // IntroOverlay is still in the DOM covering the page, so we have
-        // to hide it here — otherwise the user sees a stuck dim logo.
+        // Skip mode = reduced-motion OR session repeat.
+        //
+        // As of the inline-script rework, intro-lock IS still set in skip
+        // mode — it blocks scroll until the hero scramble finishes so the
+        // user cannot scroll past "we haven't crossed the 16% yet." before
+        // the 16% has even rendered. HeroSection's unlockPage() (called
+        // either by the scramble onComplete or by its 2.5 s safety
+        // fallback) is now the sole owner of intro-lock removal in both
+        // modes — DO NOT call unlockScroll here or we race HeroSection's
+        // scramble and let scroll leak through.
+        //
+        // The overlay is additionally hidden via CSS
+        // (html[data-intro-skip='true'] .intro-overlay { display:none })
+        // so it never produces a visible logo flash. hideOverlayInstant
+        // is kept as defense-in-depth in case the data attribute is not
+        // yet applied (e.g. a downstream change removes it).
         removeCssGate();
-        unlockScroll(); // no-op if already unlocked, cheap defense
         hideOverlayInstant();
         markSeen();
         // Fire on next tick so subscribers that mount later (e.g. the

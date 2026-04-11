@@ -231,9 +231,28 @@ export function ThesisSectionMobile() {
     return () => observer.disconnect();
   }, [capture]);
 
-  // ── Reverse re-entry from below: detect upward scroll crossing the threshold ──
-  // Using scroll deltas here avoids the "first intersect at 0px" edge case of a
-  // zero-height sentinel, which was too eager on mobile Safari.
+  // ── Scroll-event forward + reverse crossing detection ──
+  //
+  // Two entry paths are handled here:
+  //
+  //   FORWARD (Hero → Thesis): the IntersectionObserver on the top
+  //   sentinel is the primary trigger, but on Android Chrome its
+  //   callback fires noticeably LATE during fast/inertial scrolls —
+  //   by the time IO runs, the user can already be several hundred
+  //   pixels past Thesis, so the snap-and-block behaviour engages
+  //   somewhere inside ThesisGraph instead of at the Thesis top.
+  //   Scroll events fire continuously through inertia on Android, so
+  //   checking "did we cross section top downward between the last
+  //   scroll and this one" catches the crossing in real time and
+  //   captures before the user sails past.
+  //
+  //   REVERSE (ThesisGraph → Thesis): detected via the same delta
+  //   check in the upward direction, as before. This replaces an
+  //   earlier bottom-sentinel IO that was too eager on mobile Safari.
+  //
+  // The IntersectionObserver above on the top sentinel is kept as a
+  // safety net. Whichever fires first wins; the second one no-ops
+  // because stateRef.current is already 'captured'.
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -253,7 +272,22 @@ export function ThesisSectionMobile() {
         return;
       }
 
-      if (currentScrollY >= prevScrollY) return;
+      // ── Downward crossing: Hero → Thesis (forward) ──
+      // Guard against the IO having already captured, the capture-suspend
+      // window from a recent exit, and the 'top' boundary cooldown set by
+      // the most recent upward exit.
+      if (currentScrollY >= prevScrollY) {
+        if (currentScrollY === prevScrollY) return;
+        if (stateRef.current !== 'idle') return;
+        if (Date.now() < captureSuspendedUntilRef.current) return;
+        if (blockedSentinel.current === 'top') return;
+        if (prevScrollY < sectionTopAbs && currentScrollY >= sectionTopAbs) {
+          capture('top', sectionTopAbs);
+        }
+        return;
+      }
+
+      // ── Upward crossing: ThesisGraph → Thesis (reverse) ──
       if (stateRef.current !== 'idle') return;
       if (Date.now() < captureSuspendedUntilRef.current) return;
       if (blockedSentinel.current === 'bottom') return;
