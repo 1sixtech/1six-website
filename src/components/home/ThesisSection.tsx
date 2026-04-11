@@ -319,24 +319,30 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
       onEnter: () => {
         if (exitingRef.current) return;
         sectionActiveRef.current = true;
-        // Brief animatingRef window absorbs desktop entry momentum (wheel
-        // events that arrive immediately after pin). 150ms is enough for
-        // 2-3 trackpad wheel ticks while being imperceptible to mobile
-        // users (their next touchstart arrives 200-300ms+ after touchend).
-        animatingRef.current = true;
+        // NOTE: we deliberately do NOT set animatingRef=true on entry.
+        //
+        // Previously a 150ms animatingRef lockout was here to "absorb
+        // desktop entry momentum", but it broke continuous scrolling
+        // from Hero into Thesis. GSAP's Observer.onUp fires exactly
+        // once per gesture, so the user's first gesture after pin
+        // would call gotoPage(1) → rejected by animatingRef → the
+        // gesture was silently consumed, and Observer wouldn't fire
+        // again until the user paused and scrolled a second time.
+        //
+        // The COOLDOWN_MS debounce inside gotoPage already absorbs
+        // residual momentum after a real transition, so we don't need
+        // the extra entry lockout.
         showPage(0);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
-        setTimeout(() => { animatingRef.current = false; }, 150);
       },
       onEnterBack: () => {
         if (exitingRef.current) return;
         sectionActiveRef.current = true;
-        animatingRef.current = true;
+        // See onEnter comment re: not setting animatingRef on entry.
         showPage(TOTAL - 1);
         observerRef.current?.enable();
         document.documentElement.classList.add('thesis-touch-lock');
-        setTimeout(() => { animatingRef.current = false; }, 150);
       },
       onLeave: () => {
         sectionActiveRef.current = false;

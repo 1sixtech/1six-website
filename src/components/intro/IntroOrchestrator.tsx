@@ -27,11 +27,25 @@ import {
  * runReveal fires synchronously with skipAnimation=true.
  */
 
-const MIN_DISPLAY_MS = 700;
+// Timing — tuned so that even on a warm-cache reload (where webglReady
+// resolves in <100ms) the user still sees a deliberate fill + brief
+// hold at 100% + smooth reveal, not a logo flash. The previous 700ms
+// min + 0.6s fill gave almost no visible hold at peak fill and felt
+// abrupt on refresh.
+//
+//   t=0.05  fill starts
+//   t=1.00  fill ends           (0.95s fill duration)
+//   t=1.20  min timer done      (0.20s hold at 100% fill)
+//   t=1.70  reveal done         (0.50s circular reveal)
+//   t=2.00  overlay faded       (0.30s overlay fade)
+//
+// Total ≈ 2.0s on fast loads. Hard cap at 2.5s still covers the worst
+// case where webglReady stalls.
+const MIN_DISPLAY_MS = 1200;
 const HARD_CAP_MS = 2500;
-const FILL_DURATION_S = 0.6;
+const FILL_DURATION_S = 0.95;
 const FILL_DELAY_S = 0.05;
-const REVEAL_DURATION_S = 0.4;
+const REVEAL_DURATION_S = 0.5;
 const OVERLAY_FADE_S = 0.3;
 
 interface IntroOrchestratorProps {
