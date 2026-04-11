@@ -87,6 +87,18 @@ export function ThesisSectionMobile() {
   const blockedSentinel = useRef<'top' | 'bottom' | null>(null);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suspendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cached absolute Y of section top. Computed ONLY at layout-stable moments
+  // (mount, resize, load, intro-lock removal) — NEVER inside a scroll event.
+  //
+  // Why: `getBoundingClientRect()` returns STALE values on iOS during momentum
+  // scroll — see commit 8b9312e and THESIS_SCROLL_HISTORY.md §2.9, §4.6. On
+  // Android the same call fires LATE through the IntersectionObserver path,
+  // causing `entry.boundingClientRect.bottom + window.scrollY` to compute a
+  // wrong sectionTopAbs (scrollY has moved on since the snapshot), so the IO
+  // capture snaps the user into ThesisGraph instead of Thesis top. A cached
+  // value computed off the scroll path dodges both iOS-stale-rect AND
+  // Android-late-IO failure modes in one shot.
+  const sectionTopAbsRef = useRef<number | null>(null);
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
@@ -203,6 +215,46 @@ export function ThesisSectionMobile() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // ── Cache sectionTopAbs at layout-stable moments ──
+  //
+  // The section's absolute Y in the document is stable throughout a session
+  // unless content above it reflows (image / font load, resize, intro lock
+  // removal). Computing it off the scroll path sidesteps the iOS stale-rect
+  // window that bit Phase 2.9.
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const computeTopAbs = () => {
+      // Safe to read here: we are NOT inside a scroll event handler, so iOS
+      // Safari returns a fresh rect.
+      sectionTopAbsRef.current = section.getBoundingClientRect().top + window.scrollY;
+    };
+
+    computeTopAbs();
+    window.addEventListener('resize', computeTopAbs);
+    window.addEventListener('load', computeTopAbs);
+
+    // The intro overlay can delay content layout until intro-lock lifts,
+    // which on slow devices is after this effect first runs. Recompute when
+    // the lock class is removed so the cache reflects the post-intro layout.
+    const html = document.documentElement;
+    const mo = new MutationObserver(() => {
+      if (!html.classList.contains('intro-lock')) {
+        // Defer one frame so the browser has applied any layout shift from
+        // removing `overflow: hidden` before we measure.
+        requestAnimationFrame(computeTopAbs);
+      }
+    });
+    mo.observe(html, { attributes: true, attributeFilter: ['class'] });
+
+    return () => {
+      window.removeEventListener('resize', computeTopAbs);
+      window.removeEventListener('load', computeTopAbs);
+      mo.disconnect();
+    };
+  }, []);
+
   // ── Top sentinel: detect scroll down into thesis ──
   // Sentinel sits directly above the thesis section, so when it leaves the
   // viewport (scrolling down), thesis top is at the viewport top.
@@ -231,9 +283,37 @@ export function ThesisSectionMobile() {
     return () => observer.disconnect();
   }, [capture]);
 
-  // ── Reverse re-entry from below: detect upward scroll crossing the threshold ──
-  // Using scroll deltas here avoids the "first intersect at 0px" edge case of a
-  // zero-height sentinel, which was too eager on mobile Safari.
+  // ── Scroll-event forward + reverse crossing detection ──
+  //
+  // Two entry paths are handled here:
+  //
+  //   FORWARD (Hero → Thesis): the IntersectionObserver on the top sentinel
+  //   remains the primary trigger on iOS (where it fires with acceptable
+  //   latency). On Android Chrome the IO callback is throttled hard during
+  //   inertial scrolls — by the time it runs, the user can already be
+  //   several hundred pixels past Thesis, and because the IO path computes
+  //   `entry.boundingClientRect.bottom + window.scrollY` the callback-time
+  //   scrollY has moved on from the snapshot scrollY, producing a wrong
+  //   `sectionTopAbs` that scrollTo() snaps into ThesisGraph. Adding a
+  //   scroll-event forward check with a CACHED `sectionTopAbs` lets us
+  //   catch the crossing in real time on Android without the wrong-target
+  //   class of bug.
+  //
+  //   CRITICAL — iOS safety: we MUST NOT read `getBoundingClientRect()`
+  //   inside a scroll event on iOS (stale-rect window, see §2.9 +
+  //   commit 8b9312e). The cached `sectionTopAbsRef` is computed at
+  //   layout-stable moments (mount / resize / load / intro-lock lift)
+  //   and consulted here read-only. If the cache has not been populated
+  //   yet, we skip forward detection entirely and let the IO path handle
+  //   it — same behaviour as before this change, so no iPhone regression.
+  //
+  //   REVERSE (ThesisGraph → Thesis): unchanged. The existing logic
+  //   reads a fresh rect and has been iPhone-verified through Phase 3.
+  //   Do not switch this to the cache without re-verifying on device.
+  //
+  // The IntersectionObserver above remains as a safety net for both paths.
+  // Whichever fires first wins; the second one no-ops because
+  // `stateRef.current !== 'idle'`.
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -244,6 +324,9 @@ export function ThesisSectionMobile() {
       const currentScrollY = window.scrollY;
       const prevScrollY = prevScrollYRef.current;
       prevScrollYRef.current = currentScrollY;
+
+      // Fresh rect is used only for the existing pending-hash and reverse
+      // re-entry paths. The forward path below uses the cached value.
       const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
 
       if (pendingHashCaptureRef.current
@@ -253,7 +336,27 @@ export function ThesisSectionMobile() {
         return;
       }
 
-      if (currentScrollY >= prevScrollY) return;
+      // ── Downward crossing: Hero → Thesis (forward, iOS-safe) ──
+      if (currentScrollY > prevScrollY) {
+        if (stateRef.current !== 'idle') return;
+        if (Date.now() < captureSuspendedUntilRef.current) return;
+        if (blockedSentinel.current === 'top') return;
+        const cachedTopAbs = sectionTopAbsRef.current;
+        // If the cache hasn't been computed yet (very early mount timing,
+        // before the cache effect ran), bail out and let the IO path handle
+        // the entry. This preserves the pre-change behaviour on iOS.
+        if (cachedTopAbs == null) return;
+        if (prevScrollY < cachedTopAbs && currentScrollY >= cachedTopAbs) {
+          capture('top', cachedTopAbs);
+        }
+        return;
+      }
+
+      // No change → nothing to do. Prevents a rare same-value scroll event
+      // from slipping into the reverse re-entry branch below.
+      if (currentScrollY === prevScrollY) return;
+
+      // ── Upward crossing: ThesisGraph → Thesis (reverse, unchanged) ──
       if (stateRef.current !== 'idle') return;
       if (Date.now() < captureSuspendedUntilRef.current) return;
       if (blockedSentinel.current === 'bottom') return;
