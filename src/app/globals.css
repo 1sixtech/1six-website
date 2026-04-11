@@ -161,6 +161,47 @@ html.thesis-scroll-lock body {
   -webkit-overflow-scrolling: auto;
 }
 
+/* Thesis pre-capture touch-action override.
+   Swiper's shipped CSS applies `touch-action: pan-x` to `.swiper-vertical`
+   elements, which blocks native vertical scrolling on the Swiper element at
+   the browser's compositor layer. The intent is "user can only swipe
+   vertically via Swiper, never via native scroll." That is correct WHEN
+   we own the viewport (captured state). BEFORE capture, the user may
+   swipe on a partially-visible Thesis section — in that window we want
+   the swipe to pass through to native page scroll so the document can
+   finish scrolling Hero away and Thesis into the viewport-top position
+   where our capture() helper takes over.
+   Overriding touch-action on the Swiper element back to `pan-y` while
+   `html` does NOT carry the `data-thesis-captured` attribute restores
+   native vertical scrolling in that window. Swiper's JS-level
+   `allowTouchMove=false` gate (enforced in ThesisSectionMobile's
+   capture/stopCapture) still prevents Swiper from hijacking the touch at
+   the JS layer. BOTH gates are required — `touch-action` alone is not
+   sufficient because Swiper still calls `preventDefault()` on touchmove
+   once it decides the gesture is a slide change, which would kill the
+   native scroll even with pan-y applied. */
+html:not([data-thesis-captured='1']) #thesis .swiper-vertical {
+  touch-action: pan-y !important;
+}
+
+/* Thesis captured-state viewport-height freeze.
+   During the captured state the section is rendered as `h-dvh`, which is
+   the dynamic viewport height. On iOS Safari and Android Chrome the
+   dynamic value changes when the address bar collapses or expands during
+   scroll. Those height changes propagate to the section's height, which
+   propagates to Swiper's `.swiper-wrapper` and slide heights, which
+   causes a visible vertical shift during a mid-slide transition (e.g.
+   slide 2 → 3). Freezing the section height to a pixel value captured
+   at the moment of capture() stops the churn.
+   The `--thesis-captured-h` CSS variable is set by ThesisSectionMobile's
+   capture() from `visualViewport.height` (fallback `innerHeight`). This
+   is the height of the visual viewport AT THAT MOMENT — the user's
+   current screen real estate. stopCapture() clears the variable so the
+   section returns to `h-dvh` when the next natural reflow happens. */
+html[data-thesis-captured='1'] #thesis {
+  height: var(--thesis-captured-h, 100dvh) !important;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

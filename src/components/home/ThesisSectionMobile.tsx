@@ -150,7 +150,30 @@ export function ThesisSectionMobile() {
     pendingHashCaptureRef.current = false;
 
     // Step 1: cancel Android compositor momentum via layout change.
+    // Also set the data-thesis-captured attribute that the globals.css
+    // touch-action override keys off. In the uncaptured state the
+    // override re-enables native pan-y on the Swiper element so a swipe
+    // on a partially-visible Thesis area falls through to page scroll;
+    // in the captured state the attribute is set and the override no
+    // longer matches, so Swiper's default pan-x behaviour takes over and
+    // Swiper can own the gesture.
+    //
+    // Freeze the section height to the current visual viewport height so
+    // a dynamic address-bar collapse/expand during the captured state
+    // does not churn the section's height. See THESIS_SCROLL_HISTORY.md
+    // + globals.css `html[data-thesis-captured='1'] #thesis` for the
+    // CSS side of this. `visualViewport.height` is the most accurate
+    // measurement of the actual visible area; innerHeight is the
+    // fallback for browsers without visualViewport (rare on mobile but
+    // worth defending).
+    const vv = window.visualViewport;
+    const capturedHeight = Math.round(vv ? vv.height : window.innerHeight);
+    document.documentElement.style.setProperty(
+      '--thesis-captured-h',
+      `${capturedHeight}px`,
+    );
     document.documentElement.classList.add('thesis-scroll-lock');
+    document.documentElement.dataset.thesisCaptured = '1';
 
     // Step 2: instant snap to the pre-computed position (no momentum-
     // induced offset, and now reliably honoured on Android).
@@ -161,9 +184,13 @@ export function ThesisSectionMobile() {
     // ENABLE Swiper touch. Before capture, Swiper's allowTouchMove is
     // false so Thesis slides cannot be swiped while the section is
     // only partially on screen — in that window the user's touch falls
-    // through to native page scroll. The instance property is flipped
-    // directly so it takes effect on this frame, and the React state
-    // is updated for the next render so the prop value stays in sync.
+    // through to native page scroll (via the touch-action: pan-y
+    // override in globals.css + Swiper's own no-op on allowTouchMove:
+    // false). The instance property is flipped directly so it takes
+    // effect on this frame, and the React state is updated for the
+    // next render so the prop value stays in sync. BOTH gates matter:
+    // JS allowTouchMove blocks Swiper's preventDefault path, CSS
+    // touch-action opens the browser's native scroll path.
     if (swiperRef.current) {
       swiperRef.current.allowTouchMove = true;
     }
@@ -218,8 +245,15 @@ export function ThesisSectionMobile() {
     // Release the Android overflow lock so the smooth exit scrollTo (kicked
     // off by the caller via smoothScrollToExit) can actually move the page.
     // Removing the class is synchronous and takes effect before the next
-    // scrollTo, so there is no race.
+    // scrollTo, so there is no race. Also drop the thesisCaptured data
+    // attribute so the touch-action: pan-y override in globals.css starts
+    // matching again on the next gesture, re-enabling native scroll
+    // through the (still-present) Swiper element. And clear the
+    // captured-height CSS variable so the section returns to `h-dvh` on
+    // the next reflow.
     document.documentElement.classList.remove('thesis-scroll-lock');
+    delete document.documentElement.dataset.thesisCaptured;
+    document.documentElement.style.removeProperty('--thesis-captured-h');
     document.removeEventListener('touchmove', preventPageScroll);
     // Disable Swiper touch gestures again — same reason as the enable in
     // capture(). While the user is scrolling past Thesis in either
@@ -274,9 +308,20 @@ export function ThesisSectionMobile() {
   // ── Cache sectionTopAbs at layout-stable moments ──
   //
   // The section's absolute Y in the document is stable throughout a session
-  // unless content above it reflows (image / font load, resize, intro lock
-  // removal). Computing it off the scroll path sidesteps the iOS stale-rect
-  // window that bit Phase 2.9.
+  // EXCEPT when content above it reflows. Sources of reflow on mobile:
+  //   - window resize / orientation change
+  //   - load event (images, fonts, late-loaded JS bundles)
+  //   - intro-lock class removal (the intro overlay's `overflow: hidden`
+  //     comes off, triggering a small layout shift)
+  //   - visualViewport.resize (iOS dynamic address bar show/hide). Hero is
+  //     `h-dvh`, so when the address bar collapses/expands Hero's height
+  //     changes and Thesis's absolute Y shifts by the same delta. Without
+  //     this invalidation the cache would go stale between the initial
+  //     compute and the first swipe, and forward crossing would capture
+  //     to a slightly wrong sectionTopAbs.
+  //
+  // Computing off the scroll path sidesteps the iOS stale-rect window
+  // that bit Phase 2.9 (see THESIS_SCROLL_HISTORY.md §2.9).
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -290,6 +335,13 @@ export function ThesisSectionMobile() {
     computeTopAbs();
     window.addEventListener('resize', computeTopAbs);
     window.addEventListener('load', computeTopAbs);
+
+    // iOS dynamic address bar: visualViewport fires `resize` when the bar
+    // shows or hides, even though `window.resize` does not. This is the
+    // only reliable way to notice the change. Not all browsers ship
+    // visualViewport (older Android WebView), so guard the access.
+    const vv = window.visualViewport;
+    if (vv) vv.addEventListener('resize', computeTopAbs);
 
     // The intro overlay can delay content layout until intro-lock lifts,
     // which on slow devices is after this effect first runs. Recompute when
@@ -307,6 +359,7 @@ export function ThesisSectionMobile() {
     return () => {
       window.removeEventListener('resize', computeTopAbs);
       window.removeEventListener('load', computeTopAbs);
+      if (vv) vv.removeEventListener('resize', computeTopAbs);
       mo.disconnect();
     };
   }, []);
@@ -341,35 +394,36 @@ export function ThesisSectionMobile() {
 
   // ── Scroll-event forward + reverse crossing detection ──
   //
-  // Two entry paths are handled here:
+  // Two entry paths are handled here. Both now use the cached
+  // `sectionTopAbsRef` and never read `getBoundingClientRect()` inline.
+  // The old code called `section.getBoundingClientRect().top + scrollY`
+  // on every scroll event, which is the exact iOS stale-rect anti-
+  // pattern documented in THESIS_SCROLL_HISTORY.md §2.9 and fixed in
+  // commit 8b9312e for the IntersectionObserver path. The reverse
+  // re-entry path was quietly still using the stale pattern — this was
+  // the source of the "reverse capture lands with Hero slightly visible
+  // at the top" bug.
   //
   //   FORWARD (Hero → Thesis): the IntersectionObserver on the top sentinel
-  //   remains the primary trigger on iOS (where it fires with acceptable
-  //   latency). On Android Chrome the IO callback is throttled hard during
-  //   inertial scrolls — by the time it runs, the user can already be
-  //   several hundred pixels past Thesis, and because the IO path computes
-  //   `entry.boundingClientRect.bottom + window.scrollY` the callback-time
-  //   scrollY has moved on from the snapshot scrollY, producing a wrong
-  //   `sectionTopAbs` that scrollTo() snaps into ThesisGraph. Adding a
-  //   scroll-event forward check with a CACHED `sectionTopAbs` lets us
-  //   catch the crossing in real time on Android without the wrong-target
-  //   class of bug.
+  //   remains a safety net. On Android Chrome the IO callback is
+  //   throttled hard during inertial scrolls — by the time it runs, the
+  //   user is already several hundred pixels past Thesis and IO's
+  //   `entry.boundingClientRect.bottom + callback-time scrollY` is the
+  //   wrong target. The scroll-event forward check using the cached
+  //   value catches the crossing in real time on Android.
   //
-  //   CRITICAL — iOS safety: we MUST NOT read `getBoundingClientRect()`
-  //   inside a scroll event on iOS (stale-rect window, see §2.9 +
-  //   commit 8b9312e). The cached `sectionTopAbsRef` is computed at
-  //   layout-stable moments (mount / resize / load / intro-lock lift)
-  //   and consulted here read-only. If the cache has not been populated
-  //   yet, we skip forward detection entirely and let the IO path handle
-  //   it — same behaviour as before this change, so no iPhone regression.
+  //   REVERSE (ThesisGraph → Thesis): previously called a fresh
+  //   `getBoundingClientRect()` inside the scroll handler — stale during
+  //   iOS momentum. Now uses the cache.
   //
-  //   REVERSE (ThesisGraph → Thesis): unchanged. The existing logic
-  //   reads a fresh rect and has been iPhone-verified through Phase 3.
-  //   Do not switch this to the cache without re-verifying on device.
+  //   PENDING HASH navigation: uses a fresh rect because it only fires
+  //   during a deliberate hash navigation, not during user momentum.
+  //   The rect is stable at that moment and the tolerance check handles
+  //   any sub-pixel drift.
   //
-  // The IntersectionObserver above remains as a safety net for both paths.
-  // Whichever fires first wins; the second one no-ops because
-  // `stateRef.current !== 'idle'`.
+  // The IntersectionObserver above remains as a safety net for the
+  // forward path. Whichever fires first wins; the second one no-ops
+  // because `stateRef.current !== 'idle'`.
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
@@ -381,27 +435,30 @@ export function ThesisSectionMobile() {
       const prevScrollY = prevScrollYRef.current;
       prevScrollYRef.current = currentScrollY;
 
-      // Fresh rect is used only for the existing pending-hash and reverse
-      // re-entry paths. The forward path below uses the cached value.
-      const sectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
-
-      if (pendingHashCaptureRef.current
-        && stateRef.current === 'idle'
-        && Math.abs(currentScrollY - sectionTopAbs) <= HASH_CAPTURE_ALIGNMENT_TOLERANCE) {
-        capture('top', sectionTopAbs);
-        return;
+      // Pending-hash fallback: uses a fresh rect intentionally — hash nav
+      // is not a momentum-driven scroll so the rect is stable. If this
+      // ever causes trouble, switch to the cached value like the two
+      // crossing paths below.
+      if (pendingHashCaptureRef.current && stateRef.current === 'idle') {
+        const freshSectionTopAbs = section.getBoundingClientRect().top + currentScrollY;
+        if (Math.abs(currentScrollY - freshSectionTopAbs) <= HASH_CAPTURE_ALIGNMENT_TOLERANCE) {
+          capture('top', freshSectionTopAbs);
+          return;
+        }
       }
+
+      // Both crossing paths need a stable cached value. If the cache has
+      // not been populated yet (very early mount, before the cache effect
+      // ran), bail out and let the IntersectionObserver handle entries.
+      // This preserves the pre-change behaviour in that narrow window.
+      const cachedTopAbs = sectionTopAbsRef.current;
+      if (cachedTopAbs == null) return;
 
       // ── Downward crossing: Hero → Thesis (forward, iOS-safe) ──
       if (currentScrollY > prevScrollY) {
         if (stateRef.current !== 'idle') return;
         if (Date.now() < captureSuspendedUntilRef.current) return;
         if (blockedSentinel.current === 'top') return;
-        const cachedTopAbs = sectionTopAbsRef.current;
-        // If the cache hasn't been computed yet (very early mount timing,
-        // before the cache effect ran), bail out and let the IO path handle
-        // the entry. This preserves the pre-change behaviour on iOS.
-        if (cachedTopAbs == null) return;
         if (prevScrollY < cachedTopAbs && currentScrollY >= cachedTopAbs) {
           capture('top', cachedTopAbs);
         }
@@ -412,16 +469,18 @@ export function ThesisSectionMobile() {
       // from slipping into the reverse re-entry branch below.
       if (currentScrollY === prevScrollY) return;
 
-      // ── Upward crossing: ThesisGraph → Thesis (reverse, unchanged) ──
+      // ── Upward crossing: ThesisGraph → Thesis (reverse, iOS-safe) ──
       if (stateRef.current !== 'idle') return;
       if (Date.now() < captureSuspendedUntilRef.current) return;
       if (blockedSentinel.current === 'bottom') return;
 
       // Match the forward Hero -> Thesis handoff: only capture once Thesis
-      // fully occupies the viewport again (section top reaches viewport top).
-      const reverseCaptureThreshold = sectionTopAbs;
-      if (prevScrollY > reverseCaptureThreshold && currentScrollY <= reverseCaptureThreshold) {
-        capture('bottom', sectionTopAbs);
+      // fully occupies the viewport again (section top reaches viewport
+      // top). Using the cached value avoids the iOS stale-rect window
+      // that produced the "Hero slightly visible at the top after
+      // reverse re-entry" bug.
+      if (prevScrollY > cachedTopAbs && currentScrollY <= cachedTopAbs) {
+        capture('bottom', cachedTopAbs);
       }
     };
 
@@ -550,9 +609,14 @@ export function ThesisSectionMobile() {
     return () => {
       document.removeEventListener('touchmove', preventPageScroll);
       // Defensive: if the component unmounts mid-capture (e.g. route change
-      // while scroll is locked), make sure the html class is cleared so the
-      // next page does not inherit `overflow: hidden`.
+      // while scroll is locked), make sure the html class + dataset + CSS
+      // variable are all cleared so the next page does not inherit
+      // `overflow: hidden`, the captured-state marker that the CSS
+      // touch-action override checks against, nor the frozen section
+      // height.
       document.documentElement.classList.remove('thesis-scroll-lock');
+      delete document.documentElement.dataset.thesisCaptured;
+      document.documentElement.style.removeProperty('--thesis-captured-h');
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
     };
