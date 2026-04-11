@@ -190,6 +190,12 @@ export function AsciiCanvas({
       return; // Skip, too many active contexts
     }
 
+    // Hoisted so the catch block can clean up the partially-constructed
+    // mosaic. Originally declared inside the try, which made the catch
+    // block blind to a failed instance and leaked activeContextCount +
+    // mosaicRef (Codex review C3).
+    let mosaic: InstanceType<(typeof import('@/lib/ascmosaic'))['AscMosaic']> | null = null;
+
     try {
       // Remove any leftover canvases from previous instances
       container.querySelectorAll('canvas').forEach(c => c.remove());
@@ -197,7 +203,7 @@ export function AsciiCanvas({
       // Dynamic import to avoid SSR issues with Three.js
       const { AscMosaic } = await import('@/lib/ascmosaic');
 
-      const mosaic = new AscMosaic(container, {
+      mosaic = new AscMosaic(container, {
         orthographic,
         autoRotate: resolvedAutoRotate,
       });
@@ -300,6 +306,38 @@ export function AsciiCanvas({
       }
     } catch (err) {
       console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
+      // Init-failure cleanup (Codex review C3 + C4).
+      //
+      // C3: if `mosaic` was constructed before the throw (addModel,
+      //     enableAsciiMosaicFilter, or a race check failed), we leaked
+      //     the WebGL context + activeContextCount + mosaicRef until the
+      //     component unmounted. Since the `mosaicRef.current` guard at
+      //     the top of initMosaic blocks retries, that leak was
+      //     permanent for the canvas's lifetime and would eventually
+      //     exhaust MAX_ACTIVE_CONTEXTS across failures. Dispose the
+      //     instance, clear the ref, and decrement the counter.
+      //
+      // C4: also fire markAsciiReady so the IntroOrchestrator does not
+      //     wait the full 2.5s hardcap for a canvas that has no chance
+      //     of ever marking ready. A silent fast-forward to reveal with
+      //     the fallback visual (loading skeleton / blue material) is
+      //     strictly better UX than an extra ~1.3s of stuck intro.
+      if (mosaic) {
+        try {
+          mosaic.stopAnimate();
+          mosaic.dispose();
+        } catch {
+          // Best-effort cleanup — disposing a partially-constructed
+          // mosaic may hit null references internally. Ignore.
+        }
+        if (mosaicRef.current === mosaic) {
+          activeContextCount = Math.max(0, activeContextCount - 1);
+          mosaicRef.current = null;
+        }
+      }
+      if (preloadKey) {
+        markAsciiReady(preloadKey);
+      }
     }
   }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX, preloadKey]);
 
