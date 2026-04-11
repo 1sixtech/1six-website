@@ -161,13 +161,42 @@ export function IntroOrchestrator({
         }
       };
 
-      const unlock = () => {
-        html.classList.remove('intro-lock');
+      // Remove the CSS clip-path gate (data-intro-active) so main-content
+      // is no longer visually clipped. This is ALWAYS safe to remove as
+      // soon as reveal starts because GSAP's inline clipPath takes over.
+      const removeCssGate = () => {
         delete html.dataset.introActive;
       };
 
+      // Remove the hard scroll/touch lock. intro-lock blocks overflow,
+      // pointer events, and touch actions. In normal mode we keep it ON
+      // until HeroSection's scramble completes (HeroSection's unlockPage()
+      // does this via the StaggeredScramble onComplete callback). In
+      // skip / fallback paths where the orchestrator owns the full
+      // unlock, this function is called here directly.
+      const unlockScroll = () => {
+        html.classList.remove('intro-lock');
+      };
+
+      // Hide the overlay instantly (no GSAP). Used by the skip path and
+      // the null-ref fallback path — both need the overlay gone but
+      // don't run the fade-out tween.
+      const hideOverlayInstant = () => {
+        const overlay = overlayRef.current;
+        if (overlay) {
+          overlay.style.opacity = '0';
+          overlay.style.visibility = 'hidden';
+        }
+      };
+
       if (skipAnimation) {
-        unlock();
+        // Skip mode = reduced-motion OR session repeat. The inline script
+        // did NOT set intro-lock, so scroll is already unlocked. But the
+        // IntroOverlay is still in the DOM covering the page, so we have
+        // to hide it here — otherwise the user sees a stuck dim logo.
+        removeCssGate();
+        unlockScroll(); // no-op if already unlocked, cheap defense
+        hideOverlayInstant();
         markSeen();
         // Fire on next tick so subscribers that mount later (e.g. the
         // HeroSection effect) also see the event. Guard against
@@ -187,10 +216,12 @@ export function IntroOrchestrator({
       if (!main || !overlay) {
         // Defensive fallback: refs should be populated by the parent
         // HomeIntroMount before this effect runs. If they're null for any
-        // reason, do NOT leave the intro stuck — unlock, mark seen, and
-        // dispatch both events immediately so downstream consumers can
+        // reason, do NOT leave the intro stuck — fully unlock, mark seen,
+        // and dispatch both events immediately so downstream consumers can
         // proceed. This path should never run in practice.
-        unlock();
+        removeCssGate();
+        unlockScroll();
+        hideOverlayInstant();
         markSeen();
         queueMicrotask(() => {
           window.dispatchEvent(new CustomEvent('intro:revealed'));
@@ -211,7 +242,13 @@ export function IntroOrchestrator({
           duration: REVEAL_DURATION_S,
           ease: 'power3.out',
           onStart: () => {
-            unlock();
+            // Only drop the CSS clip-path gate here. intro-lock is
+            // deliberately kept ON so the user cannot scroll until
+            // HeroSection's scramble finishes and calls unlockPage()
+            // (via the StaggeredScramble onComplete callback). This
+            // matches the original pre-intro-loader behavior where
+            // scramble completion was the gate for interactivity.
+            removeCssGate();
             markSeen();
             window.dispatchEvent(new CustomEvent('intro:revealed'));
           },
