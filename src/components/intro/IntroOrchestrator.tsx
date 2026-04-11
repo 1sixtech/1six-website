@@ -65,14 +65,21 @@ export function IntroOrchestrator({
       };
     }
 
-    // Begin parallel warmup of all 11 video URLs. Promise.allSettled means
-    // partial failure is tolerated — the orchestrator relies on per-canvas
-    // 'ascii:ready' events rather than this promise's resolution.
+    // Begin parallel warmup of the video targets. Only 'video' assetTypes
+    // go through videoPool — image targets (e.g. the world map .webp)
+    // cannot be loaded into a <video> element and would silently reject.
+    // They are loaded lazily by Three.js TextureLoader when AsciiCanvas
+    // mounts. Promise.allSettled means partial failure is tolerated — the
+    // orchestrator relies on per-canvas 'ascii:ready' events rather than
+    // this promise's resolution.
+    const videoTargets = HOMEPAGE_ASCII_TARGETS.filter(
+      (t) => t.assetType === 'video',
+    );
     videoPool
-      .warmupAll(HOMEPAGE_ASCII_TARGETS.map((t) => t.textureUrl))
+      .warmupAll(videoTargets.map((t) => t.textureUrl))
       .then((results) => {
         const failed = results
-          .map((r, i) => (r.status === 'rejected' ? HOMEPAGE_ASCII_TARGETS[i].key : null))
+          .map((r, i) => (r.status === 'rejected' ? videoTargets[i].key : null))
           .filter((k): k is string => k !== null);
         if (failed.length > 0) {
           console.warn('[intro] videoPool partial failure:', failed);

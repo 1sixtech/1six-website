@@ -27,21 +27,29 @@ export interface AsciiReadyEventDetail {
 export interface AsciiTarget {
   readonly key: string;
   readonly textureUrl: string;
+  /**
+   * Asset type. 'video' targets go through videoPool warmup (which uses
+   * a real <video> element). 'image' targets are loaded lazily by
+   * Three.js TextureLoader inside AscMosaic — they do NOT need videoPool
+   * and will silently fail if passed to it (webp/jpg/png can't be loaded
+   * into a <video> element).
+   */
+  readonly assetType: 'video' | 'image';
 }
 
 /** All possible ASCII canvas keys on the homepage. */
 export const HOMEPAGE_ASCII_TARGETS: readonly AsciiTarget[] = [
-  { key: 'hero',         textureUrl: '/resource/Source_Desert.mp4' },
-  { key: 'thesis-1',     textureUrl: '/resource/Source_About 01.mp4' },
-  { key: 'thesis-2',     textureUrl: '/resource/Source_About 02.mp4' },
-  { key: 'thesis-3',     textureUrl: '/resource/Source_About 03.mp4' },
-  { key: 'thesis-4',     textureUrl: '/resource/Source_About 04.mp4' },
-  { key: 'thesis-5',     textureUrl: '/resource/Source_About 05.mp4' },
-  { key: 'thesis-6',     textureUrl: '/resource/Source_About 06.mp4' },
-  { key: 'graph',        textureUrl: '/resource/Source_Graph.mp4' },
-  { key: 'map',          textureUrl: '/resource/Source_World map.webp' },
-  { key: 'nevada-tv',    textureUrl: '/resource/Source_Nevada TV.mp4' },
-  { key: 'nevada-trade', textureUrl: '/resource/Source_Nevada Trade.mp4' },
+  { key: 'hero',         textureUrl: '/resource/Source_Desert.mp4',     assetType: 'video' },
+  { key: 'thesis-1',     textureUrl: '/resource/Source_About 01.mp4',   assetType: 'video' },
+  { key: 'thesis-2',     textureUrl: '/resource/Source_About 02.mp4',   assetType: 'video' },
+  { key: 'thesis-3',     textureUrl: '/resource/Source_About 03.mp4',   assetType: 'video' },
+  { key: 'thesis-4',     textureUrl: '/resource/Source_About 04.mp4',   assetType: 'video' },
+  { key: 'thesis-5',     textureUrl: '/resource/Source_About 05.mp4',   assetType: 'video' },
+  { key: 'thesis-6',     textureUrl: '/resource/Source_About 06.mp4',   assetType: 'video' },
+  { key: 'graph',        textureUrl: '/resource/Source_Graph.mp4',      assetType: 'video' },
+  { key: 'map',          textureUrl: '/resource/Source_World map.webp', assetType: 'image' },
+  { key: 'nevada-tv',    textureUrl: '/resource/Source_Nevada TV.mp4',  assetType: 'video' },
+  { key: 'nevada-trade', textureUrl: '/resource/Source_Nevada Trade.mp4', assetType: 'video' },
 ] as const;
 
 // ─── AsciiCanvas ready tracking ───────────────────────────────────────
