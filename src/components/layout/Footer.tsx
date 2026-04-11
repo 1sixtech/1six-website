@@ -5,13 +5,11 @@ const COMPANY_LINKS = [
   { label: 'Thesis', href: '/#thesis' },
   { label: 'About', href: '/about' },
   { label: 'Investors', href: '/about#investors' },
-  { label: 'Careers', href: '/about#careers' },
 ];
 
 const PRODUCT_LINKS = [
-  { label: 'Nevada TV', href: '#' },
-  { label: 'Nevada Trade', href: '#' },
-  { label: 'Mojave', href: '#' },
+  { label: 'Nevada TV', href: 'https://live.nevada.app' },
+  { label: 'Nevada Trade', href: 'https://trade.nevada.app' },
 ];
 
 const CONNECT_LINKS = [
