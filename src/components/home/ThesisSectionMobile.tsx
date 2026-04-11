@@ -385,10 +385,31 @@ export function ThesisSectionMobile() {
     const section = sectionRef.current;
     if (!section) return;
 
+    const getAbsoluteOffsetTop = (el: HTMLElement) => {
+      // Use layout offsets, not `getBoundingClientRect().top + window.scrollY`.
+      //
+      // Why: on iPhone, `visualViewport.resize` is fired while the browser UI
+      // is animating and `getBoundingClientRect()` can be relative to a visual
+      // viewport that is not in lock-step with `window.scrollY`. Rebuilding an
+      // absolute Y from those two values can poison `sectionTopAbsRef` with a
+      // one-off bad threshold. Once that cached threshold is wrong, BOTH
+      // forward-capture paths (top-sentinel IO + scroll crossing) miss and the
+      // user scrolls straight through Thesis into ThesisGraph.
+      //
+      // The offsetTop chain stays in layout/document coordinates, so it tracks
+      // real reflow above the section without mixing viewport-relative and
+      // document-relative measurements.
+      let top = 0;
+      let node: HTMLElement | null = el;
+      while (node) {
+        top += node.offsetTop;
+        node = node.offsetParent as HTMLElement | null;
+      }
+      return top;
+    };
+
     const computeTopAbs = () => {
-      // Safe to read here: we are NOT inside a scroll event handler, so iOS
-      // Safari returns a fresh rect.
-      sectionTopAbsRef.current = section.getBoundingClientRect().top + window.scrollY;
+      sectionTopAbsRef.current = getAbsoluteOffsetTop(section);
     };
 
     computeTopAbs();
