@@ -83,7 +83,25 @@ export function Header() {
   const handleNavClick = useCallback((e: React.MouseEvent, href: string) => {
     const hashMatch = href.match(/^\/?#(.+)$/);
     if (!hashMatch) {
-      // Non-hash link (e.g. /about): close menu, let Next.js Link handle navigation
+      // Non-hash link (e.g. /about): unlock scroll WITHOUT restoring
+      // position, then close menu and let Next.js Link handle navigation.
+      //
+      // Why not just setMenuOpen(false) and let the effect handle unlock?
+      // The menuOpen effect calls unlockScroll(true), which queues a rAF
+      // that restores scrollY to the saved position. That rAF fires AFTER
+      // Next.js's scroll-to-top handler, overriding it — so the destination
+      // page starts at the old scroll position instead of the top.
+      //
+      // By manually unlocking here (matching the hash-link pattern), we
+      // skip the rAF restoration entirely. Next.js's own scroll-to-top
+      // takes effect uncontested.
+      //
+      // The menuOpen guard (dataset.menuOpen) is cleared immediately, same
+      // as the hash path. Any phantom scroll event from removing
+      // position:fixed that reaches ThesisSectionMobile before unmount is
+      // harmless — the component's unmount cleanup removes all scroll locks.
+      manualUnlockRef.current = true;
+      unlockScroll(false);
       setMenuOpen(false);
       return;
     }
@@ -117,8 +135,16 @@ export function Header() {
         duration: 0.4,
         ease: 'power2.out',
       });
+    } else if (isHomeRoute) {
+      // Returning to the home route after visiting another page:
+      // useScrollReveal resets isVisible to false, React applies
+      // style={{ transform: 'translateY(-100%)' }}, and we need GSAP's
+      // internal transform cache to match so the next gsap.to({y:0})
+      // correctly interpolates from -100% instead of seeing a stale
+      // cached y=0 and producing a zero-length (invisible) tween.
+      gsap.set(headerRef.current, { y: '-100%' });
     }
-  }, [isVisible]);
+  }, [isVisible, isHomeRoute]);
 
   // Menu open animation (needs menuRef, only runs when menu mounts)
   useEffect(() => {
