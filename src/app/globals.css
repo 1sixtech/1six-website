@@ -100,6 +100,15 @@ html[data-intro-active="true"] #main-content {
 html {
   scrollbar-width: none; /* Firefox */
   scroll-behavior: auto;
+  /* Disable Chrome/Brave scroll anchoring — the browser's automatic scroll
+     position correction when elements above the viewport change size.
+     Safari does not implement scroll anchoring, which is why it's unaffected.
+     On Chromium browsers, address bar show/hide triggers viewport changes
+     that cause scroll anchoring to continuously "correct" the scroll
+     position during fast flicks, producing visible stutter. This site has
+     no lazy-loaded images or dynamic content insertion that would benefit
+     from anchoring, so disabling it is safe. */
+  overflow-anchor: none;
 }
 
 html::-webkit-scrollbar {
