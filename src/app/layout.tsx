@@ -141,6 +141,23 @@ export default function RootLayout({
                 document.documentElement.setAttribute('data-theme', theme);
               } catch (e) {}
               if (history.scrollRestoration) history.scrollRestoration = 'manual';
+              // Stable viewport height for mobile: Chrome Android recalculates
+              // viewport units (svh/lvh/dvh) during address bar collapse/expand,
+              // triggering style+layout recalculation on every animation frame.
+              // Capture innerHeight once and expose it as a CSS custom property
+              // so mobile full-viewport sections can use a fixed pixel value
+              // instead of svh. Updated only on orientation change (NOT resize,
+              // which fires during the very address bar animation we're avoiding).
+              // Safari iOS is unaffected (scroll is OS-level) but the fixed value
+              // is harmless there. Falls back to 100svh via CSS var() when unset.
+              if (window.matchMedia('(max-width:767px)').matches) {
+                document.documentElement.style.setProperty('--stable-svh', window.innerHeight + 'px');
+                window.addEventListener('orientationchange', function() {
+                  setTimeout(function() {
+                    document.documentElement.style.setProperty('--stable-svh', window.innerHeight + 'px');
+                  }, 150);
+                });
+              }
               // intro orchestration: see block below
               if (window.location.pathname === '/') {
                 // intro-lock is applied BEFORE first paint so the browser

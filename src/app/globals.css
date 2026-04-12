@@ -102,6 +102,29 @@ html {
   scroll-behavior: auto;
 }
 
+/* ══════════════════════════════════════════════════════════
+   Stable viewport height for mobile — Chrome scroll jank fix
+   ══���══════════════════════════════════���════════════════════
+   Chrome Android recalculates CSS viewport units (svh, dvh, lvh) during
+   address bar collapse/expand animation, triggering style recalculation →
+   layout → repaint on every frame of the animation. This produces the
+   visible scroll stutter ("grinding correction") on Chromium browsers.
+
+   Safari iOS is unaffected because its scroll runs at the OS level via
+   UIScrollView, completely independent of the web rendering pipeline.
+
+   Fix: the blocking script in layout.tsx captures window.innerHeight once
+   on mobile and sets it as --stable-svh. This CSS override replaces the
+   svh unit with the fixed pixel value, eliminating the per-frame
+   recalculation. Falls back to 100svh when --stable-svh is not set
+   (SSR, desktop, or JS-disabled). */
+@media (max-width: 767px) {
+  .h-svh,
+  .max-md\:h-svh {
+    height: var(--stable-svh, 100svh) !important;
+  }
+}
+
 html::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Edge */
 }
@@ -109,7 +132,17 @@ html::-webkit-scrollbar {
 body {
   background-color: var(--color-bg);
   color: var(--color-text);
-  transition: background-color 0.3s ease, color 0.3s ease;
+}
+/* Theme switch animation — desktop only. On mobile the transition
+   declaration tells Chrome's style system that background-color may
+   animate, which prevents aggressive compositor-layer caching of the
+   body element during scroll. Removing it on mobile lets Chrome keep
+   the body as a fully cacheable compositing layer. Theme changes on
+   mobile are instant (no smooth fade) as a trade-off. */
+@media (hover: hover) {
+  body {
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
 }
 
 /* Focus styles for keyboard navigation */
@@ -193,6 +226,36 @@ html:not([data-thesis-captured='1']) #thesis .swiper-vertical {
    updates as the address bar animates. */
 html[data-thesis-captured='1'] #thesis {
   height: 100lvh !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Mobile header: disable backdrop-filter for scroll performance
+   ══════════════════════════════════════════════════════════
+   backdrop-filter: blur() on a position:fixed element forces Chrome to
+   re-rasterize the header on EVERY scroll frame — the blur must be
+   recomputed because the pixels behind the header change as the user
+   scrolls. This is a main-thread paint operation, not a compositor
+   operation, and it is the PRIMARY cause of scroll stutter on Chromium.
+   Confirmed across VitePress (#1049), shadcn/ui (#327), thirdweb (#703),
+   and Twitter (Mozilla Bug 1809738). Safari uses hardware-optimized
+   Core Animation blur and is unaffected.
+
+   Fix: on mobile touch devices, remove the blur and use a high-opacity
+   semi-transparent background instead. The visual difference is minimal
+   and the scroll performance improvement is ~30% (VitePress measurement).
+   Desktop keeps the frosted glass effect since scroll performance is not
+   an issue there. */
+@media (hover: none) and (pointer: coarse) {
+  :root {
+    --color-header-bg: rgba(243, 240, 240, 0.95);
+  }
+  [data-theme='dark'] {
+    --color-header-bg: rgba(28, 28, 28, 0.95);
+  }
+  header {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 }
 
 /* Reduced motion */

@@ -20,10 +20,19 @@ if (typeof window !== 'undefined') {
   ScrollTrigger.config({
     autoRefreshEvents: 'visibilitychange,DOMContentLoaded,load',
   });
+  // Debounced via rAF: Chrome Android fires window.resize on every frame
+  // of the address bar animation. Even though innerWidth doesn't change
+  // during height-only resizes and the handler bails, batching prevents
+  // the event dispatch from adding main-thread overhead during scroll.
+  let _resizeRaf = 0;
   const onResize = () => {
-    const w = window.innerWidth;
-    if (_lastW && w !== _lastW) ScrollTrigger.refresh();
-    _lastW = w;
+    if (_resizeRaf) return;
+    _resizeRaf = requestAnimationFrame(() => {
+      _resizeRaf = 0;
+      const w = window.innerWidth;
+      if (_lastW && w !== _lastW) ScrollTrigger.refresh();
+      _lastW = w;
+    });
   };
   window.addEventListener('resize', onResize);
   if (document.readyState === 'complete') {

@@ -112,35 +112,54 @@ export class AscMosaic {
 
     // Resize handler: only fires on width changes to avoid flicker from
     // mobile address bar show/hide (height-only changes).
+    //
+    // IMPORTANT: the handler is debounced via rAF so the clientWidth read
+    // (which forces synchronous layout) does NOT run inline during the
+    // resize event dispatch. Chrome Android fires window.resize on EVERY
+    // frame of the address bar collapse/expand animation. Reading
+    // clientWidth synchronously inside those events forces a full layout
+    // computation each time, blocking the main thread and starving the
+    // scroll compositor — producing the "grinding correction" jank visible
+    // on Chromium browsers. Safari iOS does not fire window.resize during
+    // address bar animation, which is why Safari is unaffected.
+    //
+    // Deferring to rAF batches multiple resize events into a single layout
+    // read that runs AFTER Chrome has already committed the frame's layout,
+    // eliminating the forced-layout cost entirely.
     let lastContainerWidth = container.clientWidth;
+    let resizeRafId: number | null = null;
     this.resizeHandler = () => {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (w === lastContainerWidth) return;
-      lastContainerWidth = w;
+      if (resizeRafId !== null) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w === lastContainerWidth) return;
+        lastContainerWidth = w;
 
-      const rw = Math.round(w * this.renderScale);
-      const rh = Math.round(h * this.renderScale);
-      if (this.camera instanceof THREE.PerspectiveCamera) {
-        this.camera.aspect = w / h;
-      } else {
-        const halfH = this.orthoSize;
-        const halfW = halfH * (w / h);
-        this.camera.left = -halfW;
-        this.camera.right = halfW;
-        this.camera.top = halfH;
-        this.camera.bottom = -halfH;
-      }
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(rw, rh);
-      if (this.renderScale !== 1) {
-        const canvas = this.renderer.domElement;
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-      }
-      if (this.asciiMosaicFilter) {
-        this.asciiMosaicFilter.setSize(rw, rh);
-      }
+        const rw = Math.round(w * this.renderScale);
+        const rh = Math.round(h * this.renderScale);
+        if (this.camera instanceof THREE.PerspectiveCamera) {
+          this.camera.aspect = w / h;
+        } else {
+          const halfH = this.orthoSize;
+          const halfW = halfH * (w / h);
+          this.camera.left = -halfW;
+          this.camera.right = halfW;
+          this.camera.top = halfH;
+          this.camera.bottom = -halfH;
+        }
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(rw, rh);
+        if (this.renderScale !== 1) {
+          const canvas = this.renderer.domElement;
+          canvas.style.width = '100%';
+          canvas.style.height = '100%';
+        }
+        if (this.asciiMosaicFilter) {
+          this.asciiMosaicFilter.setSize(rw, rh);
+        }
+      });
     };
     window.addEventListener('resize', this.resizeHandler);
   }
