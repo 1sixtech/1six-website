@@ -213,16 +213,6 @@ export function Header() {
           backgroundColor: 'var(--color-header-bg)',
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
-          // Chromium perf: promote header to its own compositor layer and
-          // isolate its rendering. backdrop-filter on a fixed element forces
-          // Chrome to re-blur the background on every scroll frame — a known
-          // Chromium issue (crbug.com/339841685). will-change:transform
-          // pre-promotes the layer so the compositor can schedule the blur
-          // more efficiently, and contain:layout+style+paint tells Chrome
-          // this element's rendering is fully isolated from the rest of the
-          // document, allowing it to skip broader invalidation passes.
-          willChange: 'transform',
-          contain: 'layout style paint',
         }}
       >
         <div className="relative mx-auto h-full w-full max-w-[1440px]">
