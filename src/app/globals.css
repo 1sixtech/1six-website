@@ -184,6 +184,16 @@ html:not([data-thesis-captured='1']) #thesis .swiper-vertical {
   touch-action: pan-y !important;
 }
 
+/* Thesis captured height freeze: override h-svh with lvh (large viewport
+   height — stable, assumes browser UI fully retracted) so the section
+   fills the full visible area without dvh-driven reflows. During capture
+   the address bar is typically hidden (user has scrolled into thesis),
+   so lvh matches the actual viewport. Outside capture the section uses
+   h-svh which is stable during scroll and prevents jank from dvh
+   updates as the address bar animates. */
+html[data-thesis-captured='1'] #thesis {
+  height: 100lvh !important;
+}
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {

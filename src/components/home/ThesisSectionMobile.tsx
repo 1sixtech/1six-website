@@ -740,7 +740,7 @@ export function ThesisSectionMobile() {
       <section
         ref={sectionRef}
         id="thesis"
-        className="relative h-dvh w-full overflow-hidden z-10"
+        className="relative h-svh w-full overflow-hidden z-10"
         style={{ backgroundColor: 'var(--color-card)' }}
         aria-live="polite"
       >

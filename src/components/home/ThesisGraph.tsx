@@ -18,7 +18,7 @@ export function ThesisGraph() {
   return (
     <section
       id="thesis-graph"
-      className="relative flex h-dvh w-full items-center justify-center overflow-hidden"
+      className="relative flex h-svh w-full items-center justify-center overflow-hidden"
       style={{ backgroundColor: 'var(--color-card)' }}
     >
       {/* ASCII graph background — on mobile offset camera to show the right side (curve) */}
