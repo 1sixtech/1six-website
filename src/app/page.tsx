@@ -27,7 +27,14 @@ export default function HomePage() {
         <ProductCard
           product="nevada-tv"
           title="Nevada TV"
-          description="a 24/7/365 realtime broadcasting layer for the crypto-native world. streaming markets, traders, and narratives without interruption."
+          description={
+            <>
+              a 24/7/365 realtime{' '}
+              <span className="text-[var(--color-accent)]">broadcasting layer</span> for the
+              crypto-native world. streaming markets, traders, and narratives{' '}
+              <span className="text-[var(--color-accent)]">without interruption.</span>
+            </>
+          }
           ctaLabel="Start Watching"
           ctaHref="https://live.nevada.app"
         />
@@ -37,7 +44,15 @@ export default function HomePage() {
         <ProductCard
           product="nevada-trade"
           title="Nevada Trade"
-          description="the first trading execution layer where markets are lived. a social trading environment where users watch, discuss, and experience together."
+          description={
+            <>
+              the first trading{' '}
+              <span className="text-[var(--color-accent)]">execution layer</span> where markets
+              are lived. a{' '}
+              <span className="text-[var(--color-accent)]">social trading</span> environment
+              where users watch, discuss, and experience together.
+            </>
+          }
           ctaLabel="Start Trading"
           ctaHref="https://trade.nevada.app"
         />
