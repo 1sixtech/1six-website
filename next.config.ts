@@ -42,10 +42,13 @@ const nextConfig: NextConfig = {
     // registrations, leaving tweens that never tick and plugins (CSSPlugin,
     // AttrPlugin) that never register. Without this, the intro logo fill
     // animation silently never runs. Three is still safe.
+    //
+    // Do not enable experimental.sri here. On the current Next 16 +
+    // Turbopack production path, the emitted integrity attribute for at
+    // least the core turbopack runtime chunk does not match the served
+    // asset on Vercel, which causes browsers to block the script and
+    // leaves the client unhydrated behind the intro overlay.
     optimizePackageImports: ['three'],
-    sri: {
-      algorithm: 'sha256',
-    },
   },
   redirects: async () => [
     {
