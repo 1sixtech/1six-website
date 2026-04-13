@@ -7,6 +7,25 @@ import { fileURLToPath } from 'node:url';
 // package-lock.json in a parent directory (e.g. $HOME), which triggers the
 // "Next.js inferred your workspace root" build warning.
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const isDev = process.env.NODE_ENV !== 'production';
+const cspHeader = [
+  "default-src 'self'",
+  // Static App Router output still includes Next.js inline runtime scripts.
+  // Keep the official baseline CSP here unless the site is moved to nonce-based
+  // dynamic rendering.
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' blob: data:",
+  "media-src 'self' blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  ...(isDev ? [] : ['upgrade-insecure-requests']),
+].join('; ');
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -24,6 +43,9 @@ const nextConfig: NextConfig = {
     // AttrPlugin) that never register. Without this, the intro logo fill
     // animation silently never runs. Three is still safe.
     optimizePackageImports: ['three'],
+    sri: {
+      algorithm: 'sha256',
+    },
   },
   redirects: async () => [
     {
@@ -33,6 +55,19 @@ const nextConfig: NextConfig = {
     },
   ],
   headers: async () => [
+    {
+      source: '/(.*)',
+      headers: [
+        { key: 'Content-Security-Policy', value: cspHeader },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'X-Frame-Options', value: 'DENY' },
+        {
+          key: 'Permissions-Policy',
+          value: 'accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), browsing-topics=()',
+        },
+      ],
+    },
     {
       source: '/resource/:path*',
       headers: [

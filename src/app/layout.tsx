@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
+import Script from 'next/script';
 import './globals.css';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
@@ -124,63 +125,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={pretendard.variable} suppressHydrationWarning>
       <head>
-        {/* Blocking script to prevent theme flash (FOIT) */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              try {
-                var stored = localStorage.getItem('theme');
-                var theme;
-                if (stored === 'dark' || stored === 'light') {
-                  theme = stored;
-                } else {
-                  // First visit: dark on mobile, light on desktop
-                  theme = window.matchMedia('(max-width: 767px)').matches ? 'dark' : 'light';
-                  localStorage.setItem('theme', theme);
-                }
-                document.documentElement.setAttribute('data-theme', theme);
-              } catch (e) {}
-              if (history.scrollRestoration) history.scrollRestoration = 'manual';
-              // intro orchestration: see block below
-              if (window.location.pathname === '/') {
-                // intro-lock is applied BEFORE first paint so the browser
-                // cannot scroll during the hero scramble — in either mode:
-                //
-                //  - Full intro: locked during fill+reveal+scramble,
-                //    HeroSection's scramble onComplete removes it.
-                //  - Skip mode (reduced-motion / session repeat): locked
-                //    just during the scramble. HeroSection's scramble
-                //    onComplete (or its 2.5s safety fallback) removes it.
-                //
-                // The two modes are distinguished by data attributes:
-                //  - data-intro-active="true": render the full overlay
-                //    with fill/reveal animations (IntroOrchestrator).
-                //  - data-intro-skip="true":   suppress the overlay via
-                //    CSS (display:none) so there is no logo flash.
-                document.documentElement.classList.add('intro-lock');
-                var shouldIntro = true;
-                try {
-                  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-                    shouldIntro = false;
-                  }
-                  if (sessionStorage.getItem('introSeen') === '1') {
-                    shouldIntro = false;
-                  }
-                } catch (e) {
-                  // sessionStorage may throw in private browsing — fail open (show intro)
-                }
-                if (shouldIntro) {
-                  document.documentElement.dataset.introActive = 'true';
-                } else {
-                  document.documentElement.dataset.introSkip = 'true';
-                }
-              }
-              window.addEventListener('pageshow', function(e) {
-                if (e.persisted) window.location.reload();
-              });
-            `,
-          }}
-        />
+        <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
       <body className="font-sans antialiased">
         <script
