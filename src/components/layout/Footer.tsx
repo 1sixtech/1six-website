@@ -7,32 +7,34 @@ const COMPANY_LINKS = [
   { label: 'Investors', href: '/about#investors' },
 ];
 
-const PRODUCT_LINKS = [
-  { label: 'Nevada TV', href: 'https://live.nevada.app' },
-  { label: 'Nevada Trade', href: 'https://trade.nevada.app' },
-];
-
-const CONNECT_LINKS = [
-  { label: 'Youtube', href: 'https://www.youtube.com/@nevada-app' },
-  { label: 'Twitter', href: 'https://x.com/1sixtech' },
-  { label: 'Threads', href: 'https://www.threads.com/@live.nevada.app' },
-  { label: 'Instagram', href: 'https://www.instagram.com/live.nevada.app' },
-  { label: 'TikTok', href: 'https://www.tiktok.com/@live.nevada.app' },
-  { label: 'Discord', href: 'https://discord.gg/wR4srtyhuU' },
-];
-
 const linkClass =
   'text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)] transition-colors hover:text-[var(--color-accent)]';
 
-function FooterColumn({ title, links }: { title: string; links: { label: string; href: string }[] }) {
+function FooterColumn({
+  title,
+  links,
+  alignRight = false,
+}: {
+  title: string;
+  links: { label: string; href: string }[];
+  alignRight?: boolean;
+}) {
+  const alignClass = alignRight ? 'text-right' : '';
+
   return (
     <div>
-      <p className="mb-3 text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)]">
+      <p
+        className={`mb-3 text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)] ${alignClass}`}
+      >
         {title}
       </p>
-      <div className="flex flex-col gap-1">
+      <div className={`flex flex-col gap-1 ${alignRight ? 'items-end' : ''}`}>
         {links.map((link) => (
-          <Link key={link.label} href={link.href} className={linkClass}>
+          <Link
+            key={link.label}
+            href={link.href}
+            className={`${linkClass} ${alignClass}`}
+          >
             {link.label}
           </Link>
         ))}
@@ -52,15 +54,9 @@ export function Footer() {
         {/* Logo */}
         <LogoFooter className="h-[48px] w-[50px] text-[var(--color-accent)] mb-8" />
 
-        {/* 2-column: COMPANY + PRODUCTS */}
-        <div className="grid grid-cols-2 gap-8 mb-8">
-          <FooterColumn title="COMPANY" links={COMPANY_LINKS} />
-          <FooterColumn title="PRODUCTS" links={PRODUCT_LINKS} />
-        </div>
-
-        {/* CONNECT */}
-        <div className="mb-8">
-          <FooterColumn title="CONNECT" links={CONNECT_LINKS} />
+        {/* COMPANY */}
+        <div className="grid grid-cols-1 justify-items-end gap-8 mb-8">
+          <FooterColumn title="COMPANY" links={COMPANY_LINKS} alignRight />
         </div>
 
         {/* Copyright */}
@@ -85,30 +81,8 @@ export function Footer() {
         </p>
 
         {/* COMPANY */}
-        <p className="absolute text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)]"
-          style={{ left: '70.63%', top: '10.53%' }}>COMPANY</p>
-        <div className="absolute flex flex-col gap-1" style={{ left: 'calc(75% + 22px)', top: '32px' }}>
-          {COMPANY_LINKS.map((link) => (
-            <Link key={link.label} href={link.href} className={linkClass}>{link.label}</Link>
-          ))}
-        </div>
-
-        {/* PRODUCTS */}
-        <p className="absolute text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)]"
-          style={{ left: '70.14%', top: '40.13%' }}>PRODUCTS</p>
-        <div className="absolute flex flex-col gap-1" style={{ left: 'calc(75% + 22px)', top: '122px' }}>
-          {PRODUCT_LINKS.map((link) => (
-            <Link key={link.label} href={link.href} className={linkClass}>{link.label}</Link>
-          ))}
-        </div>
-
-        {/* CONNECT */}
-        <p className="absolute text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)]"
-          style={{ left: '86.53%', top: '10.53%' }}>CONNECT</p>
-        <div className="absolute flex flex-col gap-1" style={{ left: 'calc(91.67% + 10px)', top: '32px' }}>
-          {CONNECT_LINKS.map((link) => (
-            <Link key={link.label} href={link.href} className={linkClass}>{link.label}</Link>
-          ))}
+        <div className="absolute right-[3.33%] top-[10.53%]">
+          <FooterColumn title="COMPANY" links={COMPANY_LINKS} alignRight />
         </div>
       </div>
     </footer>

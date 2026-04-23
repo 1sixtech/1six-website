@@ -11,7 +11,6 @@ import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
 
 const NAV_ITEMS = [
   { label: 'THESIS', href: '/#thesis' },
-  { label: 'PRODUCTS', href: '/#products' },
   // { label: 'INSIGHT', href: '/#insight' },
   { label: 'ABOUT', href: '/about' },
 ];
