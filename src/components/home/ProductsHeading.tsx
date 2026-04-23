@@ -14,9 +14,6 @@ export function ProductsHeading() {
       className="flex flex-col items-center justify-center gap-3 px-[22px] md:px-0 py-16 md:py-20"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
-      <p className="text-[20px] font-normal leading-[1.2] tracking-[-0.4px] text-[var(--color-sub-text2)]">
-        PRODUCTS
-      </p>
       <h2
         className="text-[24px] font-medium leading-[1.15] tracking-[-0.48px]"
         style={{ color: 'var(--color-text)' }}

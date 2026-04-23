@@ -30,41 +30,8 @@ export function ProductMap() {
           horizontal on desktop */}
       <div className="flex w-full flex-col items-center gap-6 px-[22px] pb-8 md:flex-row md:items-end md:justify-center md:gap-24 md:px-0">
         <div className="text-center">
-          <p
-            className="text-[20px] font-semibold md:text-[24px] md:font-medium tracking-[-0.4px] md:tracking-[-0.48px]"
-            style={{ color: 'var(--color-text)' }}
-          >
-            <RollingNumber
-              digitCount={3}
-              suffix="K"
-              extraSuffix=" +"
-              extraSuffixClassName="text-[var(--color-sub-text1)]"
-              prefersReducedMotion={prefersReducedMotion}
-              triggerRef={sectionRef}
-            />
-          </p>
-          <p className="text-[15px] md:text-[18px] font-normal tracking-[-0.3px] md:tracking-[-0.36px] text-[var(--color-sub-text1)]">
-            global streaming hours
-          </p>
-        </div>
-        <div className="text-center">
-          <p
-            className="text-[20px] font-semibold md:text-[24px] md:font-medium tracking-[-0.4px] md:tracking-[-0.48px]"
-            style={{ color: 'var(--color-text)' }}
-          >
-            <RollingNumber
-              digitCount={2}
-              prefix="$ "
-              prefixClassName="text-[var(--color-sub-text1)]"
-              suffix="B"
-              separator={{ char: '.', after: 0 }}
-              prefersReducedMotion={prefersReducedMotion}
-              triggerRef={sectionRef}
-            />
-          </p>
-          <p className="text-[15px] md:text-[18px] font-normal tracking-[-0.3px] md:tracking-[-0.36px] text-[var(--color-sub-text1)]">
-            social trading volume
-          </p>
+
+           
         </div>
       </div>
     </section>
