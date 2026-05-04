@@ -39,23 +39,23 @@ export function TeamHero() {
         style={{ color: 'var(--color-text)' }}
       >
         we are a team of{' '}
-        <span className="text-[var(--color-accent)]">crypto diehards.</span>
+        <span className="text-[var(--color-accent)]">diehards.</span>
         <br />
-        we do not like to ruminate about ideals for days and nights.
+        we don&apos;t spend days and nights ruminating on ideals.
         <br />
-        we prefer to{' '}
-        <span className="text-[var(--color-accent)]">take actions</span>
-        {' '}to make our dreams come true.
+        we{' '}
+        <span className="text-[var(--color-accent)]">take action</span>
+        {' '}to make them real.
       </p>
       <p
         className="hidden md:block max-w-[850px] text-center text-[18px] font-normal leading-[1.3] tracking-[-0.48px]"
         style={{ color: 'var(--color-text)' }}
       >
-        we bring experience from Harvard, Ethereum, PhD Programs,
+        we bring experience from Harvard, Ethereum, PhD programs,
         <br />
-        world level competitive programming (ICPC World Finals), Sniper Special Forces,
+        world-class competitive programming (ICPC World Finals), special forces,
         <br />
-        and many other exotic areas of lives to cross the first{' '}
+        and many other uncommon paths of life to cross the first{' '}
         <span className="text-[var(--color-accent)]">16%.</span>
       </p>
     </section>

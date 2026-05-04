@@ -54,8 +54,7 @@ export const THESIS_STATES: ThesisState[] = [
         <span>the internet was built on </span>
         <InlineAscii n={1} extend="up" />
         <span> an </span>
-        <span className="text-[var(--color-accent)]">ideal</span>
-        <span className="text-[var(--color-accent)]">:</span>
+        <span className="text-[var(--color-accent)]">ideal:</span>
         <br />
         <span>a free and open space for information, ideas, and value.</span>
       </>
@@ -102,10 +101,11 @@ export const THESIS_STATES: ThesisState[] = [
     id: 'thesis-03',
     desktopContent: (
       <>
-        <span>blockchains are </span>
+        <span>new </span>
         <InlineAscii n={3} extend="up" />
-        <span> the </span>
-        <span className="text-[var(--color-accent)]">missing piece.</span>
+        <span> </span>
+        <span className="text-[var(--color-accent)]">internet-native protocols</span>
+        <span> have emerged:</span>
         <br />
         <span>the bridge to reclaim the internet&apos;s original promise.</span>
       </>
@@ -114,7 +114,7 @@ export const THESIS_STATES: ThesisState[] = [
       <div className="flex flex-col items-center gap-1">
         <MobileAscii n={3} align="right" />
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          blockchains are the <span className="text-[var(--color-accent)]">missing piece.</span>
+          new <span className="text-[var(--color-accent)]">internet-native protocols</span> have emerged:
         </p>
         <p className={subTextClass}>
           the bridge to reclaim the internet&apos;s<br />original promise.
@@ -153,21 +153,20 @@ export const THESIS_STATES: ThesisState[] = [
       <>
         <span>we are here to </span>
         <InlineAscii n={5} extend="up" />
-        <span> </span>
-        <span className="text-[var(--color-accent)]">change</span>
-        <span> that.</span>
+        <span> change that.</span>
         <br />
-        <span>to move blockchain from experiment to infrastructure.</span>
+        <span>to move these protocols from experiment to </span>
+        <span className="text-[var(--color-accent)]">infrastructure.</span>
       </>
     ),
     mobileContent: (
       <div className="flex flex-col items-center gap-1">
         <MobileAscii n={5} align="center" />
         <p className={subTextClass}>
-          we are here to <span className="text-[var(--color-accent)]">change</span> that.<br />to move blockchain
+          we are here to change that.<br />to move these protocols
         </p>
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          from experiment to infrastructure.
+          from experiment to <span className="text-[var(--color-accent)]">infrastructure.</span>
         </p>
       </div>
     ),
@@ -176,21 +175,22 @@ export const THESIS_STATES: ThesisState[] = [
     id: 'thesis-06',
     desktopContent: (
       <>
-        <span>from possibility to default.</span>
+        <span>from possibility to </span>
+        <span className="text-[var(--color-accent)]">default.</span>
         <br />
         <span>from the edges to </span>
         <InlineAscii n={6} extend="down" />
         <span> </span>
-        the <span className="text-[var(--color-accent)]">center</span> of the world.
+        the center of the world.
       </>
     ),
     mobileContent: (
       <div className="flex flex-col items-center gap-1">
         <p className={subTextClass}>
-          from possibility to default.<br />from the edges to
+          from possibility to <span className="text-[var(--color-accent)]">default.</span><br />from the edges to
         </p>
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px] text-[var(--color-text)]">
-          the <span className="text-[var(--color-accent)]">center</span> of the world.
+          the center of the world.
         </p>
         <MobileAscii n={6} align="center" />
       </div>

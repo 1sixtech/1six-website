@@ -18,15 +18,23 @@ export function ProductsHeading() {
         className="text-[24px] font-medium leading-[1.15] tracking-[-0.48px]"
         style={{ color: 'var(--color-text)' }}
       >
-        adoption comes first
+        adoption comes first.
       </h2>
       <p
         className="mt-2 max-w-[889px] text-center text-[15px] md:text-[18px] font-normal leading-[1.3] tracking-[-0.3px] md:tracking-[-0.36px]"
         style={{ color: 'var(--color-text)' }}
       >
-        we don&apos;t build on hope. we start with how people actually trade, watch,
+        We don&apos;t build on hope; we build on behavior.
         <br className="hidden md:inline" />
-        and participate, then design systems that align with those market realities.
+        By analyzing how people actually trade, watch, and engage,
+        <br className="hidden md:inline" />
+        we design systems that align with those market realities.
+        <br/>
+        <br/>
+        the first wave of internet-native protocols introduced true global finance,
+        <br className="hidden md:inline" />
+        1six is engineering the next generation of global financial applications
+        for the masses.
       </p>
     </section>
   );
