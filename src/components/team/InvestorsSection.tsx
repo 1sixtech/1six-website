@@ -11,7 +11,7 @@
  */
 
 const INDIVIDUAL_INVESTORS = [
-  { name: 'Naval Ravikant', role: 'Legendary Silicon Valley Investor\nNotion, Twitter angel investor' },
+  { name: 'Naval Ravikant', role: 'Legendary Silicon Valley Investor\nNotion, Twitter, Perplexity & more' },
   { name: 'Charlie Songhurst', role: 'Facebook\nBoard of Director' },
   { name: 'Ken Ng', role: 'Uniswap Foundation\nCofounder' },
   { name: 'Loi Luu', role: 'WBTC Creator' },
