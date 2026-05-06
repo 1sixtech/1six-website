@@ -25,11 +25,11 @@ export const metadata: Metadata = {
 
   title: {
     template: '%s | 1SIX',
-    default: '1SIX - Leading Web3 Industry to Cross the Chasm',
+    default: '1SIX - Internet-native finance for the next 84%',
   },
 
   description:
-    '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+    'The next wave of global finance — built on behavior, not hope.',
 
   keywords: [
     '1SIX',
@@ -54,9 +54,9 @@ export const metadata: Metadata = {
     locale: 'en_US',
     url: 'https://1six.tech',
     siteName: '1SIX Technologies',
-    title: '1SIX - Leading Web3 Industry to Cross the Chasm',
+    title: '1SIX - Internet-native finance for the next 84%',
     description:
-      '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+      'The next wave of global finance — built on behavior, not hope.',
     images: [
       {
         url: '/og-image.png',
@@ -71,9 +71,9 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     site: '@1sixtech',
     creator: '@1sixtech',
-    title: '1SIX - Leading Web3 Industry to Cross the Chasm',
+    title: '1SIX - Internet-native finance for the next 84%',
     description:
-      '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+      'The next wave of global finance — built on behavior, not hope.',
     images: ['/og-image.png'],
   },
 
@@ -106,7 +106,7 @@ const organizationJsonLd = {
   url: 'https://1six.tech',
   logo: 'https://1six.tech/favicon.png',
   description:
-    '1SIX builds infrastructure for crypto-native broadcasting and trading, pushing the web3 industry past the 16% adoption line.',
+    'The next wave of global finance — built on behavior, not hope.',
   sameAs: [
     'https://x.com/1sixtech',
     'https://www.youtube.com/@nevada-app',

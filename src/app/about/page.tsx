@@ -6,11 +6,11 @@ import { InvestorsSection } from '@/components/team/InvestorsSection';
 export const metadata: Metadata = {
   title: 'About',
   description:
-    'Meet the 1SIX team — crypto diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading web3 funds.',
+    'Meet the 1SIX team — techdiehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
   openGraph: {
     title: 'About | 1SIX',
     description:
-      'Meet the 1SIX team — crypto diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading web3 funds.',
+      'Meet the 1SIX team — techdiehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
     url: 'https://1six.tech/about',
     images: [
       {
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'About | 1SIX',
     description:
-      'Meet the 1SIX team — crypto diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading web3 funds.',
+      'Meet the 1SIX team — tech diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
   },
   alternates: {
     canonical: 'https://1six.tech/about',
