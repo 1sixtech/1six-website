@@ -38,7 +38,14 @@ export function AsciiHero({ onReady }: { onReady?: () => void }) {
   // this effect fires — the correct scale is always used on first init.
   const [scale, setScale] = useState(0);
   useEffect(() => {
-    setScale(coverScale(window.innerWidth / window.innerHeight));
+    const aspect = window.innerWidth / window.innerHeight;
+    // On wide/landscape viewports coverScale width-fits, which zooms OUT and
+    // shows the whole desert frame — including its bright sky/sand that the
+    // mosaic discards, so the hero looks sparse with an empty band on the
+    // sides. Zoom in on landscape so the dune fills the frame edge-to-edge,
+    // matching the dense mobile (portrait) framing. Portrait is unchanged.
+    const fillZoom = aspect > 1 ? 1.55 : 1;
+    setScale(coverScale(aspect) * fillZoom);
   }, []);
 
   if (!scale) return null;
