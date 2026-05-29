@@ -80,11 +80,6 @@ export function IntroOrchestrator({
 
   useEffect(() => {
     disposedRef.current = false;
-    document.documentElement.dataset.introDebug = 'effect-start';
-    console.warn('[intro-debug] effect start', {
-      introActiveAttr: document.documentElement.dataset.introActive,
-      introSkipAttr: document.documentElement.dataset.introSkip,
-    });
     // Track the active reveal tween (clip-path or overlay fade) so the
     // cleanup can kill it if the orchestrator unmounts mid-reveal.
     let revealTween: gsap.core.Tween | null = null;
@@ -125,8 +120,6 @@ export function IntroOrchestrator({
     // Skip case: reduced-motion or session repeat. data-intro-active was not
     // set by the inline script, so we fast-forward to reveal.
     if (!introActive) {
-      document.documentElement.dataset.introDebug = 'skip-path';
-      console.warn('[intro-debug] skip path');
       runReveal({ skipAnimation: true });
       return () => {
         disposedRef.current = true;
@@ -207,11 +200,6 @@ export function IntroOrchestrator({
       Promise.all([minTimer, webglReady]).then(() => 'ready' as const),
       hardCap,
     ]).then((reason) => {
-      document.documentElement.dataset.introDebug = `race-${reason}`;
-      console.warn('[intro-debug] race resolved', {
-        reason,
-        disposed: disposedRef.current,
-      });
       if (disposedRef.current) return;
       if (reason === 'hardcap') {
         const ready = getReadyKeys();
@@ -233,14 +221,6 @@ export function IntroOrchestrator({
     // runReveal is declared inside the effect so it closes over refs
     // without needing useCallback dependencies.
     function runReveal({ skipAnimation }: { skipAnimation: boolean }): void {
-      document.documentElement.dataset.introDebug = skipAnimation
-        ? 'runReveal-skip'
-        : 'runReveal-full';
-      console.warn('[intro-debug] runReveal entered', {
-        skipAnimation,
-        hasMain: !!mainContentRef.current,
-        hasOverlay: !!overlayRef.current,
-      });
       const markSeen = () => {
         try {
           sessionStorage.setItem('introSeen', '1');
@@ -371,17 +351,6 @@ export function IntroOrchestrator({
           },
         },
       );
-      document.documentElement.dataset.introDebug = 'reveal-tween-created';
-      setTimeout(() => {
-        document.documentElement.dataset.introDebugTimeout = 'fired';
-      }, 0);
-      requestAnimationFrame(() => {
-        document.documentElement.dataset.introDebugRaf = 'fired';
-      });
-      gsap.delayedCall(0, () => {
-        document.documentElement.dataset.introDebugGsap = 'fired';
-      });
-      console.warn('[intro-debug] reveal tween created');
     }
   }, [fillRectRef, overlayRef, mainContentRef]);
 
