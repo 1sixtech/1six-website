@@ -67,36 +67,31 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       reject(new Error(`videoPool: warmup timeout for ${url}`));
     }, WARMUP_TIMEOUT_MS);
 
-    const onCanPlay = async () => {
+    const onCanPlay = () => {
       if (settled) return;
-      try {
-        await video.play();
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        // Prime complete — pause immediately. acquire() will resume
-        // when a canvas takes ownership. This is the key difference
-        // from the original implementation and directly addresses the
-        // "10 videos decoding forever" leak: unacquired videos sit in
-        // the pool at pause until needed.
-        try {
-          video.pause();
-        } catch {
-          // Some mobile browsers reject pause() immediately after
-          // play(). Safe to ignore — the video is still in the pool
-          // and acquire() will call play() unconditionally.
+      settled = true;
+      clearTimeout(timeout);
+      // `canplay` means a frame is decoded, so the element is usable NOW.
+      // Pool it regardless of whether play() will be allowed: under iOS Low
+      // Power Mode / autoplay policy, play() is rejected, but the pooled video
+      // still holds a decoded first frame (forced via the #t=0.001 fragment).
+      // Consumers then render that static frame instead of garbage. Gating
+      // pooling on play() success was making warmup REJECT under Low Power
+      // Mode, which cascaded to a solid-color fallback material and the
+      // garbled mosaic. Prime + pause is best-effort.
+      pool.set(url, video);
+      pooledVideos.add(video);
+      refCount.set(video, 0);
+      video.play().then(() => {
+        try { video.pause(); } catch {
+          // Some mobile browsers reject pause() right after play(); ignore —
+          // acquire() calls play() unconditionally when a canvas takes over.
         }
-        pool.set(url, video);
-        pooledVideos.add(video);
-        refCount.set(video, 0);
-        resolve(video);
-      } catch (err) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        warmupPromises.delete(url);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
+      }).catch(() => {
+        // play() blocked (Low Power Mode / autoplay policy). Non-fatal: the
+        // pooled video keeps its decoded first frame for static rendering.
+      });
+      resolve(video);
     };
 
     const onError = () => {

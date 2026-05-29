@@ -441,11 +441,42 @@ export class AscMosaic {
     this.scene.add(ambientLight);
   }
 
+  /**
+   * Force a paused video's decoded frame onto the GPU.
+   *
+   * three.js VideoTexture relies on requestVideoFrameCallback, which only
+   * fires while the video is actively presenting frames (i.e. playing). On
+   * iOS Low Power Mode (and under autoplay policy) play() is rejected and the
+   * element stays paused, so rVFC never fires and the decoded first frame is
+   * never uploaded — the mosaic samples an empty texture and renders blank.
+   * Bumping needsUpdate while paused-with-a-frame makes the renderer re-upload
+   * the current frame, so a static-but-correct ASCII frame shows instead.
+   * Playing videos keep video.paused === false, so this is a no-op for them.
+   */
+  private refreshPausedVideoFrame(): void {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        obj.material instanceof THREE.MeshBasicMaterial &&
+        obj.material.map instanceof THREE.VideoTexture
+      ) {
+        const video = obj.material.map.image as HTMLVideoElement;
+        // HAVE_CURRENT_DATA (2) means a frame exists to upload.
+        if (video && video.paused && video.readyState >= 2) {
+          obj.material.map.needsUpdate = true;
+        }
+      }
+    });
+  }
+
   private render(): void {
     if (this.asciiMosaicFilter && this.asciiMosaicFilter.getEnabled()) {
+      this.refreshPausedVideoFrame();
       this.asciiMosaicFilter.renderToTarget(this.scene, this.camera);
       this.asciiMosaicFilter.render();
     } else {
+      this.refreshPausedVideoFrame();
       this.renderer.render(this.scene, this.camera);
     }
   }
@@ -480,6 +511,50 @@ export class AscMosaic {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+  }
+
+  /**
+   * Pause or resume the model's video texture WITHOUT disposing the WebGL
+   * context. AsciiCanvas calls this to stop decoder work for eager canvases
+   * that have scrolled off-screen.
+   *
+   * Why this exists: iOS has a hard limit on simultaneously decoding
+   * <video> elements (and WKWebView / Chrome iOS gets an even smaller
+   * media+memory budget than Safari). The homepage mounts every ASCII
+   * canvas as `eager`, so without this they all keep decoding at once even
+   * while off-screen. On memory-constrained devices that starves the
+   * decoders, the VideoTexture never receives a frame, and the mosaic
+   * tiles a single brightness-derived cell — the garbled "dots everywhere"
+   * output reported on iPhone 15 / Chrome-iOS.
+   *
+   * Pauses the <video> directly rather than via videoPool.release():
+   * release() is refcount/lifetime bookkeeping for disposal, whereas this
+   * is a transient play-state toggle for a still-mounted consumer. On the
+   * homepage each video URL has exactly one live consumer, so a direct
+   * pause/play here cannot affect another canvas.
+   */
+  setVideoPlaying(playing: boolean): void {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        obj.material instanceof THREE.MeshBasicMaterial &&
+        obj.material.map instanceof THREE.VideoTexture
+      ) {
+        const video = obj.material.map.image as HTMLVideoElement;
+        if (!video) return;
+        if (playing) {
+          void video.play().catch(() => {});
+        } else {
+          try {
+            video.pause();
+          } catch {
+            // Some mobile browsers reject pause() right after play();
+            // safe to ignore — the decoder still stops.
+          }
+        }
+      }
+    });
   }
 
   renderOnce(): void {

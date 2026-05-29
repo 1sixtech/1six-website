@@ -90,7 +90,9 @@ function createVideoTexture(
     } catch {
       // ignore
     }
-    video.src = videoUrl;
+    // #t=0.001 forces the browser to decode the first frame even when play()
+    // is blocked (iOS Low Power Mode), so a static frame is available.
+    video.src = videoUrl + '#t=0.001';
     video.autoplay = true;
     video.loop = true;
     video.muted = true;
@@ -111,19 +113,22 @@ function createVideoTexture(
     video.addEventListener('canplay', () => {
       if (resolved) return;
       cleanup();
-      video.play().then(() => {
-        if (resolved) return;
-        resolved = true;
-        const texture = new THREE.VideoTexture(video);
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        resolve(texture);
-      }).catch((err) => {
-        if (!resolved) {
-          resolved = true;
-          reject(new Error(`Video play failed: ${err?.message || 'Unknown'}`));
-        }
-      });
+      resolved = true;
+      // Build the texture as soon as a frame is decodable — do NOT gate this on
+      // play() succeeding. Under iOS Low Power Mode (and normal autoplay
+      // policy) play() is rejected, but `canplay` means a frame is already
+      // decoded, so the VideoTexture shows that frame. Gating on play() and
+      // rejecting here was the root cause of the garbled mosaic on
+      // battery-saver devices: the reject cascaded to createTexturedMesh's
+      // catch, which swapped in a solid-color material that the ASCII filter
+      // tiled as one repeated cell. A static first frame renders correctly.
+      const texture = new THREE.VideoTexture(video);
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      resolve(texture);
+      // Best-effort playback. If it's blocked (Low Power Mode), the texture
+      // stays on the decoded frame (static) instead of animating — fine.
+      video.play().catch(() => {});
     }, { once: true });
 
     video.addEventListener('error', () => {

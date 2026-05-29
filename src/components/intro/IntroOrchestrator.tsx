@@ -97,24 +97,17 @@ export function IntroOrchestrator({
     // distinguished by the data attribute.
     const introActive = html.dataset.introActive === 'true';
 
-    // Skip case: reduced-motion or session repeat. data-intro-active was not
-    // set by the inline script, so we fast-forward to reveal.
-    if (!introActive) {
-      document.documentElement.dataset.introDebug = 'skip-path';
-      console.warn('[intro-debug] skip path');
-      runReveal({ skipAnimation: true });
-      return () => {
-        disposedRef.current = true;
-      };
-    }
-
-    // Begin parallel warmup of the video targets. Only 'video' assetTypes
-    // go through videoPool — image targets (e.g. the world map .webp)
-    // cannot be loaded into a <video> element and would silently reject.
-    // They are loaded lazily by Three.js TextureLoader when AsciiCanvas
-    // mounts. Promise.allSettled means partial failure is tolerated — the
-    // orchestrator relies on per-canvas 'ascii:ready' events rather than
-    // this promise's resolution.
+    // Pre-warm the video targets in BOTH modes (must run before the skip
+    // early-return below). Skip mode (session repeat / reduced-motion) still
+    // renders the ASCII canvases, and without a warmed pool each canvas
+    // decodes its video on-demand as the user swipes — under iOS Low Power
+    // Mode that decode is throttled hard, so thesis slides flicker in and out
+    // ("나오다 말다"). Warming first-frames up front (videoPool pools at
+    // canplay even when play() is blocked) makes every slide's frame ready
+    // before it mounts. Only 'video' assetTypes go through videoPool — image
+    // targets (the world map .webp) load lazily via Three.js TextureLoader.
+    // allSettled tolerates partial failure; readiness is tracked per-canvas
+    // via 'ascii:ready', not this promise.
     const videoTargets = HOMEPAGE_ASCII_TARGETS.filter(
       (t) => t.assetType === 'video',
     );
@@ -128,6 +121,17 @@ export function IntroOrchestrator({
           console.warn('[intro] videoPool partial failure:', failed);
         }
       });
+
+    // Skip case: reduced-motion or session repeat. data-intro-active was not
+    // set by the inline script, so we fast-forward to reveal.
+    if (!introActive) {
+      document.documentElement.dataset.introDebug = 'skip-path';
+      console.warn('[intro-debug] skip path');
+      runReveal({ skipAnimation: true });
+      return () => {
+        disposedRef.current = true;
+      };
+    }
 
     // ── Logo fill animation ──
     //

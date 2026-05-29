@@ -160,6 +160,12 @@ export function AsciiCanvas({
   const mountedRef = useRef(true);
   const [isVisible, setIsVisible] = useState(eager);
   const [isInitialized, setIsInitialized] = useState(false);
+  // Eager canvases skip the init/destroy observer below and therefore never
+  // tear down off-screen. Track on-screen state separately so we can pause
+  // the video decoder + render loop while scrolled away — see the comment on
+  // AscMosaic.setVideoPlaying for why leaving every homepage video decoding
+  // at once breaks ASCII rendering on memory-constrained iOS devices.
+  const [isOnScreen, setIsOnScreen] = useState(true);
   const prefersReducedMotion = useReducedMotion();
 
   // Track visibility via IntersectionObserver (skip if eager)
@@ -178,6 +184,41 @@ export function AsciiCanvas({
     observer.observe(el);
     return () => observer.disconnect();
   }, [eager]);
+
+  // Eager canvases never tear down off-screen (the observer above is skipped),
+  // so without this they keep decoding video forever. This separate observer
+  // pauses the decoder + render loop while off-screen and resumes on return.
+  // Gated to eager: non-eager canvases already release the whole context
+  // off-screen via the init/destroy effect below.
+  useEffect(() => {
+    if (!eager) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsOnScreen(entry.isIntersecting),
+      { rootMargin: '200px' } // resume slightly before visible to avoid a blank frame
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [eager]);
+
+  // Apply on-screen state to the live mosaic: pause the video decoder and
+  // stop the render loop when off-screen, resume when back on-screen. Guarded
+  // on isInitialized so it only acts once the mosaic exists. The init path
+  // marks the canvas ready before this can pause it, so the intro is unaffected.
+  useEffect(() => {
+    const mosaic = mosaicRef.current;
+    if (!mosaic || !isInitialized) return;
+    if (isOnScreen) {
+      mosaic.animate();
+      mosaic.setVideoPlaying(true);
+    } else {
+      mosaic.stopAnimate();
+      mosaic.setVideoPlaying(false);
+    }
+  }, [isOnScreen, isInitialized]);
 
   // Initialize/destroy AscMosaic based on visibility
   const initMosaic = useCallback(async () => {
