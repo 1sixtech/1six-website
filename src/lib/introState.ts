@@ -48,8 +48,12 @@ export const HOMEPAGE_ASCII_TARGETS: readonly AsciiTarget[] = [
   { key: 'thesis-6',     textureUrl: '/resource/Source_About 06.mp4',   assetType: 'video' },
   { key: 'graph',        textureUrl: '/resource/Source_Graph.mp4',      assetType: 'video' },
   { key: 'map',          textureUrl: '/resource/Source_World map.webp', assetType: 'image' },
-  { key: 'nevada-tv',    textureUrl: '/resource/Source_Nevada TV.mp4',  assetType: 'video' },
-  { key: 'nevada-trade', textureUrl: '/resource/Source_Nevada Trade.mp4', assetType: 'video' },
+  // nevada-tv / nevada-trade were removed when the products section was
+  // dropped from the homepage (commit "rm: products"). Their canvases no
+  // longer mount, so warming them here only burned an iOS video-decoder
+  // slot for nothing — and listing them in computeExpectedReadyKeys made
+  // the intro wait on keys that never fire (always hitting the 2.5s hardcap).
+  // Re-add both here AND in computeExpectedReadyKeys if products return.
 ] as const;
 
 // ─── AsciiCanvas ready tracking ───────────────────────────────────────
@@ -89,8 +93,7 @@ export function getReadyKeys(): ReadonlySet<string> {
  * Mobile (≤ 767px): thesis-1 + thesis-2 (Swiper active + isNearby next)
  * Desktop:           thesis-1 (isNearby from index 0 on the stacked layout)
  *
- * All non-thesis keys (hero, graph, map, nevada-tv, nevada-trade) are
- * always mounted on the homepage.
+ * All non-thesis keys (hero, graph, map) are always mounted on the homepage.
  */
 export function computeExpectedReadyKeys(): string[] {
   const isMobile = typeof window !== 'undefined'
@@ -98,7 +101,7 @@ export function computeExpectedReadyKeys(): string[] {
   const thesisKeys = isMobile
     ? ['thesis-1', 'thesis-2']
     : ['thesis-1'];
-  return ['hero', ...thesisKeys, 'graph', 'map', 'nevada-tv', 'nevada-trade'];
+  return ['hero', ...thesisKeys, 'graph', 'map'];
 }
 
 // ─── Intro lifecycle tracking (for useSyncExternalStore hooks) ────────
