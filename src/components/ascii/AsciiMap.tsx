@@ -34,11 +34,20 @@ export function AsciiMapCanvas() {
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
-    setIsMobile(mq.matches);
-    setScale(coverScale(window.innerWidth / window.innerHeight));
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    // Desktop renders the map into a fixed 2.2:1 contained box (Figma
+    // 1010×460), so cover-fit to THAT aspect. Feeding the window aspect here —
+    // while the camera frustum uses the container's — was the source of the
+    // map/background ratio mismatch. Mobile keeps the full-bleed panel fit.
+    const DESKTOP_MAP_ASPECT = 1010 / 460;
+    const apply = () => {
+      const mobile = mq.matches;
+      setIsMobile(mobile);
+      const aspect = mobile ? window.innerWidth / window.innerHeight : DESKTOP_MAP_ASPECT;
+      setScale(coverScale(aspect));
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, []);
 
   if (!scale) return null;

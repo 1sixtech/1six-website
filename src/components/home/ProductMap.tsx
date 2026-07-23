@@ -16,14 +16,18 @@ export function ProductMap() {
   return (
     <section
       ref={sectionRef}
-      className="mx-auto flex h-[540px] md:h-[756px] max-w-[1344px] flex-col items-center justify-end overflow-hidden"
+      className="mx-auto flex h-[540px] md:h-[680px] max-w-[1344px] flex-col items-center justify-end overflow-hidden"
       style={{
         backgroundColor: 'var(--color-card)',
       }}
     >
-      {/* ASCII world map */}
-      <div className="relative flex-1 w-full overflow-hidden">
-        <AsciiMapCanvas />
+      {/* ASCII world map — mobile fills the panel; desktop renders a
+          contained 2.2:1 graphic (Figma 1010×460) centered within the
+          1344×680 background, with the panel showing around it. */}
+      <div className="relative flex-1 w-full overflow-hidden md:flex md:items-center md:justify-center">
+        <div className="absolute inset-0 md:relative md:inset-auto md:w-[75%] md:max-w-[1010px] md:aspect-[1010/460]">
+          <AsciiMapCanvas />
+        </div>
       </div>
 
       {/* Stats row: vertical on mobile (number first, label below per Figma),
