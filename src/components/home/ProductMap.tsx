@@ -1,42 +1,22 @@
 'use client';
 
-import { useRef } from 'react';
-import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { AsciiMapCanvas } from '@/components/ascii/AsciiMap';
-import { RollingNumber } from '@/components/ui/RollingNumber';
 
 /**
- * Product Map section with ASCII world map and slot-machine stat counters.
- * Stats continuously spin random digits like a roulette (no real data yet).
+ * Product Map section with a contained ASCII world map.
  */
 export function ProductMap() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const prefersReducedMotion = useReducedMotion();
-
   return (
     <section
-      ref={sectionRef}
-      className="mx-auto flex h-[540px] md:h-[680px] max-w-[1344px] flex-col items-center justify-end overflow-hidden"
+      className="mx-auto flex h-[540px] max-w-[1344px] items-center justify-center overflow-hidden md:h-[680px]"
       style={{
         backgroundColor: 'var(--color-card)',
       }}
     >
-      {/* ASCII world map — mobile fills the panel; desktop renders a
-          contained 2.2:1 graphic (Figma 1010×460) centered within the
-          1344×680 background, with the panel showing around it. */}
-      <div className="relative flex-1 w-full overflow-hidden md:flex md:items-center md:justify-center">
-        <div className="absolute inset-0 md:relative md:inset-auto md:w-[75%] md:max-w-[1010px] md:aspect-[1010/460]">
-          <AsciiMapCanvas />
-        </div>
-      </div>
-
-      {/* Stats row: vertical on mobile (number first, label below per Figma),
-          horizontal on desktop */}
-      <div className="flex w-full flex-col items-center gap-6 px-[22px] pb-8 md:flex-row md:items-end md:justify-center md:gap-24 md:px-0">
-        <div className="text-center">
-
-           
-        </div>
+      {/* The source includes its own white safe area. At 75% canvas width the
+          visible landmass occupies roughly 70% of the desktop panel. */}
+      <div className="relative aspect-[3/2] w-[92%] md:w-[75%] md:max-w-[1010px]">
+        <AsciiMapCanvas />
       </div>
     </section>
   );
