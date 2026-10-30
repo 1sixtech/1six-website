@@ -11,7 +11,7 @@ import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
 
 const NAV_ITEMS = [
   { label: 'THESIS', href: '/#thesis' },
-  // { label: 'INSIGHT', href: '/#insight' },
+  { label: 'RESEARCH', href: '/research' },
   { label: 'ABOUT', href: '/about' },
 ];
 
@@ -24,6 +24,7 @@ export function Header() {
   // intro reveal experience). On all other routes it should be visible from
   // first paint — there is no intro sequence to coordinate with.
   const isHomeRoute = pathname === '/';
+  const isResearchRoute = pathname.startsWith('/research');
   const isVisible = !isHomeRoute || hasScrolled;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -209,9 +210,10 @@ export function Header() {
         className="fixed top-0 left-0 right-0 z-50 h-[54px] md:h-[45px]"
         style={{
           transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)',
-          backgroundColor: 'var(--color-header-bg)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
+          backgroundColor: isResearchRoute ? 'var(--color-bg)' : 'var(--color-header-bg)',
+          borderBottom: isResearchRoute ? '1px solid var(--color-divider)' : undefined,
+          backdropFilter: isResearchRoute ? undefined : 'blur(8px)',
+          WebkitBackdropFilter: isResearchRoute ? undefined : 'blur(8px)',
         }}
       >
         <div className="relative mx-auto h-full w-full max-w-[1440px]">

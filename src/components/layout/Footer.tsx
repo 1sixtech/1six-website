@@ -3,6 +3,7 @@ import { LogoFooter } from '@/components/ui/Logo';
 
 const COMPANY_LINKS = [
   { label: 'Thesis', href: '/#thesis' },
+  { label: 'Research', href: '/research' },
   { label: 'About', href: '/about' },
   { label: 'Investors', href: '/about#investors' },
 ];

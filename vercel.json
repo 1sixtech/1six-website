@@ -1,0 +1,3 @@
+{
+  "buildCommand": "node scripts/sync-research.mjs && next build"
+}

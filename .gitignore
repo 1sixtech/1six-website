@@ -26,3 +26,7 @@ vite.config.ts.timestamp-*
 .claude/
 .context/
 *.tsbuildinfo
+
+# Fetched from noctis-articles during the build
+/content/research/
+/public/research/
