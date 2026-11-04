@@ -110,7 +110,10 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 
 - **Tailwind CSS v4** with `@theme` syntax in `globals.css`
 - Accent color: `#FF3700`
-- Font: **Pretendard Variable** (local, 45-920 weight range)
+- Font: **Pretendard Variable** 1.3.9, the official dynamic subset: 92 slices in
+  `public/fonts/pretendard-1.3.9/`, `@font-face` + unicode-range in `src/app/fonts/pretendard-variable.css`
+  (browsers fetch only the slices a page uses; the Latin slice is preloaded in the root layout).
+  Do not re-subset the font yourself: "Pretendard" is a Reserved Font Name under the OFL.
 - Dark mode: CSS variable aliasing via `data-theme` attribute
 - Responsive: mobile-first with `md:` breakpoint (768px)
 - Path alias: `@/*` maps to `./src/*`

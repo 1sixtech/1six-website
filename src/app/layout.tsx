@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import localFont from 'next/font/local';
+import './fonts/pretendard-variable.css';
 import './globals.css';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
@@ -8,12 +8,13 @@ import { Analytics } from '@vercel/analytics/next';
 import { HomeIntroMount } from '@/components/intro/HomeIntroMount';
 import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
-const pretendard = localFont({
-  src: './fonts/PretendardVariable.woff2',
-  variable: '--font-pretendard',
-  display: 'swap',
-  weight: '45 920',
-});
+/**
+ * Pretendard's official dynamic subset (fonts/pretendard-variable.css) is
+ * fetched slice by slice through unicode-range. The slice with the Latin
+ * letters, digits and common punctuation is on every page, so it is
+ * preloaded; the rest arrive only when a page shows one of their characters.
+ */
+const PRETENDARD_LATIN_SLICE = '/fonts/pretendard-1.3.9/PretendardVariable.subset.91.woff2';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -118,8 +119,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={pretendard.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <link
+          rel="preload"
+          href={PRETENDARD_LATIN_SLICE}
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
         {/* Must run before the first paint (theme, Safari's status bar tint,
             the Home intro lock): see THEME_INIT_SCRIPT. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

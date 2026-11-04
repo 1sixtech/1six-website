@@ -77,6 +77,14 @@ const nextConfig: NextConfig = {
         { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
       ],
     },
+    {
+      // Font slices live in a versioned folder (an upgrade gets a new one),
+      // so they never change under a URL.
+      source: '/fonts/:path*',
+      headers: [
+        { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+      ],
+    },
   ],
 };
 
