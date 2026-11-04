@@ -12,7 +12,7 @@ export function ProductsHeading() {
   return (
     <section
       id="products"
-      className="flex flex-col items-center justify-center px-[22px] pt-16 pb-24 md:px-6 md:pt-24 md:pb-32"
+      className="flex flex-col items-center justify-center px-[22px] pt-16 pb-12 md:px-6 md:pt-24 md:pb-32"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
       <h2
