@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
@@ -26,6 +26,23 @@ function coverScale(aspect: number): number {
   ) * BLEED;
 }
 
+/** The hero's model scale for the current window. */
+function heroScale(): number {
+  const aspect = window.innerWidth / window.innerHeight;
+  // On wide/landscape viewports coverScale width-fits, which zooms OUT and
+  // shows the whole desert frame — including its bright sky/sand that the
+  // mosaic discards, so the hero looks sparse with an empty band on the
+  // sides. Zoom in on landscape so the dune fills the frame edge-to-edge,
+  // matching the dense mobile (portrait) framing. Portrait is unchanged.
+  const fillZoom = aspect > 1 ? 1.55 : 1;
+  return coverScale(aspect) * fillZoom;
+}
+
+/** False on the server and through hydration, true from the first client render after it. */
+const subscribeToNothing = () => () => {};
+const readIsClient = () => true;
+const readServerIsClient = () => false;
+
 /** Hero background — Figma: Light F_1-1, Dark F_1-2 */
 export function AsciiHero({ onReady }: { onReady?: () => void }) {
   const { theme } = useTheme();
@@ -33,20 +50,13 @@ export function AsciiHero({ onReady }: { onReady?: () => void }) {
     ? '/resource/Monotone Cell F_1-2.png'
     : '/resource/Monotone Cell F_1-1.png';
 
-  // Compute scale on mount so the plane covers any viewport aspect ratio.
-  // AsciiCanvas is ssr:false (dynamic import), so it won't mount until after
-  // this effect fires — the correct scale is always used on first init.
-  const [scale, setScale] = useState(0);
-  useEffect(() => {
-    const aspect = window.innerWidth / window.innerHeight;
-    // On wide/landscape viewports coverScale width-fits, which zooms OUT and
-    // shows the whole desert frame — including its bright sky/sand that the
-    // mosaic discards, so the hero looks sparse with an empty band on the
-    // sides. Zoom in on landscape so the dune fills the frame edge-to-edge,
-    // matching the dense mobile (portrait) framing. Portrait is unchanged.
-    const fillZoom = aspect > 1 ? 1.55 : 1;
-    setScale(coverScale(aspect) * fillZoom);
-  }, []);
+  // Compute scale once on the client so the plane covers any viewport aspect
+  // ratio. The server and the hydration pass render nothing (no window to
+  // measure); AsciiCanvas is ssr:false, so it first mounts with the correct
+  // scale. Fixed for the component's life, as before: a resize never
+  // re-initializes the hero.
+  const isClient = useSyncExternalStore(subscribeToNothing, readIsClient, readServerIsClient);
+  const scale = useMemo(() => (isClient ? heroScale() : 0), [isClient]);
 
   if (!scale) return null;
 

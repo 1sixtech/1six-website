@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 
 type Theme = 'light' | 'dark';
@@ -16,6 +16,36 @@ const ThemeContext = createContext<ThemeContextValue>({
   mounted: false,
   toggleTheme: () => {},
 });
+
+/**
+ * The theme lives on <html data-theme>: the blocking script in <head>
+ * (lib/themeInit.ts) sets it from storage, or dark on a phone and light on
+ * a desktop, before the first paint. React reads it as an external store
+ * rather than copying it into state in an effect. The server and the
+ * hydration render see 'light' (no mismatch); the client then re-renders
+ * with the attribute's value, exactly when the old mount effect did.
+ */
+const themeListeners = new Set<() => void>();
+
+function subscribeToTheme(listener: () => void) {
+  themeListeners.add(listener);
+  return () => {
+    themeListeners.delete(listener);
+  };
+}
+
+function readTheme(): Theme {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function readServerTheme(): Theme {
+  return 'light';
+}
+
+/** False on the server and through hydration, true from the first client render after it. */
+const subscribeToNothing = () => () => {};
+const readMounted = () => true;
+const readServerMounted = () => false;
 
 /**
  * iOS Safari 26 tints its status bar from the page ground, and while a fixed
@@ -39,34 +69,8 @@ function retintBrowserChrome() {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Always initialize as 'light' on both SSR and client to avoid hydration mismatch.
-  // The blocking script in <head> handles CSS variables via data-theme attribute,
-  // so visual styling is correct immediately. React state syncs in useEffect below.
-  const [theme, setTheme] = useState<Theme>('light');
-
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    // Sync React state with the theme the blocking script already applied.
-    // For first-time visitors, the script defaults to dark on mobile, light on desktop.
-    try {
-      const stored = localStorage.getItem('theme') as Theme | null;
-      if (stored === 'dark' || stored === 'light') {
-        setTheme(stored);
-        document.documentElement.setAttribute('data-theme', stored);
-      } else {
-        // First visit: match blocking script logic
-        const isMobile = window.matchMedia('(max-width: 767px)').matches;
-        const defaultTheme: Theme = isMobile ? 'dark' : 'light';
-        setTheme(defaultTheme);
-        localStorage.setItem('theme', defaultTheme);
-        document.documentElement.setAttribute('data-theme', defaultTheme);
-      }
-    } catch {
-      // localStorage may throw in private browsing
-    }
-    setMounted(true);
-  }, []);
+  const theme = useSyncExternalStore(subscribeToTheme, readTheme, readServerTheme);
+  const mounted = useSyncExternalStore(subscribeToNothing, readMounted, readServerMounted);
 
   const toggleTheme = useCallback(() => {
     const root = document.documentElement;
@@ -77,7 +81,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       // Commit the React side (toggle icon, theme-aware canvases) inside the
       // same frame as the attribute flip so the transition's "new" snapshot
       // is the finished state.
-      flushSync(() => setTheme(next));
+      flushSync(() => {
+        themeListeners.forEach((listener) => listener());
+      });
       retintBrowserChrome();
     };
 
@@ -91,11 +97,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.startViewTransition(apply);
   }, []);
 
-  return (
-    <ThemeContext.Provider value={{ theme, mounted, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  const value = useMemo(() => ({ theme, mounted, toggleTheme }), [theme, mounted, toggleTheme]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {

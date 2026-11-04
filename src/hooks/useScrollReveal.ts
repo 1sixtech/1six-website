@@ -26,10 +26,14 @@ export function useScrollReveal(): boolean {
   // Reset on route change. On non-home routes the header is always
   // visible via the `!isHomeRoute` guard in Header.tsx, so this reset
   // is a no-op there. On the home route it re-enables the scroll
-  // listener so the header slide-in animation can fire again.
-  useEffect(() => {
+  // listener so the header slide-in animation can fire again. Done while
+  // rendering (React's pattern for adjusting state when a prop changes),
+  // so the new route's first render already has it reset.
+  const [routePath, setRoutePath] = useState(pathname);
+  if (routePath !== pathname) {
+    setRoutePath(pathname);
     setIsVisible(false);
-  }, [pathname]);
+  }
 
   useEffect(() => {
     if (isVisible) return; // already triggered
