@@ -427,7 +427,9 @@ export function AsciiCanvas({
     }
   }, [width, height]);
 
-  // Reduced motion fallback: show source media directly (supports both image and video)
+  // Reduced motion fallback: show the source media directly, still. Video
+  // sources render a single frame (the #t media fragment makes Safari paint
+  // it without playback) instead of an autoplaying loop, which is motion.
   if (prefersReducedMotion) {
     const isVideo = resolvedTextureType === 'video';
     return (
@@ -438,11 +440,12 @@ export function AsciiCanvas({
       >
         {isVideo ? (
           <video
-            src={textureUrl}
-            autoPlay
+            src={`${textureUrl}#t=0.1`}
             muted
-            loop
             playsInline
+            preload="metadata"
+            aria-hidden="true"
+            tabIndex={-1}
             className="h-full w-full object-cover opacity-30 grayscale"
           />
         ) : (

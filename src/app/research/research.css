@@ -1,37 +1,78 @@
-.research-meta {
-  color: #646464;
-}
+/* Research: the index and the article.
+   Type follows the site's roles: subhead 24/28 (index titles, article h2),
+   minor 20/22 semibold (article h3, heavier than the bold run-ins that
+   open paragraphs, so a subsection never reads lighter than its text),
+   body 17/19, support 15 (captions, tables), label 13. Grays come from
+   the theme tokens. */
 
-[data-theme='dark'] .research-meta {
-  color: #a6a6a6;
+.research-meta {
+  color: var(--color-sub-text2);
 }
 
 .research-body {
-  font-size: 18px;
-  line-height: 1.65;
-  letter-spacing: -0.011em;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: -0.009em;
+}
+
+@media (min-width: 768px) {
+  .research-body {
+    font-size: 19px;
+    line-height: 1.6;
+  }
+}
+
+.research-body > :first-child {
+  margin-top: 0;
 }
 
 .research-body p {
   margin: 1.15em 0;
 }
 
+/* Prose keeps a measure of about 70 characters in the wider column
+   (Pretendard averages 0.43em a character, so the cap is set in em);
+   figures, tables and code keep the full width. */
+.research-body > :is(p, ul, ol):not(:has(> img)) {
+  max-width: 32em;
+}
+
 .research-body h2,
 .research-body h3 {
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
   scroll-margin-top: 80px;
+  text-wrap: balance;
 }
 
 .research-body h2 {
-  margin: 2.4em 0 0.55em;
-  font-size: 22px;
+  margin: 56px 0 12px;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .research-body h3 {
-  margin: 1.8em 0 0.4em;
-  font-size: 18px;
+  margin: 40px 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+/* A heading sits close over its own text: the text's top margin would
+   otherwise leave as much air under the heading as between paragraphs. */
+.research-body :is(h2, h3) + * {
+  margin-top: 0;
+}
+
+@media (min-width: 768px) {
+  .research-body h2 {
+    font-size: 28px;
+  }
+
+  .research-body h3 {
+    font-size: 22px;
+  }
 }
 
 .research-body a {
@@ -42,8 +83,8 @@
 }
 
 .research-body a:hover {
-  color: var(--color-accent);
-  text-decoration-color: var(--color-accent);
+  color: var(--color-accent-text);
+  text-decoration-color: var(--color-accent-text);
 }
 
 .research-body strong {
@@ -69,7 +110,7 @@
 }
 
 .research-body li::marker {
-  color: var(--color-sub2);
+  color: var(--color-sub-text1);
 }
 
 .research-body ul.takeaways {
@@ -96,14 +137,11 @@
 
 .research-body p.caption {
   margin-top: 0.6em;
-  font-size: 14px;
-  line-height: 1.5;
-  letter-spacing: -0.01em;
-  color: #646464;
-}
-
-[data-theme='dark'] .research-body p.caption {
-  color: #a6a6a6;
+  max-width: 32em;
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--color-sub-text2);
 }
 
 .research-body .table-scroll {
@@ -117,6 +155,7 @@
   border-collapse: collapse;
   font-size: 15px;
   line-height: 1.4;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -134,16 +173,14 @@
 
 .research-body th {
   font-weight: 500;
-  color: var(--color-sub2);
+  color: var(--color-sub-text2);
 }
 
-[data-theme='dark'] .research-body th {
-  color: #a6a6a6;
-}
-
+/* Monospace keeps its own spacing: the body's tightening is for the sans. */
 .research-body :not(pre) > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.84em;
+  letter-spacing: 0;
   background: var(--color-card);
   padding: 0.12em 0.35em;
 }
@@ -152,6 +189,7 @@
   margin: 1.4em 0;
   padding: 16px 18px;
   overflow-x: auto;
+  letter-spacing: 0;
   background: var(--color-card);
 }
 

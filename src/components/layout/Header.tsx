@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import gsap from 'gsap';
@@ -8,6 +8,7 @@ import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
+import { CONTACT_EMAIL, isCurrentRoute } from '@/lib/site';
 
 const NAV_ITEMS = [
   { label: 'THESIS', href: '/#thesis' },
@@ -28,11 +29,27 @@ export function Header() {
   const isVisible = !isHomeRoute || hasScrolled;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close from inside the dialog (close button, Escape) and hand focus back
+  // to the trigger. Nav-link closes skip this: they navigate or scroll
+  // programmatically, and refocusing the trigger there would compete with
+  // that handoff.
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    requestAnimationFrame(() => {
+      menuButtonRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
 
   // --- Scroll lock refs and helpers (declared before handleNavClick) ---
   const scrollYRef = useRef(0);
   // When true, the scroll lock effect skips its unlock (handleNavClick did it)
   const manualUnlockRef = useRef(false);
+  // True between a menu open and its close, so the unlock path only runs
+  // after the menu was actually opened (never on first mount)
+  const wasMenuOpenRef = useRef(false);
 
   // Menu scroll-lock interacts with ThesisSectionMobile via an html dataset
   // marker. Setting body.position:fixed + top:-\${scrollY}px is the standard
@@ -146,15 +163,47 @@ export function Header() {
     }
   }, [isVisible, isHomeRoute]);
 
-  // Menu open animation (needs menuRef, only runs when menu mounts)
-  useEffect(() => {
-    if (!menuRef.current || !menuOpen) return;
-    gsap.fromTo(
-      menuRef.current,
-      { opacity: 0 },
-      { opacity: 1, duration: 0.3, ease: 'power2.out' }
-    );
+  // Menu open: the surface fades in, then the links settle in a short
+  // stagger. Focus moves into the dialog so keyboard and screen-reader
+  // users land inside it (aria-modal promises that). Reduced motion keeps
+  // the fade and drops the travel. Layout effect: the from-state must be
+  // applied before the first paint of the menu, or it flashes in fully
+  // opaque for one frame.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu || !menuOpen) return;
+    closeButtonRef.current?.focus({ preventScroll: true });
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const ctx = gsap.context(() => {
+      gsap.fromTo(menu, { opacity: 0 }, { opacity: 1, duration: 0.24, ease: 'power2.out' });
+      if (!reduceMotion) {
+        gsap.fromTo(
+          '[data-menu-item]',
+          { opacity: 0, y: 8 },
+          { opacity: 1, y: 0, duration: 0.4, ease: 'power3.out', stagger: 0.04, delay: 0.05 },
+        );
+      }
+    }, menu);
+    return () => ctx.revert();
   }, [menuOpen]);
+
+  // Keep Tab inside the open dialog.
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Tab' || !menuRef.current) return;
+    const focusables = menuRef.current.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled])',
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  }, []);
 
   // Scroll lock: freeze body in place while menu is open.
   // Uses position:fixed instead of overflow:hidden to avoid
@@ -165,8 +214,16 @@ export function Header() {
   // event emitted by position:fixed is filtered by ThesisSectionMobile's
   // onScroll guard) and CLEARED after the restore scrollTo (so the
   // restoration event is also filtered).
+  //
+  // The restore only runs when a menu was actually open. On first mount
+  // menuOpen is already false, and an unconditional unlockScroll(true)
+  // scrolled to the saved Y (0) one frame after load — throwing away the
+  // browser's own scroll to a URL fragment, so a shared /about#investors or
+  // /research/...#results link always landed at the top. Home is unaffected
+  // either way: ScrollToTop strips and replays the hash there.
   useEffect(() => {
     if (menuOpen) {
+      wasMenuOpenRef.current = true;
       scrollYRef.current = window.scrollY;
       // Must run BEFORE body.position:fixed so the phantom scroll event is
       // filtered at its source.
@@ -176,6 +233,8 @@ export function Header() {
       document.body.style.left = '0';
       document.body.style.right = '0';
     } else {
+      if (!wasMenuOpenRef.current) return;
+      wasMenuOpenRef.current = false;
       if (manualUnlockRef.current) {
         // handleNavClick already unlocked AND already cleared the dataset
         // flag (via unlockScroll(false)). Just reset the sentinel.
@@ -196,44 +255,50 @@ export function Header() {
   useEffect(() => {
     if (!menuOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key === 'Escape') closeMenu();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [menuOpen]);
+  }, [menuOpen, closeMenu]);
 
   return (
     <>
-      {/* Header: mobile 54px / desktop 45px */}
+      {/* Header: mobile 54px / desktop 45px. Surface styles live in
+          globals.css (.site-header) so reduced-transparency can override
+          them; the transform stays inline because GSAP owns it. */}
       <header
         ref={headerRef}
-        className="fixed top-0 left-0 right-0 z-50 h-[54px] md:h-[45px]"
-        style={{
-          transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)',
-          backgroundColor: isResearchRoute ? 'var(--color-bg)' : 'var(--color-header-bg)',
-          borderBottom: isResearchRoute ? '1px solid var(--color-divider)' : undefined,
-          backdropFilter: isResearchRoute ? undefined : 'blur(8px)',
-          WebkitBackdropFilter: isResearchRoute ? undefined : 'blur(8px)',
-        }}
+        data-surface={isResearchRoute ? 'solid' : 'glass'}
+        className="site-header fixed top-0 left-0 right-0 z-50 h-[54px] md:h-[45px]"
+        style={{ transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)' }}
       >
         <div className="relative mx-auto h-full w-full max-w-[1440px]">
-          {/* Logo: mobile left-[22px] / desktop left-[calc(4.17%+24.5px)] */}
+          {/* Logo: mobile left-[22px] / desktop left-[calc(4.17%+24.5px)].
+              The link spans the header's full height and centres the mark
+              with flex, so the hit area grows (vertically to the header,
+              sideways by padding and a matching negative margin) without
+              moving the mark off the header's centre line. */}
           <Link
             href="/"
-            className="absolute top-1/2 -translate-y-1/2 left-[22px] md:left-[calc(4.17%+24.5px)]"
+            aria-label="1SIX home"
+            className="absolute inset-y-0 left-[22px] md:left-[calc(4.17%+24.5px)] -mx-3 flex items-center px-3"
           >
             <LogoHeader className="h-[14px] w-[48px] md:h-[21px] md:w-[73px] text-[var(--color-accent)]" />
           </Link>
 
           {/* Desktop Nav */}
-          <nav className="absolute top-1/2 -translate-y-1/2 right-0 hidden items-center md:flex"
-            style={{ right: 'calc(8.33% - 38px)' }}>
+          <nav
+            aria-label="Primary"
+            className="absolute top-1/2 -translate-y-1/2 right-0 hidden items-center md:flex"
+            style={{ right: 'calc(8.33% - 38px)' }}
+          >
             <div className="flex items-center gap-8">
               {NAV_ITEMS.map((item) => (
                 <Link
                   key={item.label}
                   href={item.href}
-                  className="text-[12px] font-normal leading-[11px] tracking-[-0.12px] text-[var(--color-text)] transition-opacity hover:opacity-60"
+                  aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
+                  className="nav-link relative py-4 text-[12px] font-normal leading-none tracking-[0.06em] text-[var(--color-text)] transition-opacity duration-150 ease-out hover:opacity-60"
                   onClick={(e) => handleNavClick(e, item.href)}
                 >
                   {item.label}
@@ -247,9 +312,10 @@ export function Header() {
               Visual icon is 20x7, padding expands the hit area without
               changing the visual position. right-[10px] = 22px - 12px padding. */}
           <button
-            className="absolute top-1/2 right-[10px] -translate-y-1/2 flex flex-col items-center justify-center gap-[5px] px-3 py-5 md:hidden"
+            ref={menuButtonRef}
+            className="absolute top-1/2 right-[10px] -translate-y-1/2 flex flex-col items-center justify-center gap-[5px] px-3 py-5 transition-opacity duration-100 ease-out active:opacity-50 md:hidden"
             onClick={() => setMenuOpen(!menuOpen)}
-            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-label="Menu"
             aria-expanded={menuOpen}
             aria-controls="mobile-menu"
           >
@@ -269,28 +335,35 @@ export function Header() {
           aria-label="Navigation menu"
           className="fixed inset-0 z-[60] flex flex-col"
           style={{ backgroundColor: 'var(--color-bg)' }}
+          onKeyDown={handleMenuKeyDown}
         >
           {/* Menu header: same height as mobile header, with logo + close button */}
-          <div className="flex h-[54px] shrink-0 items-center justify-between px-[22px]">
+          <div className="flex h-[54px] shrink-0 items-center justify-between pl-[22px] pr-[10px]">
             <LogoHeader className="h-[14px] w-[48px] text-[var(--color-accent)]" />
             <button
-              onClick={() => setMenuOpen(false)}
+              ref={closeButtonRef}
+              onClick={closeMenu}
               aria-label="Close menu"
-              style={{ color: 'var(--color-text)' }}
-              className="text-xl"
+              className="flex h-11 w-11 items-center justify-center text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50"
             >
-              ✕
+              {/* Same 1px stroke as the hamburger it replaces */}
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false">
+                <path d="M3.5 3.5L16.5 16.5M16.5 3.5L3.5 16.5" stroke="currentColor" strokeWidth="1.1" />
+              </svg>
             </button>
           </div>
 
-          {/* Nav links: left-aligned, Figma: 15px Regular, 50px gap */}
-          <nav className="flex flex-col gap-[50px] px-[22px] pt-[40px]">
+          {/* Nav links: left-aligned, Figma: 15px Regular, 50px rhythm
+              (34px gap + 8px padding top and bottom keeps 50px between
+              labels while giving each link a 34px-tall target). */}
+          <nav aria-label="Primary" className="flex flex-col gap-[34px] px-[22px] pt-[32px]">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.label}
                 href={item.href}
-                className="text-[15px] font-normal tracking-[-0.15px] uppercase"
-                style={{ color: 'var(--color-text)' }}
+                data-menu-item
+                aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
+                className="py-2 text-[15px] font-normal tracking-[0.04em] uppercase text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50 aria-[current=page]:text-[var(--color-accent-text)]"
                 onClick={(e) => handleNavClick(e, item.href)}
               >
                 {item.label}
@@ -298,13 +371,20 @@ export function Header() {
             ))}
           </nav>
 
-          {/* Bottom: copyright + theme toggle */}
+          {/* Bottom: contact, theme toggle, copyright */}
           <div className="mt-auto px-[22px] pb-[36px]">
-            <div className="mb-4">
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              data-menu-item
+              className="mb-6 inline-block py-2 text-[15px] text-[var(--color-text)] underline decoration-[var(--color-divider)] underline-offset-[6px] transition-opacity duration-100 ease-out active:opacity-50"
+            >
+              {CONTACT_EMAIL}
+            </a>
+            <div className="mb-4" data-menu-item>
               <ThemeToggle />
             </div>
             <p className="text-[12px] text-[var(--color-sub-text1)]">
-              &copy; 2025 - 2026 1SIX Technologies Inc.
+              &copy; 2025&ndash;2026 1SIX Technologies Inc.
             </p>
           </div>
         </div>

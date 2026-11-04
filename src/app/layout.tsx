@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
-import Script from 'next/script';
 import './globals.css';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
 import { HomeIntroMount } from '@/components/intro/HomeIntroMount';
+import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
 const pretendard = localFont({
   src: './fonts/PretendardVariable.woff2',
@@ -31,18 +31,13 @@ export const metadata: Metadata = {
   description:
     'The next wave of global finance — built on behavior, not hope.',
 
+  // Products stay off the site for now, metadata included.
   keywords: [
     '1SIX',
     '1SIX Technologies',
+    'internet-native finance',
     'web3 infrastructure',
-    'crypto broadcasting',
-    'crypto trading',
     'blockchain adoption',
-    'Nevada TV',
-    'Nevada Trade',
-    'decentralized media',
-    'crypto streaming',
-    'social trading',
   ],
 
   authors: [{ name: '1SIX Technologies' }],
@@ -62,7 +57,7 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: '1SIX Technologies - Leading web3 industry to cross the chasm',
+        alt: '1SIX — we haven\'t crossed the 16% yet. Internet-native finance for the next 84%.',
       },
     ],
   },
@@ -125,7 +120,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={pretendard.variable} suppressHydrationWarning>
       <head>
-        <Script src="/theme-init.js" strategy="beforeInteractive" />
+        {/* Must run before the first paint (theme, Safari's status bar tint,
+            the Home intro lock): see THEME_INIT_SCRIPT. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="font-sans antialiased">
         <script
@@ -137,7 +134,7 @@ export default function RootLayout({
         {/* Skip to content link for keyboard users */}
         <a
           href="#main-content"
-          className="fixed top-0 left-0 z-[100] -translate-y-full bg-[var(--color-accent)] px-4 py-2 text-white transition-transform focus:translate-y-0"
+          className="fixed top-0 left-0 z-[110] -translate-y-full bg-[var(--color-accent)] px-4 py-2 text-[14px] font-medium text-black transition-transform duration-200 ease-out focus:translate-y-0"
         >
           Skip to content
         </a>

@@ -46,7 +46,7 @@ export const BACKERS: Backer[] = [
 
 export const FIRMS = ['Lemniscap', 'Lambda'];
 
-export const CONTACT_EMAIL = 'contact@1six.tech';
+export { CONTACT_EMAIL } from '@/lib/site';
 
 /**
  * Fill level per band, in percent: the statement starts at the first 16%,

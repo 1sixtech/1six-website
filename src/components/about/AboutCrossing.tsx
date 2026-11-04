@@ -8,14 +8,24 @@ interface AboutCrossingProps {
   evidence: ResearchEvidence;
 }
 
-/** Inline list of names separated by the mosaic's own slash glyph. */
-function NameList({ names, className = '' }: { names: string[]; className?: string }) {
+interface NameListProps {
+  names: string[];
+  /** One name per line, no separators (a wrapping run would strand a slash). */
+  stacked?: boolean;
+  className?: string;
+}
+
+/** List of names: an inline run separated by the mosaic's own slash glyph, or a stacked column. */
+function NameList({ names, stacked = false, className = '' }: NameListProps) {
+  const classes = ['crossing-names', stacked && 'crossing-names--stacked', className]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <ul className={`crossing-names ${className}`.trim()}>
+    <ul className={classes}>
       {names.map((name, index) => (
         <li key={name}>
           {name}
-          {index < names.length - 1 && (
+          {!stacked && index < names.length - 1 && (
             <span className="crossing-names__sep" aria-hidden="true">
               /
             </span>
@@ -36,7 +46,16 @@ function NameList({ names, className = '' }: { names: string[]; className?: stri
 export function AboutCrossing({ evidence }: AboutCrossingProps) {
   return (
     <CrossingRoot>
-      <div className="crossing-meter" aria-hidden="true">
+      {/* Mobile: the mark scrolls away, so the crossing rides under the
+          header instead: the section being read, and the fill as a live
+          count. The label starts hidden: the statement's title is on
+          screen at the top, and CrossingRoot shows the label once a title
+          has gone up under the strip. */}
+      <div className="crossing-meter" data-title="shown" aria-hidden="true">
+        <span className="crossing-meter__label" data-crossing-label-target>
+          about
+        </span>
+        <span className="crossing-meter__count" />
         <span className="crossing-meter__fill" />
       </div>
 
@@ -48,6 +67,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
             <section
               className="crossing-band crossing-band--statement"
               data-crossing-band="0"
+              data-crossing-label="about"
               aria-labelledby="about-title"
             >
               <h1 id="about-title" className="crossing-display">
@@ -71,6 +91,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="1"
+              data-crossing-label="where we come from"
               aria-labelledby="origins-title"
             >
               <h2 id="origins-title" className="crossing-heading">
@@ -81,7 +102,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
                   <div key={discipline} className="crossing-ledger__row">
                     <dt className="crossing-tag">{discipline}</dt>
                     <dd>
-                      <NameList names={names} />
+                      <NameList names={names} stacked />
                     </dd>
                   </div>
                 ))}
@@ -94,6 +115,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="2"
+              data-crossing-label="backed by"
               aria-labelledby="investors-title"
             >
               <h2 id="investors-title" className="crossing-heading">
@@ -119,6 +141,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="3"
+              data-crossing-label="we measure"
               aria-labelledby="method-title"
             >
               <h2 id="method-title" className="crossing-heading">
@@ -154,6 +177,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="4"
+              data-crossing-label="write to us"
               aria-labelledby="contact-title"
             >
               <h2 id="contact-title" className="crossing-heading">

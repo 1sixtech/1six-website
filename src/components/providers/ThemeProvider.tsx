@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 
 type Theme = 'light' | 'dark';
 
@@ -15,6 +16,27 @@ const ThemeContext = createContext<ThemeContextValue>({
   mounted: false,
   toggleTheme: () => {},
 });
+
+/**
+ * iOS Safari 26 tints its status bar from the page ground, and while a fixed
+ * header sits at the top it keeps the tint it took at first paint: after a
+ * theme switch the bar stays the old color until a reload (iOS 26.5,
+ * simulator). Taking the header out of rendering for two frames makes Safari
+ * sample the ground again. Touch devices only (the status bar is a phone and
+ * tablet surface): on a phone the toggle lives in the menu, which covers the
+ * header, and inside the View Transition the cross-fade covers the gap.
+ */
+function retintBrowserChrome() {
+  if (!window.matchMedia('(pointer: coarse)').matches) return;
+  const header = document.querySelector<HTMLElement>('.site-header');
+  if (!header) return;
+  header.style.display = 'none';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      header.style.removeProperty('display');
+    });
+  });
+}
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Always initialize as 'light' on both SSR and client to avoid hydration mismatch.
@@ -47,12 +69,26 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'light' ? 'dark' : 'light';
+    const root = document.documentElement;
+    const next: Theme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    const apply = () => {
       try { localStorage.setItem('theme', next); } catch { /* private browsing */ }
-      document.documentElement.setAttribute('data-theme', next);
-      return next;
-    });
+      root.setAttribute('data-theme', next);
+      // Commit the React side (toggle icon, theme-aware canvases) inside the
+      // same frame as the attribute flip so the transition's "new" snapshot
+      // is the finished state.
+      flushSync(() => setTheme(next));
+      retintBrowserChrome();
+    };
+
+    // Cross-fade the whole page as one surface (see ::view-transition-* in
+    // globals.css). Without support, or under reduced motion, switch at once.
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || typeof document.startViewTransition !== 'function') {
+      apply();
+      return;
+    }
+    document.startViewTransition(apply);
   }, []);
 
   return (

@@ -32,7 +32,7 @@ src/
     layout.tsx                # Root layout (metadata, theme, analytics)
     page.tsx                  # Home page
     globals.css               # Tailwind v4 @theme, CSS variables, keyframes
-    about/page.tsx            # Team/About page
+    about/page.tsx            # About page ("the crossing"), about.css page styles
     error.tsx                 # Error boundary
     not-found.tsx             # 404 page
     robots.ts, sitemap.ts, manifest.ts
@@ -44,8 +44,9 @@ src/
       HeroSection.tsx         # Staggered ASCII scramble intro
       ThesisSection.tsx       # GSAP pinned scroll section
       ThesisGraph.tsx, ProductMap.tsx, ProductCard.tsx, ...
-    team/                     # About page section components
-      TeamHero.tsx, TeamProfiles.tsx, InvestorsSection.tsx, CareersSection.tsx
+    about/                    # About page: AboutCrossing (bands), CrossingMark (sticky ASCII 16 + fill),
+                              # aboutData.ts (confirmed pedigree/backers), researchEvidence.ts
+    team/                     # CareersSection.tsx (parked, not rendered)
     layout/                   # Header.tsx, Footer.tsx
     ui/                       # Reusable: ScrollRevealWrapper, RollingNumber, ThemeToggle, Logo
     providers/                # ThemeProvider.tsx, AssetPrefetcher.tsx
@@ -53,6 +54,8 @@ src/
     useScrollReveal.ts        # One-shot first-scroll detection
     useReducedMotion.ts       # Respects prefers-reduced-motion
   lib/
+    site.ts                   # CONTACT_EMAIL, isCurrentRoute()
+    themeInit.ts              # Theme + Home intro bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
       asciiMosaicFilter.ts    # ASCII rendering algorithm
@@ -76,7 +79,9 @@ public/
 - `ThemeProvider` context at `src/components/providers/ThemeProvider.tsx`
 - Switched via `data-theme="light"|"dark"` attribute on `<html>`
 - CSS variables in `globals.css` swap per theme (not Tailwind's `dark:` class)
-- Blocking `<script>` in `<head>` prevents flash of incorrect theme (FOIT)
+- Blocking inline `<script>` in `<head>` (`src/lib/themeInit.ts`) prevents flash of incorrect theme (FOIT).
+  It must stay render-blocking: `next/script` `beforeInteractive` runs after first paint in the App Router,
+  and iOS Safari 26 keeps the status-bar tint it samples at first paint under the fixed glass header.
 - `localStorage` persistence; default: dark on mobile, light on desktop
 - Access via `useTheme()` hook
 
@@ -87,7 +92,8 @@ public/
 | **GSAP** + ScrollTrigger + Observer | Scroll-driven animations, pinned sections |
 | **Three.js** via `AscMosaic` | WebGL ASCII mosaic rendering from video/images |
 | **use-scramble** | Character scramble text reveal effects |
-| **CSS keyframes** | Marquee infinite scroll (team profiles) |
+| **CSS transitions + IntersectionObserver** | About page fill: the sticky ASCII "16" fills 16% → 100% band by band |
+| **View Transitions** | Whole-page cross-fade on theme switch (ThemeProvider) |
 
 GSAP animations must be cleaned up with `useGSAP()` context or manual `gsap.context()` + `revert()`. Always check `useReducedMotion()` and skip or simplify animations accordingly.
 
@@ -165,7 +171,7 @@ import './globals.css';
 | Path | Description |
 |------|-------------|
 | `/` | Homepage (hero, thesis, products) |
-| `/about` | Team, investors, careers |
+| `/about` | Team pedigree, backers, research, contact |
 | `/team` | Permanent redirect -> `/about` |
 
 Hash navigation: `/#thesis`, `/#products`
