@@ -1,16 +1,16 @@
 import type { Metadata } from 'next';
-import { TeamHero } from '@/components/team/TeamHero';
-import { TeamProfiles } from '@/components/team/TeamProfiles';
-import { InvestorsSection } from '@/components/team/InvestorsSection';
+import { AboutCrossing } from '@/components/about/AboutCrossing';
+import { getResearchEvidence } from '@/components/about/researchEvidence';
+import './about.css';
 
 export const metadata: Metadata = {
   title: 'About',
   description:
-    'Meet the 1SIX team — techdiehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
+    'Meet the 1SIX team — tech diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
   openGraph: {
     title: 'About | 1SIX',
     description:
-      'Meet the 1SIX team — techdiehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
+      'Meet the 1SIX team — tech diehards from Harvard, MIT, Ethereum, and ICPC World Finals. Backed by Naval Ravikant, Charlie Songhurst, and leading funds.',
     url: 'https://1six.tech/about',
     images: [
       {
@@ -33,12 +33,5 @@ export const metadata: Metadata = {
 };
 
 export default function AboutPage() {
-  return (
-    <>
-      <TeamHero />
-      <TeamProfiles />
-      <InvestorsSection />
-      {/* CareersSection hidden until content is ready */}
-    </>
-  );
+  return <AboutCrossing evidence={getResearchEvidence()} />;
 }
