@@ -9,9 +9,9 @@ gsap.registerPlugin(ScrollTrigger);
 
 interface ScrollRevealWrapperProps {
   children: ReactNode;
-  /** Initial Y offset in px. Default: 40 */
+  /** Initial Y offset in px. Default: 16 */
   y?: number;
-  /** Animation duration in seconds. Default: 0.8 */
+  /** Animation duration in seconds. Default: 0.9 */
   duration?: number;
   /** Delay in seconds. Default: 0 */
   delay?: number;
@@ -21,16 +21,24 @@ interface ScrollRevealWrapperProps {
   start?: string;
 }
 
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
 /**
- * Wraps any content with a scroll-triggered fade + slide-up entrance animation.
- * On scroll into view, the content fades from opacity 0 → 1 and slides up.
- * One-shot: only triggers once, not reversed on scroll back.
- * Respects prefers-reduced-motion.
+ * Wraps any content with a scroll-triggered entrance: the content settles
+ * up from a short offset while it sharpens from a slight blur, so it reads
+ * as arriving rather than sliding. One-shot: it never reverses.
+ *
+ * Reduced motion: the content is simply visible. The media query is read
+ * synchronously because `useReducedMotion()` reports `false` on the first
+ * client render; trusting it alone used to hide the content first and then
+ * strand it at opacity 0 once the hook flipped to `true`. The hidden state
+ * is now part of the tween inside the GSAP context, so `ctx.revert()` always
+ * restores the element's own styles.
  */
 export function ScrollRevealWrapper({
   children,
-  y = 40,
-  duration = 0.8,
+  y = 16,
+  duration = 0.9,
   delay = 0,
   className = '',
   start = 'top 85%',
@@ -39,25 +47,29 @@ export function ScrollRevealWrapper({
   const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
-    if (prefersReducedMotion || !ref.current) return;
-
     const el = ref.current;
-
-    gsap.set(el, { opacity: 0, y });
+    if (!el) return;
+    if (prefersReducedMotion || window.matchMedia(REDUCED_MOTION_QUERY).matches) return;
 
     const ctx = gsap.context(() => {
-      gsap.to(el, {
-        opacity: 1,
-        y: 0,
-        duration,
-        delay,
-        ease: 'power2.out',
-        scrollTrigger: {
-          trigger: el,
-          start,
-          once: true, // Only animate in, don't reverse
+      gsap.fromTo(
+        el,
+        { opacity: 0, y, filter: 'blur(4px)' },
+        {
+          opacity: 1,
+          y: 0,
+          filter: 'blur(0px)',
+          duration,
+          delay,
+          ease: 'power4.out',
+          clearProps: 'filter',
+          scrollTrigger: {
+            trigger: el,
+            start,
+            once: true, // Only animate in, don't reverse
+          },
         },
-      });
+      );
     });
 
     return () => ctx.revert();
