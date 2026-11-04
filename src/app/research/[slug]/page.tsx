@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { FigureViewer } from '@/components/research/FigureViewer';
 import { getArticle, getArticles } from '@/lib/research';
 
 type Props = {
@@ -95,6 +96,7 @@ export default async function ResearchArticlePage({ params }: Props) {
         className="research-body mt-8"
         dangerouslySetInnerHTML={{ __html: article.html }}
       />
+      <FigureViewer />
     </article>
   );
 }
