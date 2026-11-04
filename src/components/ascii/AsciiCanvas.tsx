@@ -1,9 +1,12 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import * as videoPool from '@/lib/videoPool';
 import { markAsciiReady } from '@/lib/introState';
+// Type only: the class itself is imported dynamically (Three.js stays out of SSR).
+import type { AscMosaic } from '@/lib/ascmosaic';
 
 /**
  * AsciiCanvas — React wrapper for the AscMosaic Three.js/WebGL library
@@ -77,6 +80,24 @@ interface AsciiCanvasProps {
   renderHeight?: number;
   /** Render at container_size × renderScale for denser mosaic grids. Survives resize. Default: 1 */
   renderScale?: number;
+  /**
+   * Draw the output at the device pixel ratio, up to this cap, so glyphs are
+   * crisp on high-density screens instead of a 1x canvas stretched 2-3x.
+   * Every pixel-sized option (mosaicSize, radii) scales with it, so the grid
+   * keeps its CSS size; the scene target stays at CSS pixels. Follows the
+   * ratio when it changes (a window moved to another screen). Default: 1 (off).
+   */
+  pixelRatioCap?: number;
+  /** Glyphs drawn at their exact pixel coverage (see AsciiMosaicFilterOptions.smoothCells). Default: false */
+  smoothCells?: boolean;
+  /** Glyph coverage multiplier with smoothCells (see AsciiMosaicFilterOptions.cellGain). Default: 1 */
+  cellGain?: number;
+  /**
+   * Still image sources only: draw just the frames that can change (the noise
+   * ticks) instead of every display frame. See AscMosaic.setRenderOnDemand.
+   * Default: false
+   */
+  renderOnDemand?: boolean;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
   eager?: boolean;
   /** Called once when the mosaic finishes initializing and starts animating */
@@ -146,6 +167,10 @@ export function AsciiCanvas({
   renderWidth,
   renderHeight,
   renderScale = 1,
+  pixelRatioCap = 1,
+  smoothCells = false,
+  cellGain = 1,
+  renderOnDemand = false,
   cameraOffsetX = 0,
   eager = false,
   onReady,
@@ -156,7 +181,7 @@ export function AsciiCanvas({
   // Auto-detect texture type from file extension
   const resolvedTextureType = textureType || (textureUrl.endsWith('.mp4') ? 'video' : 'image');
   const containerRef = useRef<HTMLDivElement>(null);
-  const mosaicRef = useRef<any>(null); // AscMosaic instance
+  const mosaicRef = useRef<AscMosaic | null>(null);
   const mountedRef = useRef(true);
   const [isVisible, setIsVisible] = useState(eager);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -167,6 +192,10 @@ export function AsciiCanvas({
   // at once breaks ASCII rendering on memory-constrained iOS devices.
   const [isOnScreen, setIsOnScreen] = useState(true);
   const prefersReducedMotion = useReducedMotion();
+  // Output density (pixelRatioCap > 1): a change, such as the window moving to
+  // a screen of another density, re-runs the init below at the new ratio.
+  const devicePixelRatio = useDevicePixelRatio();
+  const pixelRatio = Math.max(1, Math.min(devicePixelRatio, pixelRatioCap));
 
   // Track visibility via IntersectionObserver (skip if eager)
   useEffect(() => {
@@ -235,7 +264,7 @@ export function AsciiCanvas({
     // mosaic. Originally declared inside the try, which made the catch
     // block blind to a failed instance and leaked activeContextCount +
     // mosaicRef (Codex review C3).
-    let mosaic: InstanceType<(typeof import('@/lib/ascmosaic'))['AscMosaic']> | null = null;
+    let mosaic: AscMosaic | null = null;
 
     try {
       // Remove any leftover canvases from previous instances
@@ -260,10 +289,15 @@ export function AsciiCanvas({
         canvas.style.height = '100%';
       }
 
+      // Output at the device pixel ratio when asked (pixelRatioCap > 1): the
+      // pixel-sized options below scale by the same factor, so cells keep
+      // their CSS size and only get sharper.
+      const outputScale = renderScale * pixelRatio;
+
       // If renderScale specified, render at container_size × scale.
       // This survives window resize events (handled in ascmosaic).
-      if (renderScale > 1) {
-        mosaic.setRenderScale(renderScale);
+      if (outputScale > 1) {
+        mosaic.setRenderScale(outputScale);
       }
 
       // Add model with texture (supports both image and video).
@@ -302,7 +336,7 @@ export function AsciiCanvas({
 
       // Enable ASCII mosaic filter with all options at once
       await mosaic.enableAsciiMosaicFilter({
-        mosaicSize,
+        mosaicSize: mosaicSize * pixelRatio,
         mosaicCellTextureUrl: mosaicCellUrl,
         cellCount,
         setSelectionMode,
@@ -312,10 +346,14 @@ export function AsciiCanvas({
         noiseIntensity,
         noiseFPS,
         noiseFPSRandom,
-        offsetRowRadius,
+        offsetRowRadius: offsetRowRadius === undefined ? undefined : offsetRowRadius * pixelRatio,
         avoid: mouseInteraction,
-        avoidRadius: mouseInteraction ? avoidRadius : undefined,
+        avoidRadius: mouseInteraction ? avoidRadius * pixelRatio : undefined,
         avoidStrength: mouseInteraction ? avoidStrength : undefined,
+        smoothCells,
+        cellGain,
+        // The scene is read once per cell: keep its target at CSS pixels.
+        targetScale: 1 / pixelRatio,
       });
 
       // Second race check: enableAsciiMosaicFilter internally polls for up
@@ -336,6 +374,11 @@ export function AsciiCanvas({
       if (cameraOffsetX !== 0) {
         const cam = mosaic.getCamera();
         cam.position.x += cameraOffsetX;
+      }
+
+      // A still image only changes when the mosaic's own clock ticks.
+      if (renderOnDemand && resolvedTextureType === 'image') {
+        mosaic.setRenderOnDemand(true);
       }
 
       // Start animation
@@ -380,7 +423,7 @@ export function AsciiCanvas({
         markAsciiReady(preloadKey);
       }
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, cameraOffsetX, preloadKey]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, pixelRatio, smoothCells, cellGain, renderOnDemand, cameraOffsetX, preloadKey]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;

@@ -62,6 +62,12 @@ export class AscMosaic {
   private modelAutoRotate: boolean = true;
   /** 모델 자동 회전 속도 (rad/frame) */
   private modelAutoRotateSpeed: number = 0.005;
+  /** Draw only frames that can differ from the last (see setRenderOnDemand). */
+  private renderOnDemand: boolean = false;
+  /** A frame is owed: a new model, size, filter or context, or a restarted loop. */
+  private renderPending: boolean = true;
+  /** The model's image texture has arrived; until then on-demand mode watches for it. */
+  private sceneTexturesSettled: boolean = false;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -105,6 +111,7 @@ export class AscMosaic {
         const h = this.renderer.domElement.height;
         this.asciiMosaicFilter.setSize(w, h);
       }
+      this.renderPending = true;
       this.animate();
     };
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLostHandler);
@@ -141,12 +148,16 @@ export class AscMosaic {
       if (this.asciiMosaicFilter) {
         this.asciiMosaicFilter.setSize(rw, rh);
       }
+      this.renderPending = true;
     };
     window.addEventListener('resize', this.resizeHandler);
   }
 
   async addModel(options?: TexturedMeshOptions): Promise<THREE.Object3D> {
     const opts = options ?? {};
+    // Any model change redraws, and an image texture arrives after the mesh.
+    this.renderPending = true;
+    this.sceneTexturesSettled = false;
     const newShape = opts.shape ?? 'sphere';
     const newScale = opts.scale ?? 1;
 
@@ -485,6 +496,8 @@ export class AscMosaic {
     if (this.isAnimating) return;
 
     this.isAnimating = true;
+    // A restarted loop (back on screen, restored context) draws at once.
+    this.renderPending = true;
     const animate = () => {
       if (!this.isAnimating) return;
 
@@ -499,10 +512,64 @@ export class AscMosaic {
         this.orbitControls.update();
       }
 
+      if (this.renderOnDemand && !this.isRenderDue()) return;
       this.render();
     };
 
     animate();
+  }
+
+  /**
+   * Draw only the frames that can differ from the last one. For a still
+   * image source the mosaic changes only when its noise clock ticks (9 times
+   * a second for the world map), so the loop skips the display's other
+   * 50-230 frames a second; a canvas left alone keeps showing its last
+   * frame. Anything that moves the scene on its own (auto-rotate, orbit or
+   * tilt controls, a video texture) keeps every frame. Callers that change
+   * the scene in other ways must re-enable this or call renderOnce().
+   */
+  setRenderOnDemand(enabled: boolean): void {
+    this.renderOnDemand = enabled;
+    this.renderPending = true;
+  }
+
+  private isRenderDue(): boolean {
+    if ((this.modelAutoRotate && this.model) || this.orbitControls || this.tiltControlsEnabled) {
+      return true;
+    }
+    if (!this.sceneTexturesSettled) {
+      const state = this.sceneTextureState();
+      if (state === 'video') return true;
+      if (state === 'ready') {
+        // The first frame after the texture arrives uploads and shows it.
+        this.sceneTexturesSettled = true;
+        this.renderPending = true;
+      }
+    }
+    if (this.renderPending) {
+      this.renderPending = false;
+      return true;
+    }
+    return this.asciiMosaicFilter?.wantsFrame(performance.now()) ?? false;
+  }
+
+  /** Whether the model's textures are still loading, all loaded, or include a video. */
+  private sceneTextureState(): 'loading' | 'ready' | 'video' {
+    if (!this.model) return 'loading';
+    let state: 'loading' | 'ready' | 'video' = 'ready';
+    this.model?.traverse((obj) => {
+      if (state === 'video') return;
+      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+        const map = obj.material.map;
+        if (map instanceof THREE.VideoTexture) {
+          state = 'video';
+          return;
+        }
+        const image = map.image as { width?: number } | null | undefined;
+        if (!image || !image.width) state = 'loading';
+      }
+    });
+    return state;
   }
 
   stopAnimate(): void {
@@ -605,12 +672,14 @@ export class AscMosaic {
     });
 
     this.asciiMosaicFilter.enable();
+    this.renderPending = true;
   }
 
   disableAsciiMosaicFilter(): void {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.disable();
     }
+    this.renderPending = true;
   }
 
   async toggleAsciiMosaicFilter(
@@ -713,6 +782,7 @@ export class AscMosaic {
 
   setUseOrthographic(use: boolean): void {
     if (this.useOrthographic === use) return;
+    this.renderPending = true;
     const orbit = this.orbitControls;
     let savedState: { target: THREE.Vector3; distance: number; theta: number; phi: number; orthoZoom?: number } | null = null;
     if (orbit) {
@@ -775,6 +845,7 @@ export class AscMosaic {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.setSize(width, height);
     }
+    this.renderPending = true;
   }
 
   /**
@@ -796,6 +867,7 @@ export class AscMosaic {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.setSize(rw, rh);
     }
+    this.renderPending = true;
   }
 
   getOrbitControls(): OrbitControls | null {
