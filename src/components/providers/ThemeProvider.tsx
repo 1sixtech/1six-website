@@ -103,7 +103,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       apply();
       return;
     }
-    document.startViewTransition(apply);
+    const transition = document.startViewTransition(apply);
+    // A toggle during the cross-fade skips it, which rejects `ready`. apply
+    // still runs, so the theme still changes: nothing failed.
+    transition.ready.catch(() => {});
   }, []);
 
   const value = useMemo(() => ({ theme, mounted, toggleTheme }), [theme, mounted, toggleTheme]);
