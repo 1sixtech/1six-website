@@ -24,8 +24,17 @@ export interface ResearchEvidence {
 
 const SLUG = '001-hyperliquid-data-feed-latency';
 
-/** The baseline plus both own-node results; the vendor comparison stays in the article. */
-const QUOTED_TAKEAWAYS = 3;
+/**
+ * The takeaways About quotes, by their published bold labels (without the
+ * colon): the baseline plus both own-node results; the vendor comparison
+ * stays in the article. Chosen by label, not position, so a takeaway added
+ * or reordered upstream cannot slip into the quote.
+ */
+export const QUOTED_LABELS = [
+  'Public feed',
+  'Own node, quiet market',
+  'Own node, when the US stock market opens',
+];
 
 const FALLBACK = {
   title: 'How Hyperliquid data feed latency is measured',
@@ -62,6 +71,22 @@ function parseTakeaways(html: string): Takeaway[] {
     .filter((takeaway) => takeaway.text.length > 0);
 }
 
+const labelKey = (label: string) => label.replace(/:\s*$/, '').trim().toLowerCase();
+
+/**
+ * The article is synced at build time from another repository, so it can
+ * change without a change here. In a production build a missing article or
+ * a missing quoted takeaway fails the build (Vercel keeps the last good
+ * deployment) instead of shipping a link to a 404 or a quote that changed
+ * meaning. In development, where the articles may not be synced yet, the
+ * page falls back to the citation alone.
+ */
+function evidenceMissing(reason: string): void {
+  const message = `About cites research article "${SLUG}": ${reason}`;
+  if (process.env.NODE_ENV === 'production') throw new Error(message);
+  console.warn(message);
+}
+
 export function getResearchEvidence(): ResearchEvidence {
   const href = `/research/${SLUG}`;
 
@@ -73,7 +98,15 @@ export function getResearchEvidence(): ResearchEvidence {
   }
 
   if (!article) {
+    evidenceMissing('the article is not in content/research (run scripts/sync-research.mjs).');
     return { href, ...FALLBACK, takeaways: [] };
+  }
+
+  const byLabel = new Map(parseTakeaways(article.html).map((t) => [labelKey(t.label), t]));
+  const takeaways = QUOTED_LABELS.map((label) => byLabel.get(labelKey(label)));
+  const missing = QUOTED_LABELS.filter((_, i) => !takeaways[i]);
+  if (missing.length > 0) {
+    evidenceMissing(`no key takeaway labelled ${missing.map((l) => `"${l}"`).join(', ')}.`);
   }
 
   return {
@@ -81,6 +114,6 @@ export function getResearchEvidence(): ResearchEvidence {
     title: article.title,
     date: article.date,
     dateLabel: article.dateLabel,
-    takeaways: parseTakeaways(article.html).slice(0, QUOTED_TAKEAWAYS),
+    takeaways: missing.length > 0 ? [] : (takeaways as Takeaway[]),
   };
 }

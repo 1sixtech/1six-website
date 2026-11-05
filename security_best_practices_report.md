@@ -18,6 +18,11 @@ Post-fix verification results:
 
 Note: Next.js App Router still emits inline runtime scripts in static output, so the shipped CSP uses the official baseline `script-src 'self' 'unsafe-inline'` form instead of a nonce-only policy. Moving to nonce-based CSP would require dynamic rendering, which is a significant tradeoff for this static site.
 
+### Update 2026-11-05
+
+- The theme bootstrap is an inline `<head>` script again (`src/lib/themeInit.ts`, rendered by `src/app/layout.tsx`); `public/theme-init.js` is gone. It has to block the first paint: `next/script` with `beforeInteractive` runs after first paint in the App Router, and iOS Safari 26 then kept a light status bar over the dark page under the fixed header. The baseline `'unsafe-inline'` above already covers it; a future nonce or hash CSP must cover this script too.
+- Research articles are synced at build time from the separate `1sixtech/noctis-articles` repository (`scripts/sync-research.mjs`, at `RESEARCH_GIT_REF`, default `main`). Raw HTML in an article is now rendered as text (`src/lib/research.ts`), and the synced assets under `/research/:slug/...` are served with their own CSP (`default-src 'none'; ... sandbox`, `next.config.ts`), so an SVG opened on its own cannot run script. Pinning `RESEARCH_GIT_REF` to a reviewed commit in the Vercel environment is still recommended.
+
 ## Executive Summary
 
 This codebase is structurally low-risk because it is a static marketing site: there are no API routes, no database access, no authentication/session layer, no user-generated HTML rendering, and no committed secrets visible in the repository. I did not find any direct XSS, SSRF, open redirect, authz, or secret-exposure bugs in the application code.

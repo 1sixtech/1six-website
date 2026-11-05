@@ -56,7 +56,7 @@ export default async function ResearchArticlePage({ params }: Props) {
   return (
     <article>
       <p className="research-meta text-[13px] tracking-[0.01em]">
-        <Link href="/research" className="transition-colors hover:text-[var(--color-accent-text)]">
+        <Link href="/research" className="transition-colors hover:text-[var(--color-accent-text)] active:text-[var(--color-accent-text)]">
           Research
         </Link>
         <span aria-hidden="true"> · </span>
@@ -82,7 +82,7 @@ export default async function ResearchArticlePage({ params }: Props) {
               <li key={heading.id}>
                 <a
                   href={`#${heading.id}`}
-                  className="text-[15px] leading-[1.4] underline decoration-[color-mix(in_srgb,var(--color-text)_35%,transparent)] underline-offset-[3px] transition-colors hover:text-[var(--color-accent-text)] hover:decoration-[var(--color-accent-text)]"
+                  className="text-[15px] leading-[1.4] underline decoration-[color-mix(in_srgb,var(--color-text)_35%,transparent)] underline-offset-[3px] transition-colors hover:text-[var(--color-accent-text)] hover:decoration-[var(--color-accent-text)] active:text-[var(--color-accent-text)] active:decoration-[var(--color-accent-text)]"
                 >
                   {heading.text}
                 </a>

@@ -51,7 +51,7 @@ export default function ResearchPage() {
             <p className="text-[13px] tracking-[0.01em] text-[var(--color-accent-text)]">
               {article.number}
             </p>
-            <h2 className="mt-2 text-[24px] font-medium leading-[1.2] tracking-[-0.02em] text-balance transition-colors group-hover:text-[var(--color-accent)] md:text-[28px]">
+            <h2 className="mt-2 text-[24px] font-medium leading-[1.2] tracking-[-0.02em] text-balance transition-colors group-hover:text-[var(--color-accent)] group-active:text-[var(--color-accent)] md:text-[28px]">
               {article.title}
             </h2>
             <p className="research-meta mt-2 text-[13px] tracking-[0.01em]">

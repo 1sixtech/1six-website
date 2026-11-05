@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { parse } from 'marked';
+import { Marked } from 'marked';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content/research');
 const SLUG = /^[0-9]{3}-[a-z0-9-]+$/;
@@ -130,20 +130,44 @@ function slugify(text: string): string {
     .replace(/\s+/g, '-');
 }
 
+/** &amp; goes last, so an escaped entity (&amp;lt;) decodes once, to &lt;. */
 function decodeEntities(text: string): string {
   return text
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
 }
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Articles are synced at build time from another repository
+ * (scripts/sync-research.mjs), so raw HTML inside them is shown as text,
+ * never emitted as markup: a script slipped into an article cannot run on
+ * the site. Markdown itself renders as before.
+ */
+const markdown = new Marked({
+  async: false,
+  gfm: true,
+  renderer: {
+    html({ text }) {
+      return escapeHtml(text);
+    },
+  },
+});
 
 /** The intrinsic size of a synced SVG under public/, read from its root element. */
 function svgSize(publicPath: string): { width: string; height: string } | null {
   if (!publicPath.startsWith('/') || !publicPath.endsWith('.svg')) return null;
-  const file = path.join(process.cwd(), 'public', publicPath);
-  if (!existsSync(file)) return null;
+  // The path comes from the synced markdown: resolve it and keep it inside public/.
+  const publicDir = path.join(process.cwd(), 'public');
+  const file = path.resolve(publicDir, `.${publicPath}`);
+  if (!file.startsWith(publicDir + path.sep)) return null;
+  if (!existsSync(file) || !statSync(file).isFile()) return null;
   const root = readFileSync(file, 'utf8').match(/<svg\b[^>]*>/)?.[0];
   const width = root?.match(/\swidth="(\d+(?:\.\d+)?)"/)?.[1];
   const height = root?.match(/\sheight="(\d+(?:\.\d+)?)"/)?.[1];
@@ -158,7 +182,7 @@ const ENLARGE_ICON =
   '</svg></span>';
 
 function renderBody(slug: string, body: string): { html: string; headings: ResearchHeading[] } {
-  const parsed = parse(body, { async: false, gfm: true });
+  const parsed = markdown.parse(body) as string;
   const headings: ResearchHeading[] = [];
   const used = new Set<string>();
 
@@ -186,7 +210,9 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
     let tag = `<img${before}src="${local}"${after}>`;
     // A lazy image with no size takes no space until it loads, and the text
     // below jumps when it does; the SVG's own size reserves its box.
-    const size = !/\bwidth=/.test(tag) ? svgSize(local) : null;
+    // An author-given width or height stands: the SVG's own size would add a
+    // second height (or width) attribute, and the first one would win.
+    const size = !/\b(?:width|height)=/.test(tag) ? svgSize(local) : null;
     if (size) tag = tag.replace('<img', `<img width="${size.width}" height="${size.height}"`);
     if (tag.includes('loading=')) return tag;
     return tag.replace('<img', '<img loading="lazy" decoding="async"');

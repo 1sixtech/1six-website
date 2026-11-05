@@ -87,6 +87,13 @@
   text-decoration-color: var(--color-accent-text);
 }
 
+/* Press feedback on touch, where hover does not exist (the tap highlight is
+   off site-wide). Figures give their own (below). */
+.research-body a:not(.research-figure):active {
+  color: var(--color-accent-text);
+  text-decoration-color: var(--color-accent-text);
+}
+
 .research-body strong {
   font-weight: 600;
 }
@@ -137,8 +144,11 @@
 
 /* ── Figures open at full size (FigureViewer) ──
    On a phone the column shrinks a chart's labels to 5-7px, so each figure
-   is a link to itself and carries a small "enlarge" mark. On a desktop the
-   labels read at 10-14px, and the mark waits for a hover. */
+   is a link to itself and carries a small "enlarge" mark, under the chart's
+   bottom-right corner: a mark on the chart covered data (Figure 1's
+   "Program ≈294 ms" box, the very total it compares), and charts often
+   keep their legend in that corner. On a desktop the labels read at
+   10-14px, and the mark waits for a hover, on the chart. */
 
 .research-body a.research-figure {
   position: relative;
@@ -167,25 +177,31 @@
   opacity: 0.85;
 }
 
-/* The figures keep a white ground in both themes, so the mark does too. */
 .research-figure__hint {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  color: #1c1c1c;
-  background-color: rgb(255 255 255 / 0.92);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1);
-  transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  color: var(--color-sub-text1);
 }
 
 @media (hover: hover) and (pointer: fine) {
+  /* On the chart's corner, revealed by a hover. The figures keep a white
+     ground in both themes, so the mark does too. */
   .research-figure__hint {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-top: 0;
+    border-radius: 999px;
+    color: #1c1c1c;
+    background-color: rgb(255 255 255 / 0.92);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1);
     opacity: 0;
+    transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);
   }
 
   .research-figure:hover .research-figure__hint,
@@ -236,6 +252,8 @@ html:has(.figure-viewer[open]) {
   overflow: hidden;
 }
 
+/* A click beside the chart closes the viewer, as the zoom-in cursor that
+   opened it suggests; the chart itself does not. */
 .figure-viewer__scroll {
   display: flex;
   width: 100%;
@@ -243,11 +261,13 @@ html:has(.figure-viewer[open]) {
   overflow: auto;
   overscroll-behavior: contain;
   padding: 64px 16px 24px;
+  cursor: zoom-out;
 }
 
 .figure-viewer__image {
   flex: none;
   margin: auto;
+  cursor: auto;
   width: auto;
   height: auto;
   max-width: none;
@@ -265,6 +285,12 @@ html:has(.figure-viewer[open]) {
   height: 44px;
   color: var(--color-text);
   transition: opacity 100ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .figure-viewer__close:hover {
+    opacity: 0.6;
+  }
 }
 
 .figure-viewer__close:active {
