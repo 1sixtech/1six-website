@@ -57,6 +57,12 @@ date: 2026-01-02
 
 ![Folder](assets/folder.svg)
 
+Links: [the dataset](javascript:alert(document.domain)), <javascript:alert(2)>, [a ref][bad],
+[tabbed](java&#x09;script:alert(4)), [coded](&#106;avascript:alert(5)), [web](https://example.com/web),
+[mail](mailto:contact@1six.tech), [section](#results) and [notes](./notes.md).
+
+[bad]: javascript:alert(3)
+
 An inline ![icon](assets/chart.svg) in a sentence, and [a source](https://example.com/data).
 
 ![lead](assets/chart.svg) leads a sentence.
@@ -65,7 +71,7 @@ An inline ![icon](assets/chart.svg) in a sentence, and [a source](https://exampl
 
 const cwd = process.cwd();
 process.chdir(root);
-const { getArticle } = await import('./research.ts');
+const { getArticle, isSafeLinkTarget } = await import('./research.ts');
 after(() => {
   process.chdir(cwd);
   rmSync(root, { recursive: true, force: true });
@@ -147,4 +153,36 @@ test('raw HTML in an article (synced from another repository) is shown as text, 
 test('an escaped entity in a heading decodes once for the contents list', () => {
   const { headings } = getArticle(SLUG);
   assert.ok(headings.some(({ text }) => text === 'Why &lt; is escaped'), JSON.stringify(headings));
+});
+
+test('a link to anything but the web, mail, a #fragment or a relative path keeps its words, not its link', () => {
+  const { html } = getArticle(SLUG);
+  const hrefs = Array.from(html.matchAll(/<a\b[^>]*\shref="([^"]*)"/g), ([, href]) => href);
+  assert.ok(!hrefs.some((href) => /script|alert/i.test(href)), JSON.stringify(hrefs));
+  for (const words of ['the dataset', 'a ref', 'tabbed', 'coded']) {
+    assert.match(html, new RegExp(`[\\s,(]${words}[,.)\\s]`), `"${words}" stays as text`);
+  }
+  for (const href of ['https://example.com/web', 'mailto:contact@1six.tech', '#results', './notes.md']) {
+    assert.ok(hrefs.includes(href), `${href} keeps its link`);
+  }
+});
+
+test('isSafeLinkTarget reads the scheme as a browser would', () => {
+  for (const safe of ['https://a.b', 'http://a.b', 'MAILTO:x@y.z', '#top', '/research', './x.md', 'x/y', '?q=1']) {
+    assert.equal(isSafeLinkTarget(safe), true, safe);
+  }
+  for (const unsafe of [
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    ' javascript:alert(1)',
+    '\u0001javascript:alert(1)',
+    'java\tscript:alert(1)',
+    'java&#x09;script:alert(1)',
+    '&#106;avascript:alert(1)',
+    'javascript&colon;alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+  ]) {
+    assert.equal(isSafeLinkTarget(unsafe), false, JSON.stringify(unsafe));
+  }
 });

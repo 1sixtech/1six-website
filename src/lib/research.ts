@@ -144,11 +144,38 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** The link targets an article may use, besides relative paths and #fragments. */
+const SAFE_SCHEMES = new Set(['http', 'https', 'mailto']);
+
+/**
+ * Whether a link target is safe to emit: a relative path, a #fragment, or
+ * one of SAFE_SCHEMES. The scheme is read the way a browser reads it:
+ * after character references are decoded ("java&#x09;script:",
+ * "&#106;avascript:") and tabs and newlines dropped, with leading controls
+ * and spaces trimmed.
+ */
+export function isSafeLinkTarget(href: string): boolean {
+  const codePoint = (value: number) => (value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '');
+  const decoded = href
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => codePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec: string) => codePoint(Number(dec)))
+    .replace(/&(colon|tab|newline);/gi, (_, name: string) => ({ colon: ':', tab: '\t', newline: '\n' })[name.toLowerCase()] ?? '');
+  // A URL parser drops tabs and newlines anywhere and trims leading controls and spaces.
+  const normalized = decoded.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(normalized)?.[1]?.toLowerCase();
+  return scheme === undefined || SAFE_SCHEMES.has(scheme);
+}
+
 /**
  * Articles are synced at build time from another repository
- * (scripts/sync-research.mjs), so raw HTML inside them is shown as text,
- * never emitted as markup: a script slipped into an article cannot run on
- * the site. Markdown itself renders as before.
+ * (scripts/sync-research.mjs), so they are rendered as untrusted input: raw
+ * HTML inside them is shown as text, never emitted as markup, and a link
+ * to anything but the web, mail, a #fragment or a relative path (a
+ * javascript: link, an autolink to one, a reference to one) keeps its words
+ * and loses its link. A script slipped into an article cannot run on the
+ * site. Markdown itself renders as before. (Image sources need no check:
+ * one that is not an http(s) URL or a site path is rewritten under the
+ * article's own folder below, and a figure's link reuses it.)
  */
 const markdown = new Marked({
   async: false,
@@ -156,6 +183,10 @@ const markdown = new Marked({
   renderer: {
     html({ text }) {
       return escapeHtml(text);
+    },
+    link(token) {
+      if (isSafeLinkTarget(token.href)) return false; // marked's own rendering
+      return this.parser.parseInline(token.tokens);
     },
   },
 });
