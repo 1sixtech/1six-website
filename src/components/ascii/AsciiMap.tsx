@@ -6,6 +6,7 @@ import { useTheme } from '@/components/providers/ThemeProvider';
 import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import {
   getContainedMapScale,
+  getMapGlyphs,
   MAP_PLANE_HEIGHT,
   MAP_PLANE_WIDTH,
 } from './mapGeometry';
@@ -20,28 +21,6 @@ const AsciiCanvas = dynamic(
 // the rendered size and avoids coupling layout to the asset's raw dimensions.
 const CONTAINED_SCALE = getContainedMapScale();
 const MOBILE_QUERY = '(max-width: 767px)';
-
-/**
- * Glyph pitch in CSS px. The phone follows its design (Figma 834:2920). On
- * desktop the 9px of the design read as a coarse grid of large glyphs; 6px
- * gives the map 168 glyphs across instead of 112, about 1.5x the detail, and
- * costs the same to draw: the fill is set by the canvas's pixels, not by how
- * many cells cut it up.
- */
-const MOBILE_CELL = 5;
-const DESKTOP_CELL = 6;
-
-/**
- * Glyph weight (AsciiMosaicFilterOptions.cellGain). The strokes are about 6%
- * of a cell wide, so a 6px cell on a 1x screen draws them at a third of a
- * pixel: they need more lift there to read than at 12 device pixels on a 2x
- * screen. Between 1x and 2x the gain follows the pixel ratio. Tuned by eye
- * and by ink: at 1.9 the 1x strokes read as dark rings while the map stays
- * within a third of the 2x tone (2.2 made it half again as dark).
- */
-const MOBILE_GAIN = 1.3;
-const DESKTOP_GAIN_1X = 1.9;
-const DESKTOP_GAIN_2X = 1.6;
 
 function subscribeToMobileQuery(onStoreChange: () => void): () => void {
   const mediaQuery = window.matchMedia(MOBILE_QUERY);
@@ -69,9 +48,8 @@ export function AsciiMapCanvas() {
     getIsMobile,
     getServerIsMobile,
   );
-  const devicePixelRatio = useDevicePixelRatio();
-  const density = Math.min(1, Math.max(0, devicePixelRatio - 1));
-  const desktopGain = DESKTOP_GAIN_1X + (DESKTOP_GAIN_2X - DESKTOP_GAIN_1X) * density;
+  // Glyph pitch and weight by layout and pixel ratio (see mapGeometry).
+  const glyphs = getMapGlyphs(isMobile, useDevicePixelRatio());
 
   return (
     <AsciiCanvas
@@ -79,7 +57,7 @@ export function AsciiMapCanvas() {
       textureType="image"
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"
-      mosaicSize={isMobile ? MOBILE_CELL : DESKTOP_CELL}
+      mosaicSize={glyphs.cell}
       shape="plane"
       orthographic
       cellCount={3}
@@ -99,7 +77,7 @@ export function AsciiMapCanvas() {
       // and lift the strokes thin cells leave faint.
       pixelRatioCap={2}
       smoothCells
-      cellGain={isMobile ? MOBILE_GAIN : desktopGain}
+      cellGain={glyphs.gain}
       // A still image: redraw on the noise ticks (9 a second), not on every
       // frame of a 120-240 Hz display.
       renderOnDemand

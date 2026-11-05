@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
  * zoom. The query matches only the current ratio, so its 'change' fires on
  * any move away from it; each change re-arms it at the new ratio.
  */
-function subscribeToPixelRatio(onStoreChange: () => void): () => void {
+export function subscribeToPixelRatio(onStoreChange: () => void): () => void {
   let query: MediaQueryList | null = null;
 
   function watch() {

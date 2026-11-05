@@ -128,6 +128,8 @@ export class AsciiMosaicFilter {
   private atlasCellSize: number = 0;
   /** A setting changed since the last frame (see wantsFrame). */
   private frameDirty: boolean = true;
+  /** dispose() ran: an atlas that arrives later is dropped. */
+  private disposed: boolean = false;
 
   private static readonly VERTEX_SHADER = `
     attribute vec2 instanceSampleUV;
@@ -313,45 +315,75 @@ export class AsciiMosaicFilter {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.scene = new THREE.Scene();
 
-    // The current size, not the constructor's: a resize can land while the
-    // atlas loads (setSize skips the mesh until it exists).
-    this.initAtlas(options).then(() => {
-      this.buildInstancedMesh(this.width, this.height);
-    });
-    
+    // The mesh is built at once. In smoothCells mode it starts on an empty
+    // placeholder atlas, so the filter is ready (and the canvas can show)
+    // without waiting for the atlas download; the glyphs appear when the
+    // coverage atlas is swapped in.
+    this.initAtlas(options);
+    this.buildInstancedMesh(this.width, this.height);
   }
 
-  private async initAtlas(
-    options: AsciiMosaicFilterOptions
-  ): Promise<void> {
+  private initAtlas(options: AsciiMosaicFilterOptions): void {
     const textureUrl = options.mosaicCellTextureUrl ?? '/resource/mosaic_cell.png';
     const cellCount = options.cellCount ?? 10;
     if (options.smoothCells) {
-      try {
-        const image = await new THREE.ImageLoader().loadAsync(textureUrl);
-        this.atlasImage = image;
-        this.premultipliedAtlas = true;
-        this.atlasResult = { texture: this.buildCoverageAtlas(image, cellCount), cellCount };
-        return;
-      } catch (error) {
-        // Fall back to the plain atlas below rather than leave the canvas empty.
-        console.warn('모자이크 셀 커버리지 아틀라스 생성 실패:', error);
-        this.atlasImage = null;
-        this.premultipliedAtlas = false;
-      }
+      // Blending expects premultiplied colour from here on, whichever atlas
+      // ends up in place: the coverage atlas, or the plain one premultiplied
+      // on upload if that fails.
+      this.premultipliedAtlas = true;
+      const placeholder = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
+      placeholder.needsUpdate = true;
+      this.atlasResult = { texture: placeholder, cellCount };
+      void this.loadCoverageAtlas(textureUrl);
+      return;
     }
-    const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(
+    this.atlasResult = { texture: this.loadPlainAtlas(textureUrl, false), cellCount };
+  }
+
+  /** smoothCells: fetch the source atlas, then swap its coverage atlas in. */
+  private async loadCoverageAtlas(textureUrl: string): Promise<void> {
+    let texture: THREE.Texture;
+    try {
+      const image = await new THREE.ImageLoader().loadAsync(textureUrl);
+      if (this.disposed) return;
+      this.atlasImage = image;
+      texture = this.buildCoverageAtlas(image, this.atlasResult.cellCount);
+    } catch (error) {
+      if (this.disposed) return;
+      // Fall back to the plain atlas rather than leave the canvas empty.
+      console.warn('모자이크 셀 커버리지 아틀라스 생성 실패:', error);
+      this.atlasImage = null;
+      texture = this.loadPlainAtlas(textureUrl, true);
+    }
+    this.useAtlas(texture);
+  }
+
+  /** The full-size atlas, sampled one texel per pixel (nearest). */
+  private loadPlainAtlas(textureUrl: string, premultiply: boolean): THREE.Texture {
+    const texture = new THREE.TextureLoader().load(
       textureUrl,
-      () => { texture.needsUpdate = true; },
+      () => {
+        texture.needsUpdate = true;
+        this.frameDirty = true;
+      },
       undefined,
       (error) => { console.warn('모자이크 셀 텍스처 로딩 실패:', error); }
     );
+    texture.premultiplyAlpha = premultiply;
     texture.minFilter = THREE.NearestFilter;
     texture.magFilter = THREE.NearestFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.atlasResult = { texture, cellCount };
+    return texture;
+  }
+
+  /** Put an atlas in place (drawn from the next frame) and free the one it replaces. */
+  private useAtlas(texture: THREE.Texture): void {
+    const previous = this.atlasResult.texture;
+    this.atlasResult = { texture, cellCount: this.atlasResult.cellCount };
+    if (this.material) this.material.uniforms.tAtlas.value = texture;
+    if (previous !== texture) previous.dispose();
+    this.frameDirty = true;
   }
 
   /**
@@ -730,13 +762,7 @@ export class AsciiMosaicFilter {
     this.frameDirty = true;
     // The coverage atlas is drawn for one cell size: re-render it for a new one.
     if (this.atlasImage && this.atlasResult && size !== this.atlasCellSize) {
-      const previous = this.atlasResult.texture;
-      this.atlasResult = {
-        texture: this.buildCoverageAtlas(this.atlasImage, this.atlasResult.cellCount),
-        cellCount: this.atlasResult.cellCount,
-      };
-      if (this.material) this.material.uniforms.tAtlas.value = this.atlasResult.texture;
-      previous.dispose();
+      this.useAtlas(this.buildCoverageAtlas(this.atlasImage, this.atlasResult.cellCount));
     }
     const w = this.width;
     const h = this.height;
@@ -806,7 +832,12 @@ export class AsciiMosaicFilter {
 
   setSetCount(setCount: number): void {
     this.frameDirty = true;
+    const changed = Math.max(1, setCount) !== this.setCount;
     this.setCount = Math.max(1, setCount);
+    // The coverage atlas holds one row per set: re-render it for a new count.
+    if (changed && this.atlasImage && this.atlasResult) {
+      this.useAtlas(this.buildCoverageAtlas(this.atlasImage, this.atlasResult.cellCount));
+    }
     if (this.material) {
       this.material.uniforms.uRowCount.value = this.setCount;
       this.material.uniforms.uSetCount.value = this.setCount;
@@ -909,6 +940,7 @@ export class AsciiMosaicFilter {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.detachMouseListener();
     if (this.instancedMesh) {
       this.instancedMesh.geometry.dispose();

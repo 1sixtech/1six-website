@@ -25,6 +25,8 @@ export interface AscMosaicOptions {
   autoRotate?: boolean;
   /** 모델 자동 회전 속도 (rad/frame), 기본값: 0.005 */
   autoRotateSpeed?: number;
+  /** Multisample the drawing buffer (WebGLRenderer antialias). Default: true */
+  antialias?: boolean;
 }
 
 /**
@@ -93,7 +95,7 @@ export class AscMosaic {
     this.camera.position.z = 5;
 
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: options?.antialias ?? true,
       alpha: true,
     });
     this.renderer.setSize(width, height);
@@ -244,6 +246,8 @@ export class AscMosaic {
                 }
               }
               videoTexture.dispose();
+            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+              obj.material.map.dispose();
             }
             obj.material.dispose();
           }
@@ -550,7 +554,10 @@ export class AscMosaic {
       this.renderPending = false;
       return true;
     }
-    return this.asciiMosaicFilter?.wantsFrame(performance.now()) ?? false;
+    // A disabled filter draws nothing, so it owes no frames (render() then
+    // draws the scene directly, which renderPending already covers).
+    const filter = this.asciiMosaicFilter;
+    return filter && filter.getEnabled() ? filter.wantsFrame(performance.now()) : false;
   }
 
   /** Whether the model's textures are still loading, all loaded, or include a video. */
@@ -649,18 +656,23 @@ export class AscMosaic {
     const width = this.renderer.domElement.width;
     const height = this.renderer.domElement.height;
 
-    this.asciiMosaicFilter = new AsciiMosaicFilter(
+    const filter = new AsciiMosaicFilter(
       this.renderer,
       width,
       height,
       options
     );
+    this.asciiMosaicFilter = filter;
 
     await new Promise<void>((resolve, reject) => {
       const maxAttempts = 500; // 5 seconds at 10ms intervals
       let attempts = 0;
       const checkReady = () => {
-        if (this.asciiMosaicFilter && this.asciiMosaicFilter.isReady()) {
+        if (this.asciiMosaicFilter !== filter) {
+          // Disposed or replaced while getting ready: give the caller its
+          // turn back now instead of holding it until the timeout.
+          reject(new Error('AsciiMosaicFilter: replaced or disposed before ready'));
+        } else if (filter.isReady()) {
           resolve();
         } else if (++attempts >= maxAttempts) {
           reject(new Error('AsciiMosaicFilter: timed out waiting for ready state'));
@@ -671,7 +683,7 @@ export class AscMosaic {
       checkReady();
     });
 
-    this.asciiMosaicFilter.enable();
+    filter.enable();
     this.renderPending = true;
   }
 
@@ -895,6 +907,8 @@ export class AscMosaic {
                 video.load();
               }
               videoTexture.dispose();
+            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+              obj.material.map.dispose();
             }
             obj.material.dispose();
           }
@@ -935,6 +949,10 @@ export class AscMosaic {
     }
 
     this.renderer.dispose();
+    // dispose() frees three.js's resources but leaves the context itself to
+    // garbage collection; lose it now so its drawing buffer and the browser's
+    // context slot are released at once (a theme switch rebuilds canvases).
+    this.renderer.forceContextLoss();
   }
 }
 

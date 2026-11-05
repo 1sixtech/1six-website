@@ -739,8 +739,8 @@
     display: none;
   }
 
-  /* AsciiCanvas shows its source video here (held on a frontal frame by
-     CrossingMark). The video has a white ground, so blend it into the page
+  /* AsciiCanvas shows its source video here, still, on the frame where
+     the 16 faces the viewer (AsciiTeamSymbol). The video has a white ground, so blend it into the page
      instead of letting it read as a pale box: multiply on light, invert and
      screen on dark. The mark carries the page color as the blend backdrop,
      and the full fill needs no mask (which would isolate the blend). */

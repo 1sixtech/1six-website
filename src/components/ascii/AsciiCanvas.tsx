@@ -5,6 +5,7 @@ import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import * as videoPool from '@/lib/videoPool';
 import { markAsciiReady } from '@/lib/introState';
+import { outputPixelRatio, toDevicePixels } from './pixelScale';
 // Type only: the class itself is imported dynamically (Three.js stays out of SSR).
 import type { AscMosaic } from '@/lib/ascmosaic';
 
@@ -98,6 +99,11 @@ interface AsciiCanvasProps {
    * Default: false
    */
   renderOnDemand?: boolean;
+  /**
+   * The moment (seconds) a video source holds when the mosaic is replaced by
+   * the source itself (reduced motion, or WebGL unavailable). Default: 0.1
+   */
+  fallbackFrameTime?: number;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
   eager?: boolean;
   /** Called once when the mosaic finishes initializing and starts animating */
@@ -171,6 +177,7 @@ export function AsciiCanvas({
   smoothCells = false,
   cellGain = 1,
   renderOnDemand = false,
+  fallbackFrameTime = 0.1,
   cameraOffsetX = 0,
   eager = false,
   onReady,
@@ -191,11 +198,16 @@ export function AsciiCanvas({
   // AscMosaic.setVideoPlaying for why leaving every homepage video decoding
   // at once breaks ASCII rendering on memory-constrained iOS devices.
   const [isOnScreen, setIsOnScreen] = useState(true);
+  // WebGL could not start (no context, a failed init): show the source still.
+  const [failed, setFailed] = useState(false);
+  // The latest init request. A queued init that a newer one superseded (a
+  // prop change while it waited its turn) skips, so the newest props build.
+  const initTokenRef = useRef(0);
   const prefersReducedMotion = useReducedMotion();
   // Output density (pixelRatioCap > 1): a change, such as the window moving to
   // a screen of another density, re-runs the init below at the new ratio.
   const devicePixelRatio = useDevicePixelRatio();
-  const pixelRatio = Math.max(1, Math.min(devicePixelRatio, pixelRatioCap));
+  const pixelRatio = outputPixelRatio(devicePixelRatio, pixelRatioCap);
 
   // Track visibility via IntersectionObserver (skip if eager)
   useEffect(() => {
@@ -250,7 +262,9 @@ export function AsciiCanvas({
   }, [isOnScreen, isInitialized]);
 
   // Initialize/destroy AscMosaic based on visibility
-  const initMosaic = useCallback(async () => {
+  const initMosaic = useCallback(async (token: number) => {
+    // Superseded while it waited in the queue: the newer request builds.
+    if (token !== initTokenRef.current) return;
     const container = containerRef.current;
     if (!container || mosaicRef.current || prefersReducedMotion) return;
     if (!mountedRef.current) return; // Component unmounted while queued
@@ -276,6 +290,10 @@ export function AsciiCanvas({
       mosaic = new AscMosaic(container, {
         orthographic,
         autoRotate: resolvedAutoRotate,
+        // The mosaic draws axis-aligned cells on the pixel grid and the scene
+        // renders to its own target, so multisampling changes no pixel; it
+        // only multiplies the drawing buffer's memory (4x at 2x output).
+        antialias: false,
       });
       mosaicRef.current = mosaic;
       activeContextCount++;
@@ -293,6 +311,12 @@ export function AsciiCanvas({
       // pixel-sized options below scale by the same factor, so cells keep
       // their CSS size and only get sharper.
       const outputScale = renderScale * pixelRatio;
+      const device = toDevicePixels({
+        mosaicSize,
+        offsetRowRadius,
+        avoidRadius: mouseInteraction ? avoidRadius : undefined,
+        avoidStrength: mouseInteraction ? avoidStrength : undefined,
+      }, pixelRatio);
 
       // If renderScale specified, render at container_size × scale.
       // This survives window resize events (handled in ascmosaic).
@@ -324,7 +348,7 @@ export function AsciiCanvas({
       // mountedRef in that state would send enableAsciiMosaicFilter to a
       // disposed AscMosaic, whose internal filter reference is already null,
       // making the ready-state poll time out after 5s.
-      if (!mountedRef.current || mosaicRef.current !== mosaic) {
+      if (!mountedRef.current || mosaicRef.current !== mosaic || token !== initTokenRef.current) {
         mosaic.stopAnimate();
         mosaic.dispose();
         if (mosaicRef.current === mosaic) {
@@ -336,7 +360,7 @@ export function AsciiCanvas({
 
       // Enable ASCII mosaic filter with all options at once
       await mosaic.enableAsciiMosaicFilter({
-        mosaicSize: mosaicSize * pixelRatio,
+        mosaicSize: device.mosaicSize,
         mosaicCellTextureUrl: mosaicCellUrl,
         cellCount,
         setSelectionMode,
@@ -346,21 +370,21 @@ export function AsciiCanvas({
         noiseIntensity,
         noiseFPS,
         noiseFPSRandom,
-        offsetRowRadius: offsetRowRadius === undefined ? undefined : offsetRowRadius * pixelRatio,
+        offsetRowRadius: device.offsetRowRadius,
         avoid: mouseInteraction,
-        avoidRadius: mouseInteraction ? avoidRadius * pixelRatio : undefined,
-        avoidStrength: mouseInteraction ? avoidStrength : undefined,
+        avoidRadius: device.avoidRadius,
+        avoidStrength: device.avoidStrength,
         smoothCells,
         cellGain,
         // The scene is read once per cell: keep its target at CSS pixels.
-        targetScale: 1 / pixelRatio,
+        targetScale: device.targetScale,
       });
 
       // Second race check: enableAsciiMosaicFilter internally polls for up
       // to 5 seconds, and destroyMosaic can run at any point during that
       // window. If we raced, discard this now-orphaned instance instead of
       // calling animate() on a disposed renderer.
-      if (!mountedRef.current || mosaicRef.current !== mosaic) {
+      if (!mountedRef.current || mosaicRef.current !== mosaic || token !== initTokenRef.current) {
         mosaic.stopAnimate();
         mosaic.dispose();
         if (mosaicRef.current === mosaic) {
@@ -389,7 +413,12 @@ export function AsciiCanvas({
         markAsciiReady(preloadKey);
       }
     } catch (err) {
-      console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
+      // A newer request or a teardown that overtook this init (its filter
+      // was replaced or disposed while it got ready) is not a failure.
+      const superseded = !mountedRef.current
+        || token !== initTokenRef.current
+        || (mosaic !== null && mosaicRef.current !== mosaic);
+      if (!superseded) console.warn('AsciiCanvas: Failed to initialize AscMosaic:', err);
       // Init-failure cleanup (Codex review C3 + C4).
       //
       // C3: if `mosaic` was constructed before the throw (addModel,
@@ -419,6 +448,12 @@ export function AsciiCanvas({
           mosaicRef.current = null;
         }
       }
+      if (!superseded) {
+        // WebGL could not start here: show the source itself, and let the
+        // caller reveal it as it would have revealed the mosaic.
+        setFailed(true);
+        onReady?.();
+      }
       if (preloadKey) {
         markAsciiReady(preloadKey);
       }
@@ -444,12 +479,14 @@ export function AsciiCanvas({
   // Also reinit when initMosaic changes (e.g. theme-driven cell atlas swap)
   // Uses global queue to stagger WebGL initialization and prevent jank.
   useEffect(() => {
+    // Every request supersedes the ones before it, queued or in flight.
+    const token = ++initTokenRef.current;
     if (isVisible) {
       if (mosaicRef.current) {
         destroyMosaic();
       }
-      enqueueInit(initMosaic);
-    } else if (!isVisible && mosaicRef.current) {
+      enqueueInit(() => initMosaic(token));
+    } else if (mosaicRef.current) {
       destroyMosaic();
     }
   }, [isVisible, initMosaic, destroyMosaic]);
@@ -470,10 +507,11 @@ export function AsciiCanvas({
     }
   }, [width, height]);
 
-  // Reduced motion fallback: show the source media directly, still. Video
-  // sources render a single frame (the #t media fragment makes Safari paint
-  // it without playback) instead of an autoplaying loop, which is motion.
-  if (prefersReducedMotion) {
+  // Reduced motion (or WebGL unavailable): show the source media directly,
+  // still. Video sources render a single frame (the #t media fragment makes
+  // Safari paint it without playback) instead of an autoplaying loop, which
+  // is motion.
+  if (prefersReducedMotion || failed) {
     const isVideo = resolvedTextureType === 'video';
     return (
       <div
@@ -483,7 +521,7 @@ export function AsciiCanvas({
       >
         {isVideo ? (
           <video
-            src={`${textureUrl}#t=0.1`}
+            src={`${textureUrl}#t=${fallbackFrameTime}`}
             muted
             playsInline
             preload="metadata"
