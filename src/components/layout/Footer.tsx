@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { LogoFooter } from '@/components/ui/Logo';
-import { CONTACT_EMAIL } from '@/lib/site';
+import { CONTACT_EMAIL, COPYRIGHT } from '@/lib/site';
 
 interface FooterLinkItem {
   label: string;
@@ -56,7 +56,7 @@ function FooterColumn({
   );
 }
 
-const COPYRIGHT = '© 2025–2026 1SIX Technologies Inc. All rights reserved.';
+const COPYRIGHT_LINE = `${COPYRIGHT} All rights reserved.`;
 
 export function Footer() {
   return (
@@ -74,7 +74,7 @@ export function Footer() {
         </div>
 
         <p className="text-[12px] font-normal leading-[1.4] tracking-[0.01em] text-[var(--color-sub-text1)]">
-          {COPYRIGHT}
+          {COPYRIGHT_LINE}
         </p>
       </div>
 
@@ -88,7 +88,7 @@ export function Footer() {
           className="absolute text-[12px] font-normal leading-[1.4] tracking-[0.01em] text-[var(--color-sub-text1)]"
           style={{ left: '3.33%', top: '86.84%' }}
         >
-          {COPYRIGHT}
+          {COPYRIGHT_LINE}
         </p>
 
         <div className="absolute right-[3.33%] top-[10.53%] flex gap-16">

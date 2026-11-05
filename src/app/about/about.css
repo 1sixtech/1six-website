@@ -39,7 +39,7 @@
 .crossing {
   /* Strong ease-out: fast response, long settle. */
   --crossing-ease: cubic-bezier(0.23, 1, 0.32, 1);
-  --crossing-header: 54px;
+  --crossing-header: var(--site-header-h);
   /* Ink strength of the mark above the fill level. */
   --crossing-dim: 0.26;
   --crossing-fill: 16;
@@ -66,7 +66,6 @@
 
 @media (min-width: 768px) {
   .crossing {
-    --crossing-header: 45px;
     --crossing-meter-h: 0px;
     --crossing-rule-gap: 24px;
     --crossing-head-gap: 32px;
@@ -182,13 +181,15 @@
 
 /* ── The mark ── */
 
+/* Phone first: the mark sits at the top of the page, under the header and
+   the meter strip (desktop below pins it beside the bands instead). */
 .crossing-aside {
-  padding-top: calc(var(--crossing-header) + 36px);
+  padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 28px);
 }
 
 .crossing-mark {
   position: relative;
-  width: clamp(148px, 44vw, 200px);
+  width: clamp(184px, 58vw, 260px);
   aspect-ratio: 1 / 1;
   overflow: hidden;
 }
@@ -240,7 +241,9 @@
   transition: filter 900ms var(--crossing-ease);
 }
 
-.crossing[data-step='4'] .crossing-mark__ink canvas {
+/* The filter chain encodes --color-accent (globals.css): regenerate it if
+   the accent changes. data-complete is CrossingRoot's last step. */
+.crossing[data-complete='true'] .crossing-mark__ink canvas {
   filter: brightness(0) invert(27%) sepia(58%) saturate(4404%) hue-rotate(1deg) brightness(101%)
     contrast(104%);
 }
@@ -775,14 +778,6 @@
    - The type roles and spacing roles above already carry phone values;
      nothing here resizes type. */
 @media (max-width: 767px) {
-  .crossing-aside {
-    padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 28px);
-  }
-
-  .crossing-mark {
-    width: clamp(184px, 58vw, 260px);
-  }
-
   .crossing-mark__ink {
     -webkit-mask-image: none;
     mask-image: none;

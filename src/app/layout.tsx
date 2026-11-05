@@ -1,3 +1,4 @@
+import { preload } from 'react-dom';
 import type { Metadata, Viewport } from 'next';
 import './fonts/pretendard-variable.css';
 import './globals.css';
@@ -10,11 +11,16 @@ import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
 /**
  * Pretendard's official dynamic subset (fonts/pretendard-variable.css) is
- * fetched slice by slice through unicode-range. The slice with the Latin
- * letters, digits and common punctuation is on every page, so it is
- * preloaded; the rest arrive only when a page shows one of their characters.
+ * fetched slice by slice through unicode-range, and a slice is only
+ * requested once layout finds one of its characters, after the first paint.
+ * The slices every page uses are preloaded so their glyphs never swap in:
+ * 91 (Latin letters, digits, common punctuation), 87 (% of 16% and 84%, the
+ * footer's ©) and 88 (the @ of the contact address). The rest arrive when a
+ * page shows one of their characters (About preloads its own).
  */
-const PRETENDARD_LATIN_SLICE = '/fonts/pretendard-1.3.9/PretendardVariable.subset.91.woff2';
+const PRETENDARD_PAGE_SLICES = [91, 87, 88].map(
+  (slice) => `/fonts/pretendard-1.3.9/PretendardVariable.subset.${slice}.woff2`,
+);
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -118,16 +124,15 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // One resource hint each (a <link rel="preload"> rendered here would be
+  // emitted twice: React hoists it and keeps the element too).
+  for (const href of PRETENDARD_PAGE_SLICES) {
+    preload(href, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
+  }
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link
-          rel="preload"
-          href={PRETENDARD_LATIN_SLICE}
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
         {/* Must run before the first paint (theme, Safari's status bar tint,
             the Home intro lock): see THEME_INIT_SCRIPT. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

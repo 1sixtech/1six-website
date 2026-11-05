@@ -8,7 +8,7 @@ import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
-import { CONTACT_EMAIL, isCurrentRoute } from '@/lib/site';
+import { CONTACT_EMAIL, COPYRIGHT, isCurrentRoute } from '@/lib/site';
 
 const NAV_ITEMS = [
   { label: 'THESIS', href: '/#thesis' },
@@ -187,6 +187,20 @@ export function Header() {
     return () => ctx.revert();
   }, [menuOpen]);
 
+  // aria-modal promises the page behind is out of reach: while the menu is
+  // open its siblings (the header, the page, the footer) are inert, so focus
+  // cannot reach them from anywhere, not only by Tab from inside the menu.
+  useEffect(() => {
+    const menu = menuRef.current;
+    const parent = menu?.parentElement;
+    if (!menu || !menuOpen || !parent) return;
+    const behind = Array.from(parent.children).filter(
+      (el): el is HTMLElement => el !== menu && el instanceof HTMLElement && !el.inert,
+    );
+    behind.forEach((el) => { el.inert = true; });
+    return () => behind.forEach((el) => { el.inert = false; });
+  }, [menuOpen]);
+
   // Keep Tab inside the open dialog.
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Tab' || !menuRef.current) return;
@@ -263,13 +277,15 @@ export function Header() {
 
   return (
     <>
-      {/* Header: mobile 54px / desktop 45px. Surface styles live in
-          globals.css (.site-header) so reduced-transparency can override
-          them; the transform stays inline because GSAP owns it. */}
+      {/* Header: mobile 54px / desktop 45px (--site-header-h in globals.css,
+          which About's sticky strip and mark also read). ThemeProvider's
+          iOS status-bar retint finds this element by .site-header. Surface
+          styles live in globals.css (.site-header) so reduced-transparency
+          can override them; the transform stays inline because GSAP owns it. */}
       <header
         ref={headerRef}
         data-surface={isResearchRoute ? 'solid' : 'glass'}
-        className="site-header fixed top-0 left-0 right-0 z-50 h-[54px] md:h-[45px]"
+        className="site-header fixed top-0 left-0 right-0 z-50 h-[var(--site-header-h)]"
         style={{ transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)' }}
       >
         <div className="relative mx-auto h-full w-full max-w-[1440px]">
@@ -281,7 +297,7 @@ export function Header() {
           <Link
             href="/"
             aria-label="1SIX home"
-            className="absolute inset-y-0 left-[22px] md:left-[calc(4.17%+24.5px)] -mx-3 flex items-center px-3"
+            className="absolute inset-y-0 left-[22px] md:left-[calc(4.17%+24.5px)] -mx-3 flex items-center px-3 transition-opacity duration-100 ease-out active:opacity-50"
           >
             <LogoHeader className="h-[14px] w-[48px] md:h-[21px] md:w-[73px] text-[var(--color-accent)]" />
           </Link>
@@ -298,7 +314,7 @@ export function Header() {
                   key={item.label}
                   href={item.href}
                   aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
-                  className="nav-link relative py-4 text-[12px] font-normal leading-none tracking-[0.06em] text-[var(--color-text)] transition-opacity duration-150 ease-out hover:opacity-60"
+                  className="nav-link relative py-4 text-[12px] font-normal leading-none tracking-[0.06em] text-[var(--color-text)] transition-opacity duration-150 ease-out hover:opacity-60 active:opacity-50"
                   onClick={(e) => handleNavClick(e, item.href)}
                 >
                   {item.label}
@@ -338,7 +354,7 @@ export function Header() {
           onKeyDown={handleMenuKeyDown}
         >
           {/* Menu header: same height as mobile header, with logo + close button */}
-          <div className="flex h-[54px] shrink-0 items-center justify-between pl-[22px] pr-[10px]">
+          <div className="flex h-[var(--site-header-h)] shrink-0 items-center justify-between pl-[22px] pr-[10px]">
             <LogoHeader className="h-[14px] w-[48px] text-[var(--color-accent)]" />
             <button
               ref={closeButtonRef}
@@ -376,16 +392,14 @@ export function Header() {
             <a
               href={`mailto:${CONTACT_EMAIL}`}
               data-menu-item
-              className="mb-6 inline-block py-2 text-[15px] text-[var(--color-text)] underline decoration-[var(--color-divider)] underline-offset-[6px] transition-opacity duration-100 ease-out active:opacity-50"
+              className="mb-6 inline-block py-2 text-[15px] text-[var(--color-text)] underline decoration-[color-mix(in_srgb,var(--color-text)_22%,transparent)] underline-offset-[6px] transition-opacity duration-100 ease-out active:opacity-50"
             >
               {CONTACT_EMAIL}
             </a>
             <div className="mb-4" data-menu-item>
               <ThemeToggle />
             </div>
-            <p className="text-[12px] text-[var(--color-sub-text1)]">
-              &copy; 2025&ndash;2026 1SIX Technologies Inc.
-            </p>
+            <p className="text-[12px] text-[var(--color-sub-text1)]">{COPYRIGHT}</p>
           </div>
         </div>
       )}

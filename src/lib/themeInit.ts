@@ -14,18 +14,27 @@
  * queued for the Next runtime, which runs once the async chunks load, after
  * the browser may already have painted. The CSP keeps 'unsafe-inline' in
  * script-src for the App Router's own inline scripts, which covers this one.
+ *
+ * Storage access can throw (site data blocked, storage disabled), so only the
+ * storage calls sit in a try: the device default and the attribute still
+ * apply without it.
  */
-export const THEME_INIT_SCRIPT = `try {
+export const THEME_INIT_SCRIPT = `var theme;
+try {
   var stored = localStorage.getItem('theme');
-  var theme;
-  if (stored === 'dark' || stored === 'light') {
-    theme = stored;
-  } else {
-    theme = window.matchMedia('(max-width: 767px)').matches ? 'dark' : 'light';
-    localStorage.setItem('theme', theme);
-  }
-  document.documentElement.setAttribute('data-theme', theme);
+  if (stored === 'dark' || stored === 'light') theme = stored;
 } catch (e) {}
+if (!theme) {
+  try {
+    theme = window.matchMedia('(max-width: 767px)').matches ? 'dark' : 'light';
+  } catch (e) {
+    theme = 'light';
+  }
+  try {
+    localStorage.setItem('theme', theme);
+  } catch (e) {}
+}
+document.documentElement.setAttribute('data-theme', theme);
 
 if (history.scrollRestoration) history.scrollRestoration = 'manual';
 

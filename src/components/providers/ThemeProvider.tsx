@@ -58,12 +58,19 @@ const readServerMounted = () => false;
  */
 function retintBrowserChrome() {
   if (!window.matchMedia('(pointer: coarse)').matches) return;
+  // Header.tsx renders the one .site-header (see its comment).
   const header = document.querySelector<HTMLElement>('.site-header');
   if (!header) return;
+  // Hiding an element that holds focus moves focus to <body>. On a touch
+  // tablet (768px and up) the toggle itself sits in the header: give focus
+  // back once it shows again.
+  const active = document.activeElement;
+  const focused = active instanceof HTMLElement && header.contains(active) ? active : null;
   header.style.display = 'none';
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       header.style.removeProperty('display');
+      if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
     });
   });
 }
@@ -74,8 +81,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const toggleTheme = useCallback(() => {
     const root = document.documentElement;
-    const next: Theme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     const apply = () => {
+      // Read the theme when the change lands, not when it was asked for: two
+      // quick toggles (the first transition skipped) must flip it twice.
+      const next: Theme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       try { localStorage.setItem('theme', next); } catch { /* private browsing */ }
       root.setAttribute('data-theme', next);
       // Commit the React side (toggle icon, theme-aware canvases) inside the

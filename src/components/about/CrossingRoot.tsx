@@ -64,10 +64,12 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
 
     const countTo = (target: number) => {
       cancelAnimationFrame(countFrame);
-      if (!count || reduceMotion) return;
+      if (!count) return;
       const from = shown;
-      // Already there, or hidden (desktop has no meter): land without a tween.
-      if (from === target || count.getClientRects().length === 0) {
+      // Already there, hidden (desktop has no meter), or under reduced motion
+      // (the CSS pins the shown count at 100 while it holds): land without a
+      // tween, so the right value is in place if the preference lifts.
+      if (reduceMotion || from === target || count.getClientRects().length === 0) {
         shown = target;
         count.style.setProperty('--crossing-pct', String(target));
         return;
@@ -99,11 +101,16 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
     const titlesOnScreen = new Set<number>();
     // Until the title observer has reported once, "on screen" is unknown.
     let titlesReported = false;
-    const rootStyle = getComputedStyle(root);
-    // The strip's bottom edge: header plus meter (54 + 30 on a phone).
-    const strip =
-      (parseFloat(rootStyle.getPropertyValue('--crossing-header')) || 0) +
-      (parseFloat(rootStyle.getPropertyValue('--crossing-meter-h')) || 0);
+    // The strip's bottom edge: header plus meter (54 + 30 on a phone, 45 on
+    // desktop). Read again when the layout crosses 768px (a rotation).
+    const readStrip = () => {
+      const rootStyle = getComputedStyle(root);
+      return (
+        (parseFloat(rootStyle.getPropertyValue('--crossing-header')) || 0) +
+        (parseFloat(rootStyle.getPropertyValue('--crossing-meter-h')) || 0)
+      );
+    };
+    let strip = readStrip();
 
     const syncLabel = () => {
       if (!meter || !label || !titlesReported) return;
@@ -135,6 +142,8 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
       if (step === current && root.dataset.step !== undefined) return;
       current = step;
       root.dataset.step = String(step);
+      // The crossing is complete: about.css inks the mark in the accent.
+      root.dataset.complete = String(step === lastStep);
       root.style.setProperty('--crossing-fill', String(CROSSING_LEVELS[step]));
       countTo(CROSSING_LEVELS[step]);
     };
@@ -166,28 +175,44 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
     if (end && endObserver) endObserver.observe(end);
 
     // The zone below the strip and above TITLE_ZONE: a title on screen.
-    const titleObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const index = titles.indexOf(entry.target as HTMLElement);
-          if (index < 0) continue;
-          if (entry.isIntersecting) titlesOnScreen.add(index);
-          else titlesOnScreen.delete(index);
-        }
-        titlesReported = true;
-        syncLabel();
-      },
-      {
-        rootMargin: `-${strip}px 0px -${Math.round((1 - TITLE_ZONE) * 100)}% 0px`,
-        threshold: 0,
-      },
-    );
-    titles.forEach((title) => title && titleObserver.observe(title));
+    const observeTitles = () => {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const index = titles.indexOf(entry.target as HTMLElement);
+            if (index < 0) continue;
+            if (entry.isIntersecting) titlesOnScreen.add(index);
+            else titlesOnScreen.delete(index);
+          }
+          titlesReported = true;
+          syncLabel();
+        },
+        {
+          rootMargin: `-${strip}px 0px -${Math.round((1 - TITLE_ZONE) * 100)}% 0px`,
+          threshold: 0,
+        },
+      );
+      titles.forEach((title) => title && observer.observe(title));
+      return observer;
+    };
+    let titleObserver = observeTitles();
+
+    // The strip changes height at 768px: rebuild the title zone under it.
+    const layout = window.matchMedia('(min-width: 768px)');
+    const onLayoutChange = () => {
+      strip = readStrip();
+      titleObserver.disconnect();
+      titlesOnScreen.clear();
+      titlesReported = false;
+      titleObserver = observeTitles();
+    };
+    layout.addEventListener('change', onLayoutChange);
 
     return () => {
       bandObserver.disconnect();
       endObserver?.disconnect();
       titleObserver.disconnect();
+      layout.removeEventListener('change', onLayoutChange);
       cancelAnimationFrame(countFrame);
     };
   }, []);
