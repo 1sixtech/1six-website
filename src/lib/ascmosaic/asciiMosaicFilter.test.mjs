@@ -16,6 +16,8 @@ const atlases = new Map();
 const PLAIN = '/atlas-plain.png';
 atlases.set(PLAIN, () => [0, 0, 0, 255]);
 let canvas2dAvailable = true;
+/** The DOM work done so far: images fetched, canvases made, images drawn. */
+const dom = { images: 0, canvases: 0, draws: 0 };
 
 class FakeImage extends EventTarget {
   #src = '';
@@ -38,6 +40,7 @@ class FakeCanvas {
       imageSmoothingEnabled: false,
       imageSmoothingQuality: 'low',
       drawImage: (image) => {
+        dom.draws += 1;
         drawn = image;
       },
       getImageData: (x, y, w, h) => {
@@ -62,8 +65,14 @@ class FakeCanvas {
 
 // Just the DOM the filter touches: three's ImageLoader and the atlas canvas.
 globalThis.document = {
-  createElementNS: () => new FakeImage(),
-  createElement: () => new FakeCanvas(),
+  createElementNS: () => {
+    dom.images += 1;
+    return new FakeImage();
+  },
+  createElement: () => {
+    dom.canvases += 1;
+    return new FakeCanvas();
+  },
 };
 after(() => {
   delete globalThis.document;
@@ -274,14 +283,27 @@ test('coverage atlas: the filter is ready at once, on an empty atlas, and swaps 
   filter.dispose();
 });
 
-test('coverage atlas: a filter disposed while its atlas loads stays disposed', async () => {
-  const filter = new AsciiMosaicFilter(fakeRenderer(), 40, 20, {
-    smoothCells: true,
-    mosaicCellTextureUrl: PLAIN,
-  });
-  filter.dispose(); // the atlas image's load event is still queued
-  await settled();
-  assert.equal(filter.isReady(), false, 'a late atlas must not revive a disposed filter');
+test('coverage atlas: a filter disposed while its atlas loads builds, keeps and fetches nothing more', async () => {
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    // A load that succeeds, and one that fails (the plain-atlas fallback path).
+    for (const url of [PLAIN, '/atlas-missing.png']) {
+      const filter = new AsciiMosaicFilter(fakeRenderer(), 40, 20, { smoothCells: true, mosaicCellTextureUrl: url });
+      const placeholder = filter.atlasResult.texture;
+      const before = { ...dom };
+      filter.dispose(); // the atlas image's load or error event is still queued
+      await settled();
+      assert.deepEqual(dom, before, `${url}: no coverage build and no fallback fetch`);
+      assert.equal(filter.atlasImage, null, `${url}: the source image is let go`);
+      assert.equal(filter.atlasResult.texture, placeholder, `${url}: no atlas is swapped in`);
+      assert.equal(filter.isReady(), false);
+    }
+    assert.deepEqual(warnings, [], 'a disposed filter reports no failure');
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test('coverage atlas: a new set count re-renders it with one row per set', async () => {
