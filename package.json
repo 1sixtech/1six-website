@@ -8,7 +8,8 @@
 		"build": "node scripts/sync-research.mjs && next build",
 		"start": "next start",
 		"lint": "eslint .",
-		"lint:fix": "eslint . --fix"
+		"lint:fix": "eslint . --fix",
+		"test": "node --experimental-strip-types --no-warnings --test \"src/**/*.test.mjs\""
 	},
 	"dependencies": {
 		"@gsap/react": "^2.1.2",
