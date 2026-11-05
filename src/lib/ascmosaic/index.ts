@@ -70,6 +70,8 @@ export class AscMosaic {
   private renderPending: boolean = true;
   /** The model's image texture has arrived; until then on-demand mode watches for it. */
   private sceneTexturesSettled: boolean = false;
+  /** Set by the first dispose(); a repeat call has nothing left to free. */
+  private disposed: boolean = false;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -891,6 +893,10 @@ export class AscMosaic {
   }
 
   dispose(): void {
+    // AsciiCanvas can dispose a mosaic twice: on teardown, then again when
+    // the init that built it finds it was superseded.
+    if (this.disposed) return;
+    this.disposed = true;
     this.stopAnimate();
 
     if (this.model) {
@@ -952,7 +958,11 @@ export class AscMosaic {
     // dispose() frees three.js's resources but leaves the context itself to
     // garbage collection; lose it now so its drawing buffer and the browser's
     // context slot are released at once (a theme switch rebuilds canvases).
-    this.renderer.forceContextLoss();
+    // A context the browser already took back (its live-context limit, or a
+    // GPU reset) has nothing left to release.
+    if (!this.renderer.getContext().isContextLost()) {
+      this.renderer.forceContextLoss();
+    }
   }
 }
 

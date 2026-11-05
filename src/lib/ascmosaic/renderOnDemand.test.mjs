@@ -91,14 +91,26 @@ function mosaicHarness({ model = imageModel(), autoRotate = false } = {}) {
       return this.wants;
     },
     setSize() {},
+    dispose() {},
   };
   const renderer = {
     draws: 0,
+    disposals: 0,
+    contextLost: false,
+    contextLosses: 0,
     domElement: { style: {}, width: 300, height: 200 },
     render() {
       this.draws += 1;
     },
     setSize() {},
+    dispose() {
+      this.disposals += 1;
+    },
+    getContext: () => ({ isContextLost: () => renderer.contextLost }),
+    forceContextLoss() {
+      this.contextLosses += 1;
+      this.contextLost = true;
+    },
   };
   const mosaic = Object.assign(Object.create(AscMosaic.prototype), {
     container: { clientWidth: 300, clientHeight: 200 },
@@ -121,8 +133,11 @@ function mosaicHarness({ model = imageModel(), autoRotate = false } = {}) {
     renderOnDemand: false,
     renderPending: true,
     sceneTexturesSettled: false,
+    tiltResetAnimationId: null,
+    tiltAnimationId: null,
+    disposed: false,
   });
-  return { mosaic, filter, drawn: () => filter.frames + renderer.draws };
+  return { mosaic, filter, renderer, drawn: () => filter.frames + renderer.draws };
 }
 
 test('render on demand: off by default; on, a still image draws only the frames that can differ', { skip }, () => {
@@ -221,4 +236,27 @@ test('render on demand: a disabled filter owes no frames, even one that would st
   runFrames(5);
   assert.equal(drawn() - before, 1, 'the scene drawn once without the filter, then nothing');
   mosaic.stopAnimate();
+});
+
+test('dispose: a repeat call frees nothing twice, and a context already taken back is not lost again', { skip }, () => {
+  for (const alreadyLost of [false, true]) {
+    const model = imageModel();
+    const { mosaic, renderer, drawn } = mosaicHarness({ model });
+    let geometryDisposals = 0;
+    model.geometry.addEventListener('dispose', () => {
+      geometryDisposals += 1;
+    });
+    renderer.contextLost = alreadyLost; // e.g. evicted at the browser's live-context limit
+    mosaic.animate();
+    assert.equal(drawn(), 1, `the first frame draws`);
+
+    mosaic.dispose();
+    mosaic.dispose(); // AsciiCanvas: teardown, then the superseded init's own cleanup
+    const name = alreadyLost ? 'lost context' : 'live context';
+    assert.equal(renderer.disposals, 1, `${name}: the renderer is disposed once`);
+    assert.equal(geometryDisposals, 1, `${name}: the model is disposed once`);
+    assert.equal(renderer.contextLosses, alreadyLost ? 0 : 1, `${name}: context losses`);
+    runFrames(2);
+    assert.equal(drawn(), 1, `${name}: nothing draws after dispose`);
+  }
 });
