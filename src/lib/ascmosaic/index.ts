@@ -258,7 +258,15 @@ export class AscMosaic {
       this.model = null;
     }
 
-    this.model = await createTexturedMesh(opts);
+    const model = await createTexturedMesh(opts);
+    // Disposed while the texture loaded (a theme switch, or the page left):
+    // free what arrived instead of attaching it to a released scene, where
+    // its video would decode on with nothing left to stop it.
+    if (this.disposed) {
+      this.disposeModel(model);
+      return model;
+    }
+    this.model = model;
     this.scene.add(this.model);
     this.modelOptions = { ...opts };
 
@@ -892,35 +900,43 @@ export class AscMosaic {
     return this.asciiMosaicFilter;
   }
 
+  /**
+   * Frees a model's geometry, material and texture, and stops its video if
+   * it is a one-off (a pooled one stays with the pool). dispose()'s model
+   * teardown, also used for a model that arrives after dispose().
+   */
+  private disposeModel(model: THREE.Object3D): void {
+    model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (obj.material instanceof THREE.Material) {
+          if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
+            const videoTexture = obj.material.map as THREE.VideoTexture;
+            const video = videoTexture.image as HTMLVideoElement;
+            if (video && !videoPool.isPooled(video)) {
+              video.pause();
+              video.src = '';
+              video.load();
+            }
+            videoTexture.dispose();
+          } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+            obj.material.map.dispose();
+          }
+          obj.material.dispose();
+        }
+      }
+    });
+  }
+
   dispose(): void {
     // AsciiCanvas can dispose a mosaic twice: on teardown, then again when
-    // the init that built it finds it was superseded.
+    // the init that built it finds it was superseded. A model still loading
+    // at the first call is freed by addModel when it arrives.
     if (this.disposed) return;
     this.disposed = true;
     this.stopAnimate();
 
-    if (this.model) {
-      this.model.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry?.dispose();
-          if (obj.material instanceof THREE.Material) {
-            if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
-              const videoTexture = obj.material.map as THREE.VideoTexture;
-              const video = videoTexture.image as HTMLVideoElement;
-              if (video && !videoPool.isPooled(video)) {
-                video.pause();
-                video.src = '';
-                video.load();
-              }
-              videoTexture.dispose();
-            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
-              obj.material.map.dispose();
-            }
-            obj.material.dispose();
-          }
-        }
-      });
-    }
+    if (this.model) this.disposeModel(this.model);
 
     if (this.orbitControls) {
       this.orbitControls.dispose();

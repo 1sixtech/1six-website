@@ -260,3 +260,47 @@ test('dispose: a repeat call frees nothing twice, and a context already taken ba
     assert.equal(drawn(), 1, `${name}: nothing draws after dispose`);
   }
 });
+
+/** A <video> that reports canplay only when the test says so. */
+function fakeVideo() {
+  return Object.assign(new EventTarget(), {
+    src: '',
+    paused: true,
+    setAttribute() {},
+    play() {
+      this.paused = false;
+      return Promise.resolve();
+    },
+    pause() {
+      this.paused = true;
+    },
+    load() {},
+  });
+}
+
+test('dispose: a model still loading at dispose is freed when it arrives, never attached', { skip }, async () => {
+  const videos = [];
+  globalThis.document = {
+    createElement: () => {
+      const video = fakeVideo();
+      videos.push(video);
+      return video;
+    },
+  };
+  try {
+    const { mosaic } = mosaicHarness({ model: null });
+    const loading = mosaic.addModel({ shape: 'plane', textureUrl: '/v.mp4', textureType: 'video' });
+    mosaic.dispose(); // AsciiCanvas tears down while the video loads
+    const [video] = videos;
+    video.dispatchEvent(new Event('canplay')); // it arrives, and starts playing
+    const model = await loading;
+
+    assert.equal(mosaic.scene.children.includes(model), false, 'not attached to the released scene');
+    assert.equal(mosaic.model, null, 'the mosaic keeps no model');
+    assert.equal(video.paused, true, 'its video is stopped');
+    assert.equal(video.src, '', 'and let go');
+    mosaic.dispose(); // the superseded init's own cleanup finds nothing left
+  } finally {
+    delete globalThis.document;
+  }
+});
