@@ -1,41 +1,41 @@
 /**
- * Products Heading — Figma-accurate
+ * "adoption comes first." — the homepage's statement of method.
  *
- * Figma specs:
- * - "PRODUCTS" label: 20px, #646464, centered
- * - "adoption comes first." 24px Medium, centered
- * - Subtitle: 18px, centered, max-width ~889px
- * - Positioned relative to full-width container
+ * The section keeps id="products" because hash navigation and older links
+ * target it. Products themselves stay off the site, so the copy describes
+ * the method (behavior over hope) rather than naming one.
+ *
+ * Line breaks come from a measured column plus balanced wrapping instead of
+ * hard <br>s, so the paragraph re-flows cleanly at every width.
  */
 export function ProductsHeading() {
   return (
     <section
       id="products"
-      className="flex flex-col items-center justify-center gap-3 px-[22px] md:px-0 py-16 md:py-20"
+      className="flex flex-col items-center justify-center px-[22px] pt-16 pb-12 md:px-6 md:pt-24 md:pb-32"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
       <h2
-        className="text-[24px] font-medium leading-[1.15] tracking-[-0.48px]"
+        className="text-center text-[28px] font-medium leading-[1.15] tracking-[-0.02em] md:text-[36px]"
         style={{ color: 'var(--color-text)' }}
       >
         adoption comes first.
       </h2>
-      <p
-        className="mt-2 max-w-[889px] text-center text-[15px] md:text-[18px] font-normal leading-[1.3] tracking-[-0.3px] md:tracking-[-0.36px]"
+      <div
+        className="mt-6 flex max-w-[600px] flex-col gap-5 text-center text-[16px] font-normal leading-[1.45] tracking-[-0.01em] text-balance md:mt-8 md:text-[18px]"
         style={{ color: 'var(--color-text)' }}
       >
-        We don&apos;t build on hope; we build on behavior.
-        <br className="hidden md:inline" />
-        By analyzing how people actually trade, watch, and engage,
-        <br className="hidden md:inline" />
-        we design systems that align with those market realities.
-        <br/>
-        <br/>
-        the first wave of internet-native protocols introduced true global finance,
-        <br className="hidden md:inline" />
-        1six is engineering the next generation of global financial applications
-        for the masses.
-      </p>
+        <p>
+          we don&apos;t build on hope; we build on behavior. by analyzing how people
+          actually trade, watch, and engage, we design systems that align with those
+          market realities.
+        </p>
+        <p>
+          the first wave of internet-native protocols introduced true global finance.
+          1six is engineering the next generation of global financial applications
+          for the masses.
+        </p>
+      </div>
     </section>
   );
 }

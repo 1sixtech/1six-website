@@ -25,6 +25,8 @@ export interface AscMosaicOptions {
   autoRotate?: boolean;
   /** 모델 자동 회전 속도 (rad/frame), 기본값: 0.005 */
   autoRotateSpeed?: number;
+  /** Multisample the drawing buffer (WebGLRenderer antialias). Default: true */
+  antialias?: boolean;
 }
 
 /**
@@ -62,6 +64,14 @@ export class AscMosaic {
   private modelAutoRotate: boolean = true;
   /** 모델 자동 회전 속도 (rad/frame) */
   private modelAutoRotateSpeed: number = 0.005;
+  /** Draw only frames that can differ from the last (see setRenderOnDemand). */
+  private renderOnDemand: boolean = false;
+  /** A frame is owed: a new model, size, filter or context, or a restarted loop. */
+  private renderPending: boolean = true;
+  /** The model's image texture has arrived; until then on-demand mode watches for it. */
+  private sceneTexturesSettled: boolean = false;
+  /** Set by the first dispose(); a repeat call has nothing left to free. */
+  private disposed: boolean = false;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -87,7 +97,7 @@ export class AscMosaic {
     this.camera.position.z = 5;
 
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: options?.antialias ?? true,
       alpha: true,
     });
     this.renderer.setSize(width, height);
@@ -105,6 +115,7 @@ export class AscMosaic {
         const h = this.renderer.domElement.height;
         this.asciiMosaicFilter.setSize(w, h);
       }
+      this.renderPending = true;
       this.animate();
     };
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLostHandler);
@@ -141,12 +152,16 @@ export class AscMosaic {
       if (this.asciiMosaicFilter) {
         this.asciiMosaicFilter.setSize(rw, rh);
       }
+      this.renderPending = true;
     };
     window.addEventListener('resize', this.resizeHandler);
   }
 
   async addModel(options?: TexturedMeshOptions): Promise<THREE.Object3D> {
     const opts = options ?? {};
+    // Any model change redraws, and an image texture arrives after the mesh.
+    this.renderPending = true;
+    this.sceneTexturesSettled = false;
     const newShape = opts.shape ?? 'sphere';
     const newScale = opts.scale ?? 1;
 
@@ -233,6 +248,8 @@ export class AscMosaic {
                 }
               }
               videoTexture.dispose();
+            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+              obj.material.map.dispose();
             }
             obj.material.dispose();
           }
@@ -241,7 +258,15 @@ export class AscMosaic {
       this.model = null;
     }
 
-    this.model = await createTexturedMesh(opts);
+    const model = await createTexturedMesh(opts);
+    // Disposed while the texture loaded (a theme switch, or the page left):
+    // free what arrived instead of attaching it to a released scene, where
+    // its video would decode on with nothing left to stop it.
+    if (this.disposed) {
+      this.disposeModel(model);
+      return model;
+    }
+    this.model = model;
     this.scene.add(this.model);
     this.modelOptions = { ...opts };
 
@@ -485,6 +510,8 @@ export class AscMosaic {
     if (this.isAnimating) return;
 
     this.isAnimating = true;
+    // A restarted loop (back on screen, restored context) draws at once.
+    this.renderPending = true;
     const animate = () => {
       if (!this.isAnimating) return;
 
@@ -499,10 +526,67 @@ export class AscMosaic {
         this.orbitControls.update();
       }
 
+      if (this.renderOnDemand && !this.isRenderDue()) return;
       this.render();
     };
 
     animate();
+  }
+
+  /**
+   * Draw only the frames that can differ from the last one. For a still
+   * image source the mosaic changes only when its noise clock ticks (9 times
+   * a second for the world map), so the loop skips the display's other
+   * 50-230 frames a second; a canvas left alone keeps showing its last
+   * frame. Anything that moves the scene on its own (auto-rotate, orbit or
+   * tilt controls, a video texture) keeps every frame. Callers that change
+   * the scene in other ways must re-enable this or call renderOnce().
+   */
+  setRenderOnDemand(enabled: boolean): void {
+    this.renderOnDemand = enabled;
+    this.renderPending = true;
+  }
+
+  private isRenderDue(): boolean {
+    if ((this.modelAutoRotate && this.model) || this.orbitControls || this.tiltControlsEnabled) {
+      return true;
+    }
+    if (!this.sceneTexturesSettled) {
+      const state = this.sceneTextureState();
+      if (state === 'video') return true;
+      if (state === 'ready') {
+        // The first frame after the texture arrives uploads and shows it.
+        this.sceneTexturesSettled = true;
+        this.renderPending = true;
+      }
+    }
+    if (this.renderPending) {
+      this.renderPending = false;
+      return true;
+    }
+    // A disabled filter draws nothing, so it owes no frames (render() then
+    // draws the scene directly, which renderPending already covers).
+    const filter = this.asciiMosaicFilter;
+    return filter && filter.getEnabled() ? filter.wantsFrame(performance.now()) : false;
+  }
+
+  /** Whether the model's textures are still loading, all loaded, or include a video. */
+  private sceneTextureState(): 'loading' | 'ready' | 'video' {
+    if (!this.model) return 'loading';
+    let state: 'loading' | 'ready' | 'video' = 'ready';
+    this.model?.traverse((obj) => {
+      if (state === 'video') return;
+      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+        const map = obj.material.map;
+        if (map instanceof THREE.VideoTexture) {
+          state = 'video';
+          return;
+        }
+        const image = map.image as { width?: number } | null | undefined;
+        if (!image || !image.width) state = 'loading';
+      }
+    });
+    return state;
   }
 
   stopAnimate(): void {
@@ -582,18 +666,23 @@ export class AscMosaic {
     const width = this.renderer.domElement.width;
     const height = this.renderer.domElement.height;
 
-    this.asciiMosaicFilter = new AsciiMosaicFilter(
+    const filter = new AsciiMosaicFilter(
       this.renderer,
       width,
       height,
       options
     );
+    this.asciiMosaicFilter = filter;
 
     await new Promise<void>((resolve, reject) => {
       const maxAttempts = 500; // 5 seconds at 10ms intervals
       let attempts = 0;
       const checkReady = () => {
-        if (this.asciiMosaicFilter && this.asciiMosaicFilter.isReady()) {
+        if (this.asciiMosaicFilter !== filter) {
+          // Disposed or replaced while getting ready: give the caller its
+          // turn back now instead of holding it until the timeout.
+          reject(new Error('AsciiMosaicFilter: replaced or disposed before ready'));
+        } else if (filter.isReady()) {
           resolve();
         } else if (++attempts >= maxAttempts) {
           reject(new Error('AsciiMosaicFilter: timed out waiting for ready state'));
@@ -604,13 +693,15 @@ export class AscMosaic {
       checkReady();
     });
 
-    this.asciiMosaicFilter.enable();
+    filter.enable();
+    this.renderPending = true;
   }
 
   disableAsciiMosaicFilter(): void {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.disable();
     }
+    this.renderPending = true;
   }
 
   async toggleAsciiMosaicFilter(
@@ -713,6 +804,7 @@ export class AscMosaic {
 
   setUseOrthographic(use: boolean): void {
     if (this.useOrthographic === use) return;
+    this.renderPending = true;
     const orbit = this.orbitControls;
     let savedState: { target: THREE.Vector3; distance: number; theta: number; phi: number; orthoZoom?: number } | null = null;
     if (orbit) {
@@ -775,6 +867,7 @@ export class AscMosaic {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.setSize(width, height);
     }
+    this.renderPending = true;
   }
 
   /**
@@ -796,6 +889,7 @@ export class AscMosaic {
     if (this.asciiMosaicFilter) {
       this.asciiMosaicFilter.setSize(rw, rh);
     }
+    this.renderPending = true;
   }
 
   getOrbitControls(): OrbitControls | null {
@@ -806,29 +900,43 @@ export class AscMosaic {
     return this.asciiMosaicFilter;
   }
 
+  /**
+   * Frees a model's geometry, material and texture, and stops its video if
+   * it is a one-off (a pooled one stays with the pool). dispose()'s model
+   * teardown, also used for a model that arrives after dispose().
+   */
+  private disposeModel(model: THREE.Object3D): void {
+    model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (obj.material instanceof THREE.Material) {
+          if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
+            const videoTexture = obj.material.map as THREE.VideoTexture;
+            const video = videoTexture.image as HTMLVideoElement;
+            if (video && !videoPool.isPooled(video)) {
+              video.pause();
+              video.src = '';
+              video.load();
+            }
+            videoTexture.dispose();
+          } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
+            obj.material.map.dispose();
+          }
+          obj.material.dispose();
+        }
+      }
+    });
+  }
+
   dispose(): void {
+    // AsciiCanvas can dispose a mosaic twice: on teardown, then again when
+    // the init that built it finds it was superseded. A model still loading
+    // at the first call is freed by addModel when it arrives.
+    if (this.disposed) return;
+    this.disposed = true;
     this.stopAnimate();
 
-    if (this.model) {
-      this.model.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry?.dispose();
-          if (obj.material instanceof THREE.Material) {
-            if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
-              const videoTexture = obj.material.map as THREE.VideoTexture;
-              const video = videoTexture.image as HTMLVideoElement;
-              if (video && !videoPool.isPooled(video)) {
-                video.pause();
-                video.src = '';
-                video.load();
-              }
-              videoTexture.dispose();
-            }
-            obj.material.dispose();
-          }
-        }
-      });
-    }
+    if (this.model) this.disposeModel(this.model);
 
     if (this.orbitControls) {
       this.orbitControls.dispose();
@@ -863,6 +971,14 @@ export class AscMosaic {
     }
 
     this.renderer.dispose();
+    // dispose() frees three.js's resources but leaves the context itself to
+    // garbage collection; lose it now so its drawing buffer and the browser's
+    // context slot are released at once (a theme switch rebuilds canvases).
+    // A context the browser already took back (its live-context limit, or a
+    // GPU reset) has nothing left to release.
+    if (!this.renderer.getContext().isContextLost()) {
+      this.renderer.forceContextLoss();
+    }
   }
 }
 

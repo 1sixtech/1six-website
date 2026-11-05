@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { parse } from 'marked';
+import { Marked } from 'marked';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content/research');
 const SLUG = /^[0-9]{3}-[a-z0-9-]+$/;
@@ -130,17 +130,148 @@ function slugify(text: string): string {
     .replace(/\s+/g, '-');
 }
 
+/** &amp; goes last, so an escaped entity (&amp;lt;) decodes once, to &lt;. */
 function decodeEntities(text: string): string {
   return text
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** The link targets an article may use, besides relative paths and #fragments. */
+const SAFE_SCHEMES = new Set(['http', 'https', 'mailto']);
+
+/**
+ * Whether a link target is safe to emit: a relative path, a #fragment, or
+ * one of SAFE_SCHEMES. The scheme is read the way a browser reads it:
+ * after character references are decoded ("java&#x09;script:",
+ * "&#106;avascript:") and tabs and newlines dropped, with leading controls
+ * and spaces trimmed.
+ */
+export function isSafeLinkTarget(href: string): boolean {
+  const codePoint = (value: number) => (value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '');
+  const decoded = href
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => codePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec: string) => codePoint(Number(dec)))
+    .replace(/&(colon|tab|newline);/gi, (_, name: string) => ({ colon: ':', tab: '\t', newline: '\n' })[name.toLowerCase()] ?? '');
+  // A URL parser drops tabs and newlines anywhere and trims leading controls and spaces.
+  const normalized = decoded.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(normalized)?.[1]?.toLowerCase();
+  return scheme === undefined || SAFE_SCHEMES.has(scheme);
+}
+
+/**
+ * Articles are synced at build time from another repository
+ * (scripts/sync-research.mjs), so they are rendered as untrusted input: raw
+ * HTML inside them is shown as text, never emitted as markup, and a link
+ * to anything but the web, mail, a #fragment or a relative path (a
+ * javascript: link, an autolink to one, a reference to one) keeps its words
+ * and loses its link. A script slipped into an article cannot run on the
+ * site. Markdown itself renders as before. (Image sources need no check:
+ * one that is not an http(s) URL or a site path is rewritten under the
+ * article's own folder below, and a figure's link reuses it.) renderBody
+ * then checks the result against what this renderer can emit
+ * (unsafeArticleHtml), and refuses to publish anything else.
+ */
+const markdown = new Marked({
+  async: false,
+  gfm: true,
+  renderer: {
+    html({ text }) {
+      return escapeHtml(text);
+    },
+    // After an inline <pre>, <code>, <kbd> or <script> tag, marked keeps the
+    // text that follows raw (escaped: true), expecting the tag itself to be
+    // emitted as markup. Here the tag is shown as text, so that text is too.
+    text(token) {
+      if ('escaped' in token && token.escaped && !('tokens' in token && token.tokens)) {
+        return escapeHtml(token.text);
+      }
+      return false;
+    },
+    link(token) {
+      if (isSafeLinkTarget(token.href)) return false; // marked's own rendering
+      return this.parser.parseInline(token.tokens);
+    },
+  },
+});
+
+/** The intrinsic size of a synced SVG under public/, read from its root element. */
+function svgSize(publicPath: string): { width: string; height: string } | null {
+  if (!publicPath.startsWith('/') || !publicPath.endsWith('.svg')) return null;
+  // The path comes from the synced markdown: resolve it and keep it inside public/.
+  const publicDir = path.join(process.cwd(), 'public');
+  const file = path.resolve(publicDir, `.${publicPath}`);
+  if (!file.startsWith(publicDir + path.sep)) return null;
+  if (!existsSync(file) || !statSync(file).isFile()) return null;
+  const root = readFileSync(file, 'utf8').match(/<svg\b[^>]*>/)?.[0];
+  const width = root?.match(/\swidth="(\d+(?:\.\d+)?)"/)?.[1];
+  const height = root?.match(/\sheight="(\d+(?:\.\d+)?)"/)?.[1];
+  return width && height ? { width, height } : null;
+}
+
+/** The "open at full size" mark on a figure: two arrows pointing out. */
+const ENLARGE_ICON =
+  '<span class="research-figure__hint" aria-hidden="true">' +
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false">' +
+  '<path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/>' +
+  '</svg></span>';
+
+/**
+ * The tags and attributes an article's HTML can hold: what marked's GFM
+ * renderer emits (marked 18, its Renderer class), plus the ids, classes,
+ * figure links, image sizes and enlarge icon renderBody adds.
+ */
+const ARTICLE_TAGS = new Set([
+  'a', 'blockquote', 'br', 'code', 'del', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'img',
+  'input', 'li', 'ol', 'p', 'path', 'pre', 'span', 'strong', 'svg', 'table', 'tbody', 'td', 'th', 'thead',
+  'tr', 'ul',
+]);
+const ARTICLE_ATTRIBUTES = new Set([
+  'align', 'alt', 'aria-hidden', 'aria-label', 'checked', 'class', 'd', 'decoding', 'disabled', 'fill',
+  'focusable', 'height', 'href', 'id', 'loading', 'rel', 'src', 'start', 'stroke', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-width', 'target', 'title', 'type', 'viewbox', 'width',
+]);
+/** A start or end tag; a quoted attribute value may hold ">". */
+const HTML_TAG = /<(\/?)([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^"'>])*)>/gi;
+
+/**
+ * The first thing in an article's rendered HTML that its renderer never
+ * emits, or null: a tag or attribute outside the lists above (an event
+ * handler, a <script>, an <iframe>, a style), an unquoted value, a "<" that
+ * opens no tag, or a link or image that isSafeLinkTarget refuses. The last
+ * line of defence for untrusted articles: whatever a new way through
+ * marked's parser produces, it is not on these lists.
+ */
+export function unsafeArticleHtml(html: string): string | null {
+  let end = 0;
+  for (const match of html.matchAll(HTML_TAG)) {
+    if (html.slice(end, match.index).includes('<')) return 'a "<" that opens no tag';
+    end = match.index + match[0].length;
+    const [tag, closing, name, attributes] = match;
+    if (!ARTICLE_TAGS.has(name.toLowerCase())) return tag;
+    // With the quoted values gone, only names, "=" and separators may remain.
+    const names = attributes.replace(/"[^"]*"|'[^']*'/g, ' ').split(/[\s/]+/).filter(Boolean);
+    if (closing && names.length > 0) return tag;
+    for (const attribute of names) {
+      const known = /^[a-z][a-z-]*=?$/i.test(attribute) && ARTICLE_ATTRIBUTES.has(attribute.replace(/=$/, '').toLowerCase());
+      if (!known) return tag;
+    }
+    for (const [, url] of attributes.matchAll(/\b(?:href|src)\s*=\s*"([^"]*)"/gi)) {
+      if (!isSafeLinkTarget(url)) return tag;
+    }
+  }
+  return html.slice(end).includes('<') ? 'a "<" that opens no tag' : null;
 }
 
 function renderBody(slug: string, body: string): { html: string; headings: ResearchHeading[] } {
-  const parsed = parse(body, { async: false, gfm: true });
+  const parsed = markdown.parse(body) as string;
   const headings: ResearchHeading[] = [];
   const used = new Set<string>();
 
@@ -165,9 +296,26 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
   html = html.replace(/<p><em>(Figure [\s\S]*?)<\/em><\/p>/g, '<p class="caption">$1</p>');
   html = html.replace(/<img\b([^>]*?)src="([^"]+)"([^>]*)>/g, (match, before: string, src: string, after: string) => {
     const local = /^(https?:|\/)/.test(src) ? src : `/research/${slug}/${src.replace(/^\.\//, '')}`;
-    const tag = `<img${before}src="${local}"${after}>`;
+    let tag = `<img${before}src="${local}"${after}>`;
+    // A lazy image with no size takes no space until it loads, and the text
+    // below jumps when it does; the SVG's own size reserves its box.
+    // An author-given width or height stands: the SVG's own size would add a
+    // second height (or width) attribute, and the first one would win.
+    const size = !/\b(?:width|height)=/.test(tag) ? svgSize(local) : null;
+    if (size) tag = tag.replace('<img', `<img width="${size.width}" height="${size.height}"`);
     if (tag.includes('loading=')) return tag;
     return tag.replace('<img', '<img loading="lazy" decoding="async"');
+  });
+  // A figure (an image alone in its paragraph) links to its own file, so a
+  // tap shows it at full size: the charts are drawn 760-900 units wide with
+  // 14-17px labels, which a phone column shrinks to 5-7px. FigureViewer
+  // opens the link in place; without script it opens the file itself.
+  html = html.replace(/<p>(<img\b[^>]*>)<\/p>/g, (match, img: string) => {
+    const src = img.match(/\bsrc="([^"]+)"/)?.[1];
+    if (!src) return match;
+    const alt = img.match(/\balt="([^"]*)"/)?.[1] ?? '';
+    const label = alt ? `Enlarge figure: ${alt}` : 'Enlarge figure';
+    return `<p class="figure"><a class="research-figure" href="${src}" aria-label="${label}">${img}${ENLARGE_ICON}</a></p>`;
   });
   html = html.replace(
     /<a href="(https?:[^"]+)"/g,
@@ -176,6 +324,11 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
   html = html.replace(/<table>/g, '<div class="table-scroll"><table>');
   html = html.replace(/<\/table>/g, '</table></div>');
 
+  // Fail the build rather than publish markup this renderer cannot produce.
+  const unsafe = unsafeArticleHtml(html);
+  if (unsafe) {
+    throw new Error(`research: ${slug} rendered ${unsafe.slice(0, 160)}, which the article renderer never emits; refusing to publish it.`);
+  }
   return { html, headings };
 }
 

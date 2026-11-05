@@ -76,7 +76,7 @@ function createVideoTexture(
     const video = document.createElement('video');
     try {
       const baseUrl = (window.location.origin === 'null' || window.location.protocol === 'blob:')
-        ? ((window as any).ASC_MOSAIC_BASE_URL || '')
+        ? ((window as Window & { ASC_MOSAIC_BASE_URL?: string }).ASC_MOSAIC_BASE_URL || '')
         : window.location.origin;
       if (baseUrl) {
         const urlObj = new URL(videoUrl, baseUrl + '/');

@@ -77,6 +77,30 @@ const nextConfig: NextConfig = {
         { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
       ],
     },
+    {
+      // Font slices live in a versioned folder (an upgrade gets a new one),
+      // so they never change under a URL.
+      source: '/fonts/:path*',
+      headers: [
+        { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+      ],
+    },
+    {
+      // Research assets are synced from another repository at build time
+      // (scripts/sync-research.mjs). Opened on its own (a figure's link, a
+      // new tab) an SVG is a document: this policy lets it draw but never
+      // run script, in a sandbox with no origin of its own. It replaces the
+      // site-wide policy above for these paths only (the last matching rule
+      // wins for a header); inside an <img> an SVG never runs script anyway.
+      // The article pages themselves (/research/:slug) do not match.
+      source: '/research/:slug/:path+',
+      headers: [
+        {
+          key: 'Content-Security-Policy',
+          value: "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src 'self' data:; sandbox",
+        },
+      ],
+    },
   ],
 };
 

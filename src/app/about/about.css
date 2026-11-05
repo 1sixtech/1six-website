@@ -1,0 +1,791 @@
+/* ══════════════════════════════════════════════════════════
+   About — "The crossing"
+   ══════════════════════════════════════════════════════════
+   A sticky ASCII "16" fills as the reader moves through four bands,
+   from the first 16% to 100%. CrossingRoot writes the level into
+   --crossing-fill (and a step index into data-step); everything that
+   reads it animates off one registered property, so the mark's ink
+   mask, its level line and the mobile meter's line always move
+   together. The meter's count follows on the same curve (see
+   --crossing-pct below).
+
+   Hierarchy does not rely on size alone. Each type role differs from
+   its neighbour in at least two of size, weight, tone and space, and
+   each section opens with a head: a rule in the text's own ink with the
+   title close beneath it, then the list, whose rows are divided by
+   quieter hairlines. On a phone, where the desktop's columns no longer
+   separate the roles, that is what keeps a title from reading as the
+   first row of its list.
+
+   Colors come only from the theme tokens in globals.css. Accent rule:
+   --color-accent for marks and text ≥ 24px, --color-accent-text below. */
+
+@property --crossing-fill {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 16;
+}
+
+/* The same level as an integer, so a CSS counter can print it in the mobile
+   meter. It is never transitioned: WebKit prints a counter fed by a
+   transitioning <integer> as 0 until the transition ends. CrossingRoot
+   steps it through whole numbers on the count itself, on the fill's curve. */
+@property --crossing-pct {
+  syntax: '<integer>';
+  inherits: true;
+  initial-value: 16;
+}
+
+.crossing {
+  /* Strong ease-out: fast response, long settle. */
+  --crossing-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --crossing-header: var(--site-header-h);
+  /* Ink strength of the mark above the fill level. */
+  --crossing-dim: 0.26;
+  --crossing-fill: 16;
+  --crossing-pct: 16;
+  /* Mobile meter strip under the header (no strip on desktop). */
+  --crossing-meter-h: 30px;
+
+  /* Spacing roles, on a 4px grid and far apart in value: section rule to
+     title, title to its first content, either side of a hairline inside a
+     list, and the end of one section to the rule of the next. */
+  --crossing-rule-gap: 16px;
+  --crossing-head-gap: 24px;
+  --crossing-row-pad: 16px;
+  --crossing-section-gap: 96px;
+
+  position: relative;
+  transition: --crossing-fill 1200ms var(--crossing-ease);
+}
+
+/* The dark atlas draws gray glyphs, so its silhouette needs more ink to read. */
+[data-theme='dark'] .crossing {
+  --crossing-dim: 0.36;
+}
+
+@media (min-width: 768px) {
+  .crossing {
+    --crossing-meter-h: 0px;
+    --crossing-rule-gap: 24px;
+    --crossing-head-gap: 32px;
+    --crossing-row-pad: 24px;
+    --crossing-section-gap: clamp(128px, 16svh, 176px);
+  }
+}
+
+/* ── Mobile meter ──
+   On a phone the mark scrolls away with the first band, so the crossing
+   rides in a slim strip of the header's own glass: the section being read
+   on the left, the fill as a live count on the right, and the accent line
+   along the bottom edge. It takes no layout space (negative margin), so
+   the page flows exactly as before beneath it.
+   The label names a section only once its title has gone up under the
+   strip (data-title, set by CrossingRoot): while a title is on screen the
+   title names the section, and the strip shows the count alone. */
+
+.crossing-meter {
+  position: sticky;
+  top: var(--crossing-header);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: var(--crossing-meter-h);
+  margin-bottom: calc(-1 * var(--crossing-meter-h));
+  padding-inline: 22px;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--color-sub-text2);
+  background-color: var(--color-header-bg);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: inset 0 -1px 0 var(--color-divider);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.crossing-meter__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: opacity 160ms var(--crossing-ease);
+}
+
+.crossing-meter[data-title='shown'] .crossing-meter__label {
+  opacity: 0;
+}
+
+.crossing-meter__count {
+  flex-shrink: 0;
+  /* The count holds the strip's right edge while the label comes and goes. */
+  margin-left: auto;
+  counter-reset: crossing var(--crossing-pct);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.crossing-meter__count::after {
+  content: counter(crossing) '%';
+}
+
+.crossing-meter__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background-color: var(--color-accent);
+  transform-origin: left center;
+  transform: scaleX(calc(var(--crossing-fill) / 100));
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .crossing-meter {
+    background-color: var(--color-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .crossing-meter {
+    display: none;
+  }
+}
+
+/* ── Frame: thirds on desktop, one column on mobile ── */
+
+.crossing-frame {
+  max-width: 1440px;
+  margin-inline: auto;
+}
+
+.crossing-grid {
+  padding-inline: 22px;
+}
+
+@media (min-width: 768px) {
+  .crossing-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    column-gap: clamp(32px, 4vw, 72px);
+    /* Same inset as the header logo. */
+    padding-inline: calc(4.17% + 24.5px);
+  }
+}
+
+/* ── The mark ── */
+
+/* Phone first: the mark sits at the top of the page, under the header and
+   the meter strip (desktop below pins it beside the bands instead). */
+.crossing-aside {
+  padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 28px);
+}
+
+.crossing-mark {
+  position: relative;
+  width: clamp(184px, 58vw, 260px);
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+
+/* Desktop: the column runs the full height of the bands and the mark itself
+   is sticky, centred in the viewport below the header. Its size is known in
+   CSS (container units on the column), so the sticky offset can centre it;
+   at the end of the page the mark then rides up with the last band instead
+   of a viewport-tall box shoving it under the header. */
+@media (min-width: 768px) {
+  .crossing-aside {
+    container-type: inline-size;
+    padding-top: 0;
+  }
+
+  .crossing-mark {
+    --crossing-mark: min(100cqi, calc(100svh - var(--crossing-header) - 160px), 460px);
+    position: sticky;
+    top: calc(var(--crossing-header) + (100svh - var(--crossing-header) - var(--crossing-mark)) / 2);
+    width: var(--crossing-mark);
+    margin-inline: auto;
+  }
+}
+
+.crossing-mark__ink {
+  --crossing-edge: calc(var(--crossing-fill) * 1%);
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 var(--crossing-edge),
+    rgb(0 0 0 / var(--crossing-dim)) var(--crossing-edge)
+  );
+  mask-image: linear-gradient(
+    to top,
+    #000 var(--crossing-edge),
+    rgb(0 0 0 / var(--crossing-dim)) var(--crossing-edge)
+  );
+  transition: opacity 900ms var(--crossing-ease);
+}
+
+/* Completion: the glyphs ink in accent, the dim-then-accent grammar of the
+   intro logo fill. The canvas is transparent and its glyphs are
+   alpha-antialiased, so a filter on the canvas itself recolors only the
+   glyphs (edges keep their alpha) and can never tint the ground.
+   brightness(0) first flattens both themes' glyph grays to black; the rest
+   maps black to the accent (#FF3700 target, #FF3600 measured in Chromium). */
+.crossing-mark__ink canvas {
+  transition: filter 900ms var(--crossing-ease);
+}
+
+/* The filter chain encodes --color-accent (globals.css): regenerate it if
+   the accent changes. data-complete is CrossingRoot's last step. */
+.crossing[data-complete='true'] .crossing-mark__ink canvas {
+  filter: brightness(0) invert(27%) sepia(58%) saturate(4404%) hue-rotate(1deg) brightness(101%)
+    contrast(104%);
+}
+
+/* The level: a hairline riding the top edge of a full-size layer that is
+   translated down by the unfilled share, so it moves by transform alone
+   (no layout or paint). At 100% it stays at the brim: the crossing reads
+   as complete, as the mobile meter does when it runs the full width. */
+.crossing-mark__level {
+  position: absolute;
+  inset: 0;
+  border-top: 1px solid var(--color-accent);
+  transform: translateY(calc((100 - var(--crossing-fill)) * 1%));
+  pointer-events: none;
+  transition: opacity 700ms var(--crossing-ease);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .crossing-mark[data-ready='false'] .crossing-mark__ink,
+  .crossing-mark[data-ready='false'] .crossing-mark__level {
+    opacity: 0;
+  }
+}
+
+/* The mark as a still (reduced motion, or no WebGL): AsciiCanvas shows its
+   source video, paused on the frame where the 16 faces the viewer
+   (AsciiTeamSymbol). The video has a white ground, so blend it into the page
+   instead of letting it read as a pale box: multiply on light, invert and
+   screen on dark. The still's own box carries the page color as the blend
+   backdrop. It sits inside the ink layer, whose fill mask isolates blending,
+   so the blend survives the mask and the fill dims the still as it does the
+   glyphs. */
+.crossing-mark [data-ascii-still] {
+  background-color: var(--color-bg);
+}
+
+.crossing-mark [data-ascii-still] video {
+  opacity: 0.6;
+  mix-blend-mode: multiply;
+}
+
+[data-theme='dark'] .crossing-mark [data-ascii-still] video {
+  filter: grayscale(1) invert(1);
+  mix-blend-mode: screen;
+}
+
+/* ── Bands ──
+   Each section opens with its head: the rule, in the title's own ink, a
+   tier above the hairlines inside the lists, then the title close beneath
+   it. The long interval is the one before the next rule. */
+
+.crossing-bands {
+  min-width: 0;
+}
+
+.crossing-band {
+  padding-block: var(--crossing-rule-gap) var(--crossing-section-gap);
+  border-top: 1px solid var(--color-text);
+  /* An in-page jump lands the rule just under the header and meter. */
+  scroll-margin-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 2px);
+}
+
+/* Bands take focus after an in-page link so the reading position follows;
+   they are not controls, so they draw no focus ring. */
+.crossing-band:focus {
+  outline: none;
+}
+
+.crossing-band--statement {
+  padding-block: 24px var(--crossing-section-gap);
+  border-top: 0;
+}
+
+@media (min-width: 768px) {
+  .crossing-band {
+    scroll-margin-top: calc(var(--crossing-header) + 48px);
+  }
+
+  /* First viewport: the statement is centred on the same axis as the mark. */
+  .crossing-band--statement {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100svh;
+    padding-block: calc(var(--crossing-header) + 48px) 48px;
+  }
+}
+
+/* ── Type roles ──
+   display       the statement (h1)
+   heading       a section's title, close under its rule
+   display-link  the address: larger than its title, regular weight, underlined
+   statement     the closing line: smaller and lighter than a title
+   entry, lead   names in the lists; the opening paragraph
+   body          prose and the measured results
+   support       roles, captions, the onward links
+   label         tags, meta, the meter */
+
+.crossing-display {
+  font-size: clamp(40px, 11.3vw, 48px);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: var(--color-text);
+}
+
+.crossing-display > span {
+  display: block;
+}
+
+.crossing-heading {
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.026em;
+  color: var(--color-text);
+  text-wrap: balance;
+}
+
+.crossing-lead {
+  margin-top: var(--crossing-head-gap);
+  max-width: 27em;
+  font-size: 20px;
+  line-height: 1.32;
+  letter-spacing: -0.017em;
+  color: var(--color-text);
+  text-wrap: pretty;
+}
+
+.crossing-body {
+  margin-top: 20px;
+  max-width: 32em;
+  font-size: clamp(17px, calc(0.35vw + 14px), 19px);
+  line-height: 1.55;
+  letter-spacing: -0.009em;
+  color: var(--color-sub-text2);
+  text-wrap: pretty;
+}
+
+.crossing-figure {
+  font-weight: 500;
+  color: var(--color-accent-text);
+}
+
+/* Small labels: never below 13px, opened up slightly at this size. */
+.crossing-tag,
+.crossing-meta {
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: var(--color-sub-text1);
+}
+
+@media (min-width: 768px) {
+  .crossing-display {
+    font-size: clamp(44px, calc(2.9vw + 22px), 64px);
+    letter-spacing: -0.034em;
+  }
+
+  .crossing-heading {
+    font-size: clamp(32px, calc(1.2vw + 23px), 40px);
+  }
+
+  .crossing-lead {
+    font-size: clamp(20px, calc(0.9vw + 13px), 26px);
+  }
+}
+
+/* ── Names: one entry role for origins, backers and firms ──
+   Regular weight against the titles' medium, and two steps smaller. */
+
+.crossing-names,
+.crossing-backer__name,
+.crossing-firms__names {
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.24;
+  letter-spacing: -0.017em;
+  color: var(--color-text);
+}
+
+@media (min-width: 768px) {
+  .crossing-names,
+  .crossing-backer__name,
+  .crossing-firms__names {
+    font-size: clamp(20px, calc(0.9vw + 13px), 26px);
+  }
+}
+
+/* An inline run, separated by the mosaic's own slash. */
+.crossing-names {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.32em;
+  row-gap: 0.1em;
+}
+
+.crossing-names > li {
+  white-space: nowrap;
+}
+
+.crossing-names__sep {
+  margin-left: 0.32em;
+  font-weight: 300;
+  color: var(--color-sub-text1);
+}
+
+/* A stacked column, one name per line: in a run that wraps, a slash would
+   strand at the end of a line. */
+.crossing-names--stacked {
+  flex-direction: column;
+  row-gap: 2px;
+}
+
+.crossing-names--stacked > li {
+  white-space: normal;
+}
+
+/* ── Where we come from: a ledger of origins ── */
+
+.crossing-ledger {
+  container-type: inline-size;
+  margin-top: var(--crossing-head-gap);
+}
+
+.crossing-ledger__row {
+  display: grid;
+  row-gap: 8px;
+  padding-block: var(--crossing-row-pad);
+  border-top: 1px solid var(--color-divider);
+}
+
+/* The section's rule and title head the list, so its first row carries no
+   rule of its own, and its last row ends without one. */
+.crossing-ledger__row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.crossing-ledger__row:last-child {
+  padding-bottom: 0;
+}
+
+/* A tag column beside the names once the ledger itself is wide enough. */
+@container (width >= 760px) {
+  .crossing-ledger__row {
+    grid-template-columns: minmax(10rem, 13.5rem) minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: baseline;
+  }
+}
+
+/* ── Backed by ── */
+
+.crossing-backers {
+  display: grid;
+  margin-top: var(--crossing-head-gap);
+}
+
+.crossing-backer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block: var(--crossing-row-pad);
+  border-top: 1px solid var(--color-divider);
+}
+
+.crossing-backer:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (min-width: 1024px) {
+  .crossing-backers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .crossing-backer {
+    gap: 8px;
+  }
+
+  .crossing-backer:nth-child(odd) {
+    padding-right: 32px;
+  }
+
+  /* The second column's first entry heads the list too. */
+  .crossing-backer:nth-child(2) {
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
+.crossing-backer__role,
+.crossing-firms__more {
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--color-sub-text2);
+}
+
+.crossing-firms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75em;
+  row-gap: 6px;
+  padding-block: var(--crossing-row-pad) 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+/* ── We measure ── */
+
+.crossing-evidence {
+  margin-top: var(--crossing-head-gap);
+}
+
+.crossing-takeaways > li {
+  /* The rows' hairlines run the column's width; the text keeps a reading
+     measure of about 70 characters (Pretendard averages 0.43em a character,
+     so the cap is set in em: a ch is its zero, 0.6em wide). */
+  padding-block: var(--crossing-row-pad);
+  padding-inline-end: max(0px, calc(100% - 32em));
+  border-bottom: 1px solid var(--color-divider);
+  font-size: clamp(17px, calc(0.35vw + 14px), 19px);
+  line-height: 1.55;
+  letter-spacing: -0.009em;
+  color: var(--color-text);
+  text-wrap: pretty;
+}
+
+.crossing-takeaways > li:first-child {
+  padding-top: 0;
+}
+
+.crossing-takeaways strong {
+  font-weight: 600;
+}
+
+.crossing-evidence__source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: var(--crossing-row-pad);
+}
+
+/* ── Onward links: one explicit next step per band ── */
+
+.crossing-onward {
+  display: inline-block;
+  min-height: 44px;
+  margin-top: 32px;
+  padding-block: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0;
+  color: var(--color-text);
+  -webkit-tap-highlight-color: transparent;
+  transition: color 160ms var(--crossing-ease);
+}
+
+.crossing-onward__label {
+  font-style: normal;
+}
+
+.crossing-onward__text {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+  text-decoration-color: color-mix(in srgb, currentColor 30%, transparent);
+  transition: text-decoration-color 160ms var(--crossing-ease);
+}
+
+.crossing-onward__tail {
+  white-space: nowrap;
+}
+
+.crossing-onward__icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-left: 0.45em;
+  vertical-align: -0.14em;
+  transition: transform 240ms var(--crossing-ease);
+}
+
+/* The research citation reads as body copy that links out. */
+.crossing-source {
+  margin-top: 2px;
+  font-size: clamp(17px, calc(0.35vw + 14px), 19px);
+  line-height: 1.35;
+  letter-spacing: -0.009em;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .crossing-onward:hover {
+    color: var(--color-accent-text);
+  }
+
+  .crossing-onward:hover .crossing-onward__text {
+    text-decoration-color: currentColor;
+  }
+}
+
+/* The arrow leans toward its destination; reduced motion keeps it still. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .crossing-onward[data-direction='down']:hover .crossing-onward__icon {
+    transform: translateY(3px);
+  }
+
+  .crossing-onward[data-direction='right']:hover .crossing-onward__icon {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .crossing-onward:active .crossing-onward__icon {
+    transform: scale(0.9);
+    transition-duration: 100ms;
+  }
+}
+
+.crossing-onward:focus-visible,
+.crossing-email:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+/* ── Write to us ──
+   Title, lede and address form one tight group; the closing line stands a
+   full section gap below it, as the page's last beat. */
+
+.crossing-contact__lede {
+  margin-top: var(--crossing-head-gap);
+}
+
+/* Larger than its title but regular weight, underlined, and sized to the
+   column on a phone so the 17-character address never breaks. */
+.crossing-email {
+  display: inline-block;
+  margin-top: 8px;
+  padding-block: 4px;
+  font-size: clamp(34px, calc((100vw - 44px) / 8.4), 48px);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.05em;
+  text-underline-offset: 0.16em;
+  text-decoration-color: color-mix(in srgb, var(--color-text) 22%, transparent);
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 180ms var(--crossing-ease),
+    text-decoration-color 180ms var(--crossing-ease);
+}
+
+/* Press feedback where hover does not exist (phones, tablets). */
+.crossing-email:active {
+  opacity: 0.6;
+  transition: opacity 100ms var(--crossing-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .crossing-email:hover {
+    color: var(--color-accent);
+    text-decoration-color: currentColor;
+  }
+}
+
+.crossing-close {
+  margin-top: var(--crossing-section-gap);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  text-wrap: balance;
+}
+
+.crossing-close__figure {
+  color: var(--color-accent);
+}
+
+@media (min-width: 768px) {
+  .crossing-email {
+    font-size: clamp(36px, calc(3.4vw + 10px), 60px);
+  }
+
+  .crossing-close {
+    font-size: clamp(24px, calc(1.8vw + 10px), 36px);
+  }
+}
+
+.crossing-end {
+  display: block;
+  height: 1px;
+}
+
+/* ── Reduced motion: the crossing is shown complete and still ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .crossing {
+    --crossing-fill: 100 !important;
+    --crossing-pct: 100 !important;
+    transition: none;
+  }
+
+  /* The count carries its own inline value once CrossingRoot has run. */
+  .crossing-meter__count {
+    --crossing-pct: 100 !important;
+  }
+
+  .crossing-mark__level {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Phones (< 768px): rethought, not scaled down
+   ══════════════════════════════════════════════════════════
+   - The meter above carries the fill, so the mark prints at full ink,
+     larger, without its level line: on a phone it is the opening image,
+     and a mostly dimmed 16 at 170px read as a smudge.
+   - Scrolling is the next step on a phone, so the per-band "next" links
+     go; the research citation stays (it is a link to the source).
+   - The type roles and spacing roles above already carry phone values;
+     nothing here resizes type. */
+@media (max-width: 767px) {
+  .crossing-mark__ink {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .crossing-mark__level {
+    display: none;
+  }
+
+  .crossing-onward:not(.crossing-source) {
+    display: none;
+  }
+}

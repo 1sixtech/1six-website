@@ -44,6 +44,28 @@ export interface AsciiMosaicFilterOptions {
   minBrightness?: number;
   /** 최대 밝기 (0~100, 기본값: 80) */
   maxBrightness?: number;
+  /**
+   * Draw glyphs from an atlas pre-rendered at the cell's device-pixel size,
+   * where each texel holds its glyph's exact coverage of that pixel (an area
+   * average), drawn 1:1. Atlas cells are far larger than the mosaic cells
+   * they fill (the world map's are 666px for a 6-15px cell): nearest
+   * sampling keeps one texel in dozens, so strokes break up, and GPU mipmaps
+   * smear each glyph across about two pixels. Default: false (nearest).
+   */
+  smoothCells?: boolean;
+  /**
+   * Size of the scene render target relative to the output, in (0, 1]. The
+   * mosaic reads that target once per cell, so a canvas drawn at the device
+   * pixel ratio for crisp glyphs can keep the target at CSS pixels and skip
+   * most of the extra fill. Default: 1.
+   */
+  targetScale?: number;
+  /**
+   * With smoothCells: multiply each glyph's coverage (its colour is kept,
+   * full coverage caps at 1), so strokes far thinner than a pixel at small
+   * cell sizes still read as strokes. Baked into the atlas. Default: 1.
+   */
+  cellGain?: number;
 }
 
 /**
@@ -94,6 +116,20 @@ export class AsciiMosaicFilter {
   private mouseMoveBound: ((e: MouseEvent) => void) | null = null;
   private mouseLeaveBound: (() => void) | null = null;
   private mouseEnterBound: (() => void) | null = null;
+  /** See AsciiMosaicFilterOptions.targetScale. */
+  private targetScale: number = 1;
+  /** The atlas holds premultiplied colour (smoothCells), so blending must expect it. */
+  private premultipliedAtlas: boolean = false;
+  /** See AsciiMosaicFilterOptions.cellGain (applies to the coverage atlas only). */
+  private cellGain: number = 1;
+  /** smoothCells: the source atlas, kept to re-render it if the cell size changes. */
+  private atlasImage: HTMLImageElement | null = null;
+  /** smoothCells: the cell size (device px) the coverage atlas was rendered for. */
+  private atlasCellSize: number = 0;
+  /** A setting changed since the last frame (see wantsFrame). */
+  private frameDirty: boolean = true;
+  /** dispose() ran: an atlas that arrives later is dropped. */
+  private disposed: boolean = false;
 
   private static readonly VERTEX_SHADER = `
     attribute vec2 instanceSampleUV;
@@ -151,7 +187,7 @@ export class AsciiMosaicFilter {
     uniform float uAdjustCellOrder;
     uniform float uMinBrightness;
     uniform float uMaxBrightness;
-    
+
     varying vec2 vSampleUV;
     varying vec2 vLocalUV;
     
@@ -232,7 +268,7 @@ export class AsciiMosaicFilter {
       
       vec2 atlasUV = vec2(mix(uMin, uMax, vLocalUV.x), mix(vMax, vMin, vLocalUV.y));
       vec4 atlasColor = texture2D(tAtlas, atlasUV);
-      
+
       if (uAdjustCellOrder > 0.5) {
         if (atlasColor.a <= 0.5) {
           discard;
@@ -266,8 +302,10 @@ export class AsciiMosaicFilter {
     this.minBrightness = Math.max(0, Math.min(100, options.minBrightness ?? 20));
     this.maxBrightness = Math.max(0, Math.min(100, options.maxBrightness ?? 80));
     this.lastNoiseUpdateTime = performance.now();
+    this.targetScale = Math.min(1, Math.max(0.1, options.targetScale ?? 1));
+    this.cellGain = Math.max(0, options.cellGain ?? 1);
 
-    this.renderTarget = new THREE.WebGLRenderTarget(width, height, {
+    this.renderTarget = new THREE.WebGLRenderTarget(this.targetSize(width), this.targetSize(height), {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
@@ -277,29 +315,155 @@ export class AsciiMosaicFilter {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.scene = new THREE.Scene();
 
-    this.initAtlas(options).then(() => {
-      this.buildInstancedMesh(width, height);
-    });
-    
+    // The mesh is built at once. In smoothCells mode it starts on an empty
+    // placeholder atlas, so the filter is ready (and the canvas can show)
+    // without waiting for the atlas download; the glyphs appear when the
+    // coverage atlas is swapped in.
+    this.initAtlas(options);
+    this.buildInstancedMesh(this.width, this.height);
   }
 
-  private async initAtlas(
-    options: AsciiMosaicFilterOptions
-  ): Promise<void> {
+  private initAtlas(options: AsciiMosaicFilterOptions): void {
     const textureUrl = options.mosaicCellTextureUrl ?? '/resource/mosaic_cell.png';
     const cellCount = options.cellCount ?? 10;
-    const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(
+    if (options.smoothCells) {
+      // Blending expects premultiplied colour from here on, whichever atlas
+      // ends up in place: the coverage atlas, or the plain one premultiplied
+      // on upload if that fails.
+      this.premultipliedAtlas = true;
+      const placeholder = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
+      placeholder.needsUpdate = true;
+      this.atlasResult = { texture: placeholder, cellCount };
+      void this.loadCoverageAtlas(textureUrl);
+      return;
+    }
+    this.atlasResult = { texture: this.loadPlainAtlas(textureUrl, false), cellCount };
+  }
+
+  /** smoothCells: fetch the source atlas, then swap its coverage atlas in. */
+  private async loadCoverageAtlas(textureUrl: string): Promise<void> {
+    let texture: THREE.Texture;
+    try {
+      const image = await new THREE.ImageLoader().loadAsync(textureUrl);
+      if (this.disposed) return;
+      this.atlasImage = image;
+      texture = this.buildCoverageAtlas(image, this.atlasResult.cellCount);
+    } catch (error) {
+      if (this.disposed) return;
+      // Fall back to the plain atlas rather than leave the canvas empty.
+      console.warn('모자이크 셀 커버리지 아틀라스 생성 실패:', error);
+      this.atlasImage = null;
+      texture = this.loadPlainAtlas(textureUrl, true);
+    }
+    this.useAtlas(texture);
+  }
+
+  /** The full-size atlas, sampled one texel per pixel (nearest). */
+  private loadPlainAtlas(textureUrl: string, premultiply: boolean): THREE.Texture {
+    const texture = new THREE.TextureLoader().load(
       textureUrl,
-      () => { texture.needsUpdate = true; },
+      () => {
+        texture.needsUpdate = true;
+        this.frameDirty = true;
+      },
       undefined,
       (error) => { console.warn('모자이크 셀 텍스처 로딩 실패:', error); }
     );
+    texture.premultiplyAlpha = premultiply;
     texture.minFilter = THREE.NearestFilter;
     texture.magFilter = THREE.NearestFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.atlasResult = { texture, cellCount };
+    return texture;
+  }
+
+  /** Put an atlas in place (drawn from the next frame) and free the one it replaces. */
+  private useAtlas(texture: THREE.Texture): void {
+    const previous = this.atlasResult.texture;
+    this.atlasResult = { texture, cellCount: this.atlasResult.cellCount };
+    if (this.material) this.material.uniforms.tAtlas.value = texture;
+    if (previous !== texture) previous.dispose();
+    this.frameDirty = true;
+  }
+
+  /**
+   * The atlas at one texel per device pixel of the current cell size. Each
+   * texel is its glyph's exact coverage of that pixel (the area average of
+   * the full-size glyph), premultiplied, with cellGain applied. Drawn 1:1, a
+   * glyph keeps every stroke and spreads no wider than its own pixels.
+   *
+   * Two steps: the browser scales the atlas to SUPERSAMPLE² samples per
+   * output pixel, then each pixel averages its own samples here. The browser
+   * step only has to be good at a moderate ratio; the averaging is exact.
+   * At these cell sizes the whole build reads a few thousand pixels.
+   */
+  private buildCoverageAtlas(image: HTMLImageElement, cellCount: number): THREE.DataTexture {
+    const SUPERSAMPLE = 8;
+    const size = this.mosaicSize;
+    // Integer cell sizes (1x, 2x and 3x screens) map texel to pixel exactly,
+    // so nearest sampling reproduces the coverage untouched. A fractional
+    // size (a 1.25x or 1.5x screen) cannot align, and filters linearly.
+    const cell = Math.max(1, Math.round(size));
+    const aligned = Math.abs(size - cell) < 1e-3;
+    const width = cellCount * cell;
+    const height = this.setCount * cell;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width * SUPERSAMPLE;
+    canvas.height = height * SUPERSAMPLE;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('2D canvas context unavailable');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const samples = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+    const data = new Uint8Array(width * height * 4);
+    const norm = 1 / (SUPERSAMPLE * SUPERSAMPLE * 255);
+    const gain = this.cellGain;
+    for (let y = 0; y < height; y++) {
+      // Image row y goes to texture row (height - 1 - y): the same
+      // orientation as an image texture uploaded with flipY, which the
+      // shader's atlas lookup expects.
+      const rowOut = (height - 1 - y) * width * 4;
+      for (let x = 0; x < width; x++) {
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let a = 0;
+        for (let sy = 0; sy < SUPERSAMPLE; sy++) {
+          let i = ((y * SUPERSAMPLE + sy) * canvas.width + x * SUPERSAMPLE) * 4;
+          for (let sx = 0; sx < SUPERSAMPLE; sx++, i += 4) {
+            const alpha = samples[i + 3];
+            r += samples[i] * alpha;
+            g += samples[i + 1] * alpha;
+            b += samples[i + 2] * alpha;
+            a += alpha;
+          }
+        }
+        // Coverage in 0-1; premultiplied colour channels in 0-255.
+        const coverage = a * norm;
+        const gained = Math.min(1, coverage * gain);
+        const lift = coverage > 0 ? gained / coverage : 0;
+        const o = rowOut + x * 4;
+        data[o] = Math.min(255, Math.round(r * norm * lift));
+        data[o + 1] = Math.min(255, Math.round(g * norm * lift));
+        data[o + 2] = Math.min(255, Math.round(b * norm * lift));
+        data[o + 3] = Math.round(gained * 255);
+      }
+    }
+
+    const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    texture.flipY = false;
+    texture.premultiplyAlpha = false; // already premultiplied above
+    texture.generateMipmaps = false;
+    texture.minFilter = aligned ? THREE.NearestFilter : THREE.LinearFilter;
+    texture.magFilter = aligned ? THREE.NearestFilter : THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    this.atlasCellSize = size;
+    return texture;
   }
 
   private getInstanceCount(w: number, h: number, size: number): number {
@@ -358,6 +522,7 @@ export class AsciiMosaicFilter {
       vertexShader: AsciiMosaicFilter.VERTEX_SHADER,
       fragmentShader: AsciiMosaicFilter.FRAGMENT_SHADER,
       transparent: true,
+      premultipliedAlpha: this.premultipliedAtlas,
       // depthWrite: false,
       // depthTest: true,
       // wireframe: true, // 디버깅: 셀 경계 표시
@@ -549,14 +714,41 @@ export class AsciiMosaicFilter {
     this.material.uniforms.uEffectiveOffsetRowStrength.value = this.effectiveOffsetRowStrength;
 
     this.renderer.render(this.scene, this.camera);
+    this.frameDirty = false;
   }
 
   isReady(): boolean {
     return !!(this.material && this.instancedMesh && this.atlasResult);
   }
 
+  /**
+   * Whether the next frame can differ from the last one drawn, for callers
+   * that render only on change (AscMosaic.setRenderOnDemand): a setting
+   * changed, the noise or set clock is due a tick, or a mouse effect is
+   * live or still easing out. Over a still scene nothing else moves it.
+   */
+  wantsFrame(now: number): boolean {
+    if (!this.material) return false;
+    if (this.frameDirty) return true;
+    const clocked = this.noiseIntensity > 0
+      || (this.setCount > 1 && (this.setSelectionMode === 'random' || this.setSelectionMode === 'cycle'));
+    if (clocked && (this.nextNoiseUpdateTime === 0 || now >= this.nextNoiseUpdateTime)) return true;
+    if (this.avoid && (this.mouseIsInside || this.effectiveAvoidStrength > 0.001)) return true;
+    if (
+      this.setSelectionMode === 'offsetRow'
+      && this.setCount > 1
+      && (this.mouseIsInside || this.effectiveOffsetRowStrength > 0.001)
+    ) return true;
+    return false;
+  }
+
+  /** A render-target dimension for an output dimension (see targetScale). */
+  private targetSize(size: number): number {
+    return Math.max(1, Math.round(size * this.targetScale));
+  }
+
   setSize(width: number, height: number): void {
-    this.renderTarget.setSize(width, height);
+    this.renderTarget.setSize(this.targetSize(width), this.targetSize(height));
     this.width = width;
     this.height = height;
     if (this.material) {
@@ -567,6 +759,11 @@ export class AsciiMosaicFilter {
 
   setMosaicSize(size: number): void {
     this.mosaicSize = size;
+    this.frameDirty = true;
+    // The coverage atlas is drawn for one cell size: re-render it for a new one.
+    if (this.atlasImage && this.atlasResult && size !== this.atlasCellSize) {
+      this.useAtlas(this.buildCoverageAtlas(this.atlasImage, this.atlasResult.cellCount));
+    }
     const w = this.width;
     const h = this.height;
     const newCount = this.getInstanceCount(w, h, size);
@@ -613,6 +810,7 @@ export class AsciiMosaicFilter {
   }
 
   setNoiseIntensity(intensity: number): void {
+    this.frameDirty = true;
     this.noiseIntensity = Math.max(0.0, Math.min(1.0, intensity));
     if (this.material) {
       this.material.uniforms.uNoiseIntensity.value = this.noiseIntensity;
@@ -620,18 +818,26 @@ export class AsciiMosaicFilter {
   }
 
   setNoiseFPS(fps: number): void {
+    this.frameDirty = true;
     this.noiseFPS = Math.max(1.0, fps);
     this.lastNoiseUpdateTime = performance.now();
     this.nextNoiseUpdateTime = 0;
   }
 
   setNoiseFPSRandom(random: number): void {
+    this.frameDirty = true;
     this.noiseFPSRandom = Math.max(0, Math.min(5, random));
     this.nextNoiseUpdateTime = 0;
   }
 
   setSetCount(setCount: number): void {
+    this.frameDirty = true;
+    const changed = Math.max(1, setCount) !== this.setCount;
     this.setCount = Math.max(1, setCount);
+    // The coverage atlas holds one row per set: re-render it for a new count.
+    if (changed && this.atlasImage && this.atlasResult) {
+      this.useAtlas(this.buildCoverageAtlas(this.atlasImage, this.atlasResult.cellCount));
+    }
     if (this.material) {
       this.material.uniforms.uRowCount.value = this.setCount;
       this.material.uniforms.uSetCount.value = this.setCount;
@@ -639,6 +845,7 @@ export class AsciiMosaicFilter {
   }
 
   setSetSelectionMode(mode: 'first' | 'random' | 'cycle' | 'offsetRow'): void {
+    this.frameDirty = true;
     this.setSelectionMode = mode;
     if (this.material) {
       this.material.uniforms.uSetSelectionMode.value =
@@ -650,6 +857,7 @@ export class AsciiMosaicFilter {
   }
 
   setOffsetRowRadius(radius: number): void {
+    this.frameDirty = true;
     this.offsetRowRadius = Math.max(0, radius);
     if (this.material) {
       this.material.uniforms.uOffsetRowRadius.value = this.offsetRowRadius;
@@ -657,6 +865,7 @@ export class AsciiMosaicFilter {
   }
 
   setAvoid(enabled: boolean): void {
+    this.frameDirty = true;
     this.avoid = enabled;
     if (this.material) {
       this.material.uniforms.uAvoidEnabled.value = enabled ? 1 : 0;
@@ -669,6 +878,7 @@ export class AsciiMosaicFilter {
   }
 
   setAdjustCellOrder(enabled: boolean): void {
+    this.frameDirty = true;
     if (this.adjustCellOrder === enabled) return;
     this.adjustCellOrder = enabled;
     // uniform 값만 업데이트
@@ -678,6 +888,7 @@ export class AsciiMosaicFilter {
   }
 
   setAvoidRadius(radius: number): void {
+    this.frameDirty = true;
     this.avoidRadius = Math.max(0, radius);
     if (this.material) {
       this.material.uniforms.uAvoidRadius.value = this.avoidRadius;
@@ -685,6 +896,7 @@ export class AsciiMosaicFilter {
   }
 
   setAvoidStrength(strength: number): void {
+    this.frameDirty = true;
     this.avoidStrength = Math.max(0, strength);
     if (this.material) {
       this.material.uniforms.uAvoidStrength.value = this.avoidStrength;
@@ -692,6 +904,7 @@ export class AsciiMosaicFilter {
   }
 
   setMinBrightness(brightness: number): void {
+    this.frameDirty = true;
     this.minBrightness = Math.max(0, Math.min(100, brightness));
     if (this.material) {
       this.material.uniforms.uMinBrightness.value = this.minBrightness;
@@ -699,6 +912,7 @@ export class AsciiMosaicFilter {
   }
 
   setMaxBrightness(brightness: number): void {
+    this.frameDirty = true;
     this.maxBrightness = Math.max(0, Math.min(100, brightness));
     if (this.material) {
       this.material.uniforms.uMaxBrightness.value = this.maxBrightness;
@@ -710,11 +924,13 @@ export class AsciiMosaicFilter {
   }
 
   enable(): void {
+    this.frameDirty = true;
     this.isEnabled = true;
     this.updateMouseListenerState();
   }
 
   disable(): void {
+    this.frameDirty = true;
     this.detachMouseListener();
     this.isEnabled = false;
   }
@@ -724,6 +940,7 @@ export class AsciiMosaicFilter {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.detachMouseListener();
     if (this.instancedMesh) {
       this.instancedMesh.geometry.dispose();
@@ -741,6 +958,7 @@ export class AsciiMosaicFilter {
     if (this.atlasResult?.texture) {
       this.atlasResult.texture.dispose();
     }
+    this.atlasImage = null;
     this.material = null;
   }
 }

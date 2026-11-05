@@ -14,6 +14,8 @@ export function LogoHeader({ className = '' }: { className?: string }) {
       viewBox="0 0 73 21.03"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
     >
       <path d="M72.96 0.04L73 0H68.52L68.48 0.04L60.3 8.26V12.77L68.52 21.03H73L62.94 10.91C62.72 10.69 62.72 10.33 62.94 10.11L72.96 0.04Z" fill="currentColor"/>
       <path d="M50.69 21.03L58.9 12.77V8.26L50.73 0.04L50.69 0H46.2L46.24 0.04L56.27 10.12C56.48 10.33 56.48 10.69 56.27 10.91L46.2 21.03H50.69Z" fill="currentColor"/>
@@ -35,6 +37,8 @@ export function LogoFooter({ className = '' }: { className?: string }) {
       viewBox="0 0 49.91 48"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
     >
       <path d="M9.95 0L0 15.23H6.89L16.82 0H9.95Z" fill="currentColor"/>
       <path d="M34.4 17.66C25.85 17.66 18.89 24.46 18.89 32.83C18.89 41.19 25.85 48 34.4 48C42.95 48 49.91 41.2 49.91 32.83C49.91 24.46 42.95 17.66 34.4 17.66ZM34.4 42.25C29.09 42.25 24.76 38.02 24.76 32.83C24.76 27.63 29.09 23.4 34.4 23.4C39.71 23.4 44.03 27.63 44.03 32.83C44.03 38.02 39.71 42.25 34.4 42.25Z" fill="currentColor"/>

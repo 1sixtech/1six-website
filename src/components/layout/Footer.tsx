@@ -1,48 +1,62 @@
 import Link from 'next/link';
 import { LogoFooter } from '@/components/ui/Logo';
+import { CONTACT_EMAIL, COPYRIGHT } from '@/lib/site';
 
-const COMPANY_LINKS = [
+interface FooterLinkItem {
+  label: string;
+  href: string;
+}
+
+const COMPANY_LINKS: FooterLinkItem[] = [
   { label: 'Thesis', href: '/#thesis' },
   { label: 'Research', href: '/research' },
   { label: 'About', href: '/about' },
   { label: 'Investors', href: '/about#investors' },
 ];
 
+const CONTACT_LINKS: FooterLinkItem[] = [
+  { label: CONTACT_EMAIL, href: `mailto:${CONTACT_EMAIL}` },
+];
+
+// A column is a label over its links, and the two must not read alike:
+// the label is small uppercase in the quieter gray, the links are larger
+// sentence-case text in the stronger gray. 4px of vertical padding makes
+// every row a 30px target (WCAG 2.5.8 asks for 24).
 const linkClass =
-  'text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)] transition-colors hover:text-[var(--color-accent)]';
+  'inline-block py-[4px] text-[15px] font-normal leading-[1.45] tracking-normal text-[var(--color-sub-text2)] transition-[color,opacity] duration-150 ease-out hover:text-[var(--color-accent-text)] active:opacity-50';
 
 function FooterColumn({
   title,
   links,
-  alignRight = false,
 }: {
   title: string;
-  links: { label: string; href: string }[];
-  alignRight?: boolean;
+  links: FooterLinkItem[];
 }) {
-  const alignClass = alignRight ? 'text-right' : '';
-
   return (
-    <div>
-      <p
-        className={`mb-3 text-[12px] font-normal leading-[1.2] tracking-[0.53px] text-[var(--color-sub-text1)] ${alignClass}`}
-      >
+    <div className="text-right">
+      <p className="mb-2 text-[12px] font-normal leading-[1.2] tracking-[0.06em] text-[var(--color-sub-text1)]">
         {title}
       </p>
-      <div className={`flex flex-col gap-1 ${alignRight ? 'items-end' : ''}`}>
+      <ul className="flex flex-col items-end">
         {links.map((link) => (
-          <Link
-            key={link.label}
-            href={link.href}
-            className={`${linkClass} ${alignClass}`}
-          >
-            {link.label}
-          </Link>
+          <li key={link.label}>
+            {link.href.startsWith('mailto:') ? (
+              <a href={link.href} className={linkClass}>
+                {link.label}
+              </a>
+            ) : (
+              <Link href={link.href} className={linkClass}>
+                {link.label}
+              </Link>
+            )}
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
+
+const COPYRIGHT_LINE = `${COPYRIGHT} All rights reserved.`;
 
 export function Footer() {
   return (
@@ -52,38 +66,34 @@ export function Footer() {
     >
       {/* ===== MOBILE FOOTER (<768px) ===== */}
       <div className="block md:hidden px-[22px] py-10">
-        {/* Logo */}
         <LogoFooter className="h-[48px] w-[50px] text-[var(--color-accent)] mb-8" />
 
-        {/* COMPANY */}
-        <div className="grid grid-cols-1 justify-items-end gap-8 mb-8">
-          <FooterColumn title="COMPANY" links={COMPANY_LINKS} alignRight />
+        <div className="mb-8 flex flex-wrap justify-end gap-x-12 gap-y-6">
+          <FooterColumn title="CONTACT" links={CONTACT_LINKS} />
+          <FooterColumn title="COMPANY" links={COMPANY_LINKS} />
         </div>
 
-        {/* Copyright */}
-        <p className="text-[12px] font-normal leading-[1.2] tracking-[-0.12px] text-[var(--color-sub-text1)]">
-          &copy; 2025 - 2026 1SIX Technologies Inc. All rights reserved.
+        <p className="text-[12px] font-normal leading-[1.4] tracking-[0.01em] text-[var(--color-sub-text1)]">
+          {COPYRIGHT_LINE}
         </p>
       </div>
 
       {/* ===== DESKTOP FOOTER (>=768px) — absolute positioned, Figma-accurate ===== */}
       <div className="hidden md:block relative mx-auto h-[304px] w-full max-w-[1440px]">
-        {/* Logo */}
         <div className="absolute" style={{ left: '3.33%', top: '10.53%' }}>
           <LogoFooter className="h-[48px] w-[50px] text-[var(--color-accent)]" />
         </div>
 
-        {/* Copyright */}
         <p
-          className="absolute text-[12px] font-normal leading-[1.2] tracking-[-0.12px] text-[var(--color-sub-text1)]"
+          className="absolute text-[12px] font-normal leading-[1.4] tracking-[0.01em] text-[var(--color-sub-text1)]"
           style={{ left: '3.33%', top: '86.84%' }}
         >
-          &copy; 2025 - 2026 1SIX Technologies Inc. All rights reserved.
+          {COPYRIGHT_LINE}
         </p>
 
-        {/* COMPANY */}
-        <div className="absolute right-[3.33%] top-[10.53%]">
-          <FooterColumn title="COMPANY" links={COMPANY_LINKS} alignRight />
+        <div className="absolute right-[3.33%] top-[10.53%] flex gap-16">
+          <FooterColumn title="CONTACT" links={CONTACT_LINKS} />
+          <FooterColumn title="COMPANY" links={COMPANY_LINKS} />
         </div>
       </div>
     </footer>

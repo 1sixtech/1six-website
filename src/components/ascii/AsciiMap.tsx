@@ -3,8 +3,10 @@
 import { useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import {
   getContainedMapScale,
+  getMapGlyphs,
   MAP_PLANE_HEIGHT,
   MAP_PLANE_WIDTH,
 } from './mapGeometry';
@@ -46,6 +48,8 @@ export function AsciiMapCanvas() {
     getIsMobile,
     getServerIsMobile,
   );
+  // Glyph pitch and weight by layout and pixel ratio (see mapGeometry).
+  const glyphs = getMapGlyphs(isMobile, useDevicePixelRatio());
 
   return (
     <AsciiCanvas
@@ -53,7 +57,7 @@ export function AsciiMapCanvas() {
       textureType="image"
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"
-      mosaicSize={isMobile ? 7 : 9}
+      mosaicSize={glyphs.cell}
       shape="plane"
       orthographic
       cellCount={3}
@@ -66,6 +70,17 @@ export function AsciiMapCanvas() {
       maxBrightness={76}
       planeWidth={MAP_PLANE_WIDTH}
       planeHeight={MAP_PLANE_HEIGHT}
+      // The atlas glyphs are 666px each: nearest-sampled into 5-6px cells on
+      // a 1x canvas and stretched 2-3x by a phone or Retina screen, they broke
+      // up and blurred. Output at up to 2x the CSS size (the scene target
+      // stays at CSS pixels), draw each glyph at its exact pixel coverage,
+      // and lift the strokes thin cells leave faint.
+      pixelRatioCap={2}
+      smoothCells
+      cellGain={glyphs.gain}
+      // A still image: redraw on the noise ticks (9 a second), not on every
+      // frame of a 120-240 Hz display.
+      renderOnDemand
       preloadKey="map"
       eager
     />

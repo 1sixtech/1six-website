@@ -3,7 +3,6 @@ import { ThesisSection } from '@/components/home/ThesisSection';
 import { ThesisGraph } from '@/components/home/ThesisGraph';
 import { ProductsHeading } from '@/components/home/ProductsHeading';
 import { ProductMap } from '@/components/home/ProductMap';
-import { ProductCard } from '@/components/home/ProductCard';
 import { ScrollRevealWrapper } from '@/components/ui/ScrollRevealWrapper';
 import { ScrollToTop } from '@/components/ui/ScrollToTop';
 
@@ -15,15 +14,12 @@ export default function HomePage() {
       <ThesisSection />
       <ThesisGraph />
 
-      <ScrollRevealWrapper y={30} duration={0.8}>
+      <ScrollRevealWrapper>
         <ProductsHeading />
       </ScrollRevealWrapper>
 
+      {/* Closes the page: the ASCII map with "the next 84%" as its caption */}
       <ProductMap />
-
-      <div className="h-[100px] md:h-[140px]" />
-
-      {/* Insight section hidden until content is ready */}
     </>
   );
 }

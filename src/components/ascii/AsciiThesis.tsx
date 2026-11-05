@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useTheme } from '@/components/providers/ThemeProvider';
 
 const AsciiCanvas = dynamic(
   () => import('./AsciiCanvas').then((mod) => ({ default: mod.AsciiCanvas })),
@@ -23,13 +24,21 @@ interface AsciiThesisProps {
 
 /** Thesis inline ASCII art — flat plane, mouse avoid */
 export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
+  const { theme } = useTheme();
   const config = THESIS_ASCII_CONFIG[stateNumber];
   if (!config) return null;
+
+  // Light: the filled-cell sheet prints each tile as a halftone square on the
+  // card. Dark: those light fills read as white stickers on the charcoal card,
+  // so dark uses the transparent dark sheet (same 12x3 layout as F_4-1).
+  const cellUrl = theme === 'dark'
+    ? '/resource/Monotone Cell F_5-1.png'
+    : '/resource/Monotone Cell F_4-1.png';
 
   return (
     <AsciiCanvas
       textureUrl={config.textureUrl}
-      mosaicCellUrl="/resource/Monotone Cell F_4-1.png"
+      mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"
       mosaicSize={9}
       shape="plane"

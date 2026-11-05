@@ -34,6 +34,9 @@ export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
       planeWidth={4}
       planeHeight={4}
       renderScale={2.4}
+      // Reduced motion shows the source video still: on the frame where the
+      // "16" faces the viewer.
+      fallbackFrameTime={0.2}
       onReady={onReady}
     />
   );
