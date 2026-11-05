@@ -198,8 +198,11 @@ export function AsciiCanvas({
   // AscMosaic.setVideoPlaying for why leaving every homepage video decoding
   // at once breaks ASCII rendering on memory-constrained iOS devices.
   const [isOnScreen, setIsOnScreen] = useState(true);
-  // WebGL could not start (no context, a failed init): show the source still.
+  // WebGL could not start (no context, a failed init): show the source still,
+  // for the rest of this mount. The ref keeps later inits (a theme or pixel
+  // ratio change) from building a canvas inside the fallback.
   const [failed, setFailed] = useState(false);
+  const failedRef = useRef(false);
   // The latest init request. A queued init that a newer one superseded (a
   // prop change while it waited its turn) skips, so the newest props build.
   const initTokenRef = useRef(0);
@@ -264,7 +267,7 @@ export function AsciiCanvas({
   // Initialize/destroy AscMosaic based on visibility
   const initMosaic = useCallback(async (token: number) => {
     // Superseded while it waited in the queue: the newer request builds.
-    if (token !== initTokenRef.current) return;
+    if (token !== initTokenRef.current || failedRef.current) return;
     const container = containerRef.current;
     if (!container || mosaicRef.current || prefersReducedMotion) return;
     if (!mountedRef.current) return; // Component unmounted while queued
@@ -451,6 +454,7 @@ export function AsciiCanvas({
       if (!superseded) {
         // WebGL could not start here: show the source itself, and let the
         // caller reveal it as it would have revealed the mosaic.
+        failedRef.current = true;
         setFailed(true);
         onReady?.();
       }
@@ -513,9 +517,12 @@ export function AsciiCanvas({
   // is motion.
   if (prefersReducedMotion || failed) {
     const isVideo = resolvedTextureType === 'video';
+    // data-ascii-still lets a page blend the source media into its ground
+    // (globals.css, about.css), whichever of the two put it here.
     return (
       <div
         ref={containerRef}
+        data-ascii-still=""
         className={`relative overflow-hidden ${className}`}
         style={{ width, height, backgroundColor }}
       >

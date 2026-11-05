@@ -212,28 +212,27 @@ body {
   transform: scaleX(1);
 }
 
-/* Home world map under reduced motion: AsciiCanvas shows the source image
-   instead of the mosaic, and its ground is white. On a phone the map lies on
-   the page itself, so blend it in rather than print a pale box: multiply on
-   light, inverted and screened on dark. The box carries the ground it sits
-   on (page on a phone, panel on desktop) as the blend backdrop. */
-@media (prefers-reduced-motion: reduce) {
-  .world-map-canvas {
-    background-color: var(--color-bg);
-  }
-
-  .world-map-canvas img {
-    mix-blend-mode: multiply;
-  }
-
-  [data-theme='dark'] .world-map-canvas img {
-    filter: grayscale(1) invert(1);
-    mix-blend-mode: screen;
-  }
+/* Home world map as a still (reduced motion, or no WebGL): AsciiCanvas shows
+   the source image instead of the mosaic, and its ground is white. On a phone
+   the map lies on the page itself, so blend it in rather than print a pale
+   box: multiply on light, inverted and screened on dark. The still's box
+   carries the ground it sits on (page on a phone, panel on desktop) as the
+   blend backdrop. */
+.world-map-canvas [data-ascii-still] {
+  background-color: var(--color-bg);
 }
 
-@media (prefers-reduced-motion: reduce) and (min-width: 768px) {
-  .world-map-canvas {
+.world-map-canvas [data-ascii-still] img {
+  mix-blend-mode: multiply;
+}
+
+[data-theme='dark'] .world-map-canvas [data-ascii-still] img {
+  filter: grayscale(1) invert(1);
+  mix-blend-mode: screen;
+}
+
+@media (min-width: 768px) {
+  .world-map-canvas [data-ascii-still] {
     background-color: var(--color-card);
   }
 }

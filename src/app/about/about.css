@@ -268,6 +268,28 @@
   }
 }
 
+/* The mark as a still (reduced motion, or no WebGL): AsciiCanvas shows its
+   source video, paused on the frame where the 16 faces the viewer
+   (AsciiTeamSymbol). The video has a white ground, so blend it into the page
+   instead of letting it read as a pale box: multiply on light, invert and
+   screen on dark. The still's own box carries the page color as the blend
+   backdrop. It sits inside the ink layer, whose fill mask isolates blending,
+   so the blend survives the mask and the fill dims the still as it does the
+   glyphs. */
+.crossing-mark [data-ascii-still] {
+  background-color: var(--color-bg);
+}
+
+.crossing-mark [data-ascii-still] video {
+  opacity: 0.6;
+  mix-blend-mode: multiply;
+}
+
+[data-theme='dark'] .crossing-mark [data-ascii-still] video {
+  filter: grayscale(1) invert(1);
+  mix-blend-mode: screen;
+}
+
 /* ── Bands ──
    Each section opens with its head: the rule, in the title's own ink, a
    tier above the hairlines inside the lists, then the title close beneath
@@ -740,30 +762,6 @@
 
   .crossing-mark__level {
     display: none;
-  }
-
-  /* AsciiCanvas shows its source video here, still, on the frame where
-     the 16 faces the viewer (AsciiTeamSymbol). The video has a white ground, so blend it into the page
-     instead of letting it read as a pale box: multiply on light, invert and
-     screen on dark. The mark carries the page color as the blend backdrop,
-     and the full fill needs no mask (which would isolate the blend). */
-  .crossing-mark {
-    background-color: var(--color-bg);
-  }
-
-  .crossing-mark__ink {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-
-  .crossing-mark video {
-    opacity: 0.6;
-    mix-blend-mode: multiply;
-  }
-
-  [data-theme='dark'] .crossing-mark video {
-    filter: grayscale(1) invert(1);
-    mix-blend-mode: screen;
   }
 }
 
