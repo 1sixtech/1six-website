@@ -175,7 +175,9 @@ export function isSafeLinkTarget(href: string): boolean {
  * and loses its link. A script slipped into an article cannot run on the
  * site. Markdown itself renders as before. (Image sources need no check:
  * one that is not an http(s) URL or a site path is rewritten under the
- * article's own folder below, and a figure's link reuses it.)
+ * article's own folder below, and a figure's link reuses it.) renderBody
+ * then checks the result against what this renderer can emit
+ * (unsafeArticleHtml), and refuses to publish anything else.
  */
 const markdown = new Marked({
   async: false,
@@ -183,6 +185,15 @@ const markdown = new Marked({
   renderer: {
     html({ text }) {
       return escapeHtml(text);
+    },
+    // After an inline <pre>, <code>, <kbd> or <script> tag, marked keeps the
+    // text that follows raw (escaped: true), expecting the tag itself to be
+    // emitted as markup. Here the tag is shown as text, so that text is too.
+    text(token) {
+      if ('escaped' in token && token.escaped && !('tokens' in token && token.tokens)) {
+        return escapeHtml(token.text);
+      }
+      return false;
     },
     link(token) {
       if (isSafeLinkTarget(token.href)) return false; // marked's own rendering
@@ -211,6 +222,53 @@ const ENLARGE_ICON =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false">' +
   '<path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/>' +
   '</svg></span>';
+
+/**
+ * The tags and attributes an article's HTML can hold: what marked's GFM
+ * renderer emits (marked 18, its Renderer class), plus the ids, classes,
+ * figure links, image sizes and enlarge icon renderBody adds.
+ */
+const ARTICLE_TAGS = new Set([
+  'a', 'blockquote', 'br', 'code', 'del', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'img',
+  'input', 'li', 'ol', 'p', 'path', 'pre', 'span', 'strong', 'svg', 'table', 'tbody', 'td', 'th', 'thead',
+  'tr', 'ul',
+]);
+const ARTICLE_ATTRIBUTES = new Set([
+  'align', 'alt', 'aria-hidden', 'aria-label', 'checked', 'class', 'd', 'decoding', 'disabled', 'fill',
+  'focusable', 'height', 'href', 'id', 'loading', 'rel', 'src', 'start', 'stroke', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-width', 'target', 'title', 'type', 'viewbox', 'width',
+]);
+/** A start or end tag; a quoted attribute value may hold ">". */
+const HTML_TAG = /<(\/?)([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^"'>])*)>/gi;
+
+/**
+ * The first thing in an article's rendered HTML that its renderer never
+ * emits, or null: a tag or attribute outside the lists above (an event
+ * handler, a <script>, an <iframe>, a style), an unquoted value, a "<" that
+ * opens no tag, or a link or image that isSafeLinkTarget refuses. The last
+ * line of defence for untrusted articles: whatever a new way through
+ * marked's parser produces, it is not on these lists.
+ */
+export function unsafeArticleHtml(html: string): string | null {
+  let end = 0;
+  for (const match of html.matchAll(HTML_TAG)) {
+    if (html.slice(end, match.index).includes('<')) return 'a "<" that opens no tag';
+    end = match.index + match[0].length;
+    const [tag, closing, name, attributes] = match;
+    if (!ARTICLE_TAGS.has(name.toLowerCase())) return tag;
+    // With the quoted values gone, only names, "=" and separators may remain.
+    const names = attributes.replace(/"[^"]*"|'[^']*'/g, ' ').split(/[\s/]+/).filter(Boolean);
+    if (closing && names.length > 0) return tag;
+    for (const attribute of names) {
+      const known = /^[a-z][a-z-]*=?$/i.test(attribute) && ARTICLE_ATTRIBUTES.has(attribute.replace(/=$/, '').toLowerCase());
+      if (!known) return tag;
+    }
+    for (const [, url] of attributes.matchAll(/\b(?:href|src)\s*=\s*"([^"]*)"/gi)) {
+      if (!isSafeLinkTarget(url)) return tag;
+    }
+  }
+  return html.slice(end).includes('<') ? 'a "<" that opens no tag' : null;
+}
 
 function renderBody(slug: string, body: string): { html: string; headings: ResearchHeading[] } {
   const parsed = markdown.parse(body) as string;
@@ -266,6 +324,11 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
   html = html.replace(/<table>/g, '<div class="table-scroll"><table>');
   html = html.replace(/<\/table>/g, '</table></div>');
 
+  // Fail the build rather than publish markup this renderer cannot produce.
+  const unsafe = unsafeArticleHtml(html);
+  if (unsafe) {
+    throw new Error(`research: ${slug} rendered ${unsafe.slice(0, 160)}, which the article renderer never emits; refusing to publish it.`);
+  }
   return { html, headings };
 }
 
