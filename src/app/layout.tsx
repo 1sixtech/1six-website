@@ -38,7 +38,8 @@ export const metadata: Metadata = {
   description:
     'The next wave of global finance — built on behavior, not hope.',
 
-  // Products stay off the site for now, metadata included.
+  // Products stay off the site for now, metadata included (the JSON-LD below
+  // lists only the company's own profiles).
   keywords: [
     '1SIX',
     '1SIX Technologies',
@@ -111,11 +112,7 @@ const organizationJsonLd = {
     'The next wave of global finance — built on behavior, not hope.',
   sameAs: [
     'https://x.com/1sixtech',
-    'https://www.youtube.com/@nevada-app',
     'https://discord.gg/wR4srtyhuU',
-    'https://www.threads.com/@live.nevada.app',
-    'https://www.instagram.com/live.nevada.app',
-    'https://www.tiktok.com/@live.nevada.app',
   ],
 };
 
