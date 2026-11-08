@@ -3,6 +3,18 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.1.0] - 2026-11-08
+
+### Fixed
+
+- Mobile Thesis holds its position after a fast flick on iOS 27, where an instant scroll request no longer stops native momentum. The seven slides, upward re-entry, and downward exit cooldown retain their existing behavior.
+- Leaving the first slide while the viewport is still settling no longer pulls the page back into the last slide.
+- Selecting Thesis from its own menu aligns the captured section instead of scrolling to Hero with capture still active.
+
+### Tests
+
+- Added component-effect regression tests for continued momentum, menu scroll-lock coordination, edge exits, and immediate forward re-entry.
+
 ## [0.3.0.0] - 2026-11-08
 
 Meet the company first, explore the thesis, and browse the team's writing.
