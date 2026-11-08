@@ -241,8 +241,9 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Tests cover pure logic, article safety, and actual crossing/intro effects with
-  controlled dependencies. There is no DOM test package or in-repo browser runner; use gstack `/browse`
+  stripped natively). Tests cover pure logic, article safety, and actual crossing, intro, mobile
+  capture, and header navigation effects with controlled dependencies. There is no DOM test package
+  or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 
 ## Key Dependencies
@@ -273,7 +274,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
 - [TODOS.md](TODOS.md): remaining work and completed release items.
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
-- [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): historical scroll decisions and regressions (April 2026).
+- [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
 - [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.
 - [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md): synchronized project instructions.
