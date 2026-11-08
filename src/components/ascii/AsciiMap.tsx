@@ -81,7 +81,6 @@ export function AsciiMapCanvas() {
       // A still image: redraw on the noise ticks (9 a second), not on every
       // frame of a 120-240 Hz display.
       renderOnDemand
-      preloadKey="map"
       eager
     />
   );

@@ -80,6 +80,7 @@ export class AsciiMosaicFilter {
   private instancedMesh: THREE.InstancedMesh | null = null;
   private material: THREE.ShaderMaterial | null = null;
   private atlasResult!: MosaicAtlasResult;
+  private atlasReady: boolean = false;
   private mosaicSize: number;
   private noiseIntensity: number;
   private noiseFPS: number;
@@ -315,10 +316,9 @@ export class AsciiMosaicFilter {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.scene = new THREE.Scene();
 
-    // The mesh is built at once. In smoothCells mode it starts on an empty
-    // placeholder atlas, so the filter is ready (and the canvas can show)
-    // without waiting for the atlas download; the glyphs appear when the
-    // coverage atlas is swapped in.
+    // Build the mesh immediately, but do not report readiness until real
+    // atlas data arrives. A texture handle or empty coverage placeholder
+    // cannot draw glyphs and must not release a page's loading overlay.
     this.initAtlas(options);
     this.buildInstancedMesh(this.width, this.height);
   }
@@ -348,6 +348,7 @@ export class AsciiMosaicFilter {
       if (this.disposed) return;
       this.atlasImage = image;
       texture = this.buildCoverageAtlas(image, this.atlasResult.cellCount);
+      this.atlasReady = true;
     } catch (error) {
       if (this.disposed) return;
       // Fall back to the plain atlas rather than leave the canvas empty.
@@ -363,6 +364,8 @@ export class AsciiMosaicFilter {
     const texture = new THREE.TextureLoader().load(
       textureUrl,
       () => {
+        if (this.disposed) return;
+        this.atlasReady = true;
         texture.needsUpdate = true;
         this.frameDirty = true;
       },
@@ -718,7 +721,7 @@ export class AsciiMosaicFilter {
   }
 
   isReady(): boolean {
-    return !!(this.material && this.instancedMesh && this.atlasResult);
+    return !!(this.atlasReady && this.material && this.instancedMesh && this.atlasResult);
   }
 
   /**

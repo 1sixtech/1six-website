@@ -38,6 +38,9 @@ export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
       // "16" faces the viewer.
       fallbackFrameTime={0.2}
       onReady={onReady}
+      // The About intro clips the page. Initialize behind it rather than
+      // waiting for an intersection that cannot occur until reveal.
+      eager
     />
   );
 }

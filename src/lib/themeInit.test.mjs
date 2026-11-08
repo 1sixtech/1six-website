@@ -12,7 +12,7 @@ function runThemeInit({
   phone = false,
   reducedMotion = false,
   introSeen = false,
-  pathname = '/thesis',
+  pathname = '/',
   storageThrows = false,
 } = {}) {
   const storage = new Map(stored === null ? [] : [['theme', stored]]);
@@ -28,7 +28,7 @@ function runThemeInit({
       setItem: (key, value) => (guard(), storage.set(key, String(value))),
     },
     sessionStorage: {
-      getItem: (key) => (guard(), key === 'introSeen' && introSeen ? '1' : null),
+      getItem: (key) => (guard(), key === 'aboutIntroSeen' && introSeen ? '1' : null),
     },
     history: state.history,
     document: {
@@ -85,7 +85,7 @@ test('theme bootstrap: storage that refuses access still gets the device default
   assert.equal(runThemeInit({ storageThrows: true }).root.attributes['data-theme'], 'light');
 });
 
-test('intro bootstrap: Thesis locks and plays the intro once per session, unless motion is reduced', () => {
+test('intro bootstrap: About owns the logo loader; Thesis keeps only its scramble lock', () => {
   const first = runThemeInit();
   assert.ok(first.root.classes.has('intro-lock'));
   assert.equal(first.root.dataset.introActive, 'true');
@@ -94,14 +94,18 @@ test('intro bootstrap: Thesis locks and plays the intro once per session, unless
 
   for (const options of [{ introSeen: true }, { reducedMotion: true }]) {
     const { root } = runThemeInit(options);
-    assert.ok(root.classes.has('intro-lock'));
+    assert.equal(root.classes.has('intro-lock'), false);
     assert.equal(root.dataset.introSkip, 'true', JSON.stringify(options));
     assert.equal(root.dataset.introActive, undefined, JSON.stringify(options));
   }
 
-  const about = runThemeInit({ pathname: '/' });
-  assert.equal(about.root.classes.size, 0);
-  assert.deepEqual(about.root.dataset, {});
+  const thesis = runThemeInit({ pathname: '/thesis' });
+  assert.ok(thesis.root.classes.has('intro-lock'));
+  assert.deepEqual(thesis.root.dataset, {}, 'no company logo or circular mask on Thesis');
+
+  const writing = runThemeInit({ pathname: '/writing' });
+  assert.equal(writing.root.classes.size, 0);
+  assert.deepEqual(writing.root.dataset, {});
 
   // A page restored from the back-forward cache reloads, so the intro and
   // canvases start clean; a normal show does not.

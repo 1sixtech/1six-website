@@ -55,7 +55,6 @@ export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
       planeWidth={4}
       planeHeight={4}
       renderScale={4.5}
-      preloadKey={`thesis-${stateNumber}`}
       eager
     />
   );

@@ -15,8 +15,8 @@ export function Header() {
   const pathname = usePathname();
   const hasScrolled = useScrollReveal();
   // On the thesis route the header is hidden until first scroll (tied to the
-  // intro reveal experience). On all other routes it should be visible from
-  // first paint — there is no intro sequence to coordinate with.
+  // text scramble). Other routes show it immediately; About's logo overlay
+  // covers the header only during its first-visit loading sequence.
   const isThesisRoute = pathname === '/thesis';
   const isWritingRoute = pathname.startsWith('/writing');
   const isVisible = !isThesisRoute || hasScrolled;

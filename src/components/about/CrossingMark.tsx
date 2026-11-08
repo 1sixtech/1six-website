@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { AsciiTeamSymbol } from '@/components/ascii/AsciiTeamSymbol';
+import { markAboutMarkReady, resetAboutMarkReady } from '@/lib/introState';
 
 /**
  * The ASCII "16" mark and its fill. Purely decorative: the whole column is
- * hidden from assistive tech, and nothing in it gates content.
+ * hidden from assistive tech. Its first rendered frame readies the About
+ * loader; repeat visits and reduced motion show the page immediately.
  *
  * The fill is a mask on the mark's own ink, not a second canvas: below the
  * level the glyphs print at full strength, above it they sit at a dim
@@ -17,12 +19,28 @@ import { AsciiTeamSymbol } from '@/components/ascii/AsciiTeamSymbol';
  */
 export function CrossingMark() {
   const [ready, setReady] = useState(false);
+  const mountedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    resetAboutMarkReady();
+    return () => {
+      mountedRef.current = false;
+      resetAboutMarkReady();
+    };
+  }, []);
+
+  const handleReady = useCallback(() => {
+    if (!mountedRef.current) return;
+    setReady(true);
+    markAboutMarkReady();
+  }, []);
 
   return (
     <div className="crossing-aside" aria-hidden="true">
       <div className="crossing-mark" data-ready={ready ? 'true' : 'false'}>
         <div className="crossing-mark__ink">
-          <AsciiTeamSymbol onReady={() => setReady(true)} />
+          <AsciiTeamSymbol onReady={handleReady} />
         </div>
         <span className="crossing-mark__level">
           <span className="crossing-mark__count" data-crossing-count>16%</span>

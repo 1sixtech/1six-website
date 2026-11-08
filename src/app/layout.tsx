@@ -6,7 +6,7 @@ import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
-import { ThesisIntroMount } from '@/components/intro/ThesisIntroMount';
+import { PageEntry } from '@/components/intro/PageEntry';
 import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
 /**
@@ -152,7 +152,7 @@ export default function RootLayout({
           <main id="main-content">{children}</main>
           <Footer />
         </ThemeProvider>
-        <ThesisIntroMount />
+        <PageEntry />
         <Analytics />
       </body>
     </html>

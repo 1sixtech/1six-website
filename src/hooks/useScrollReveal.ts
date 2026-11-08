@@ -10,7 +10,7 @@ import { usePathname } from 'next/navigation';
  *
  * Resets on route change so the header visibility lifecycle restarts
  * when navigating between pages. Without the reset, navigating from
- * /about back to / leaves hasScrolled=true (Header never unmounts),
+ * About back to Thesis leaves hasScrolled=true (Header never unmounts),
  * which prevents the GSAP reveal effect from re-running and leaves
  * the header stuck at translateY(-100%).
  *
@@ -23,9 +23,9 @@ export function useScrollReveal(): boolean {
   const [isVisible, setIsVisible] = useState(false);
   const pathname = usePathname();
 
-  // Reset on route change. On non-home routes the header is always
-  // visible via the `!isHomeRoute` guard in Header.tsx, so this reset
-  // is a no-op there. On the home route it re-enables the scroll
+  // Reset on route change. Outside Thesis the header is always
+  // visible via the `!isThesisRoute` guard in Header.tsx.
+  // Returning to Thesis re-enables the scroll
   // listener so the header slide-in animation can fire again. Done while
   // rendering (React's pattern for adjusting state when a prop changes),
   // so the new route's first render already has it reset.
