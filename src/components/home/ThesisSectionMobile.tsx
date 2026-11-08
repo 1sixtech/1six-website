@@ -6,6 +6,7 @@ import { EffectFade } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { HASH_SCROLL_REQUEST_EVENT } from '@/lib/hashScroll';
 import { THESIS_STATES, TOTAL } from './thesisData';
+import { movedAwayFrom } from './captureSettle';
 
 import 'swiper/css';
 import 'swiper/css/effect-fade';
@@ -132,18 +133,16 @@ export function ThesisSectionMobile() {
   //      programmatic `window.scrollTo` while the compositor animation
   //      is running. Setting overflow:hidden is a layout change that
   //      synchronously cancels the animation so the scrollTo on the
-  //      next line can actually land. On iPhone the existing touchmove
-  //      preventDefault mechanism already blocks momentum — overflow:
-  //      hidden is additive there and doesn't conflict (iOS 16.3+
-  //      honours html-level overflow:hidden).
+  //      next line can actually land. On iPhone this blocks new page
+  //      gestures, but iOS 27 can keep an existing fling running after
+  //      an instant scrollTo. The captured onScroll branch settles it.
   //   2. window.scrollTo(sectionTopAbs) — snaps the viewport to the
   //      computed Thesis top. Works on both platforms now that
   //      Android's animation has been cancelled.
   //   3. Swiper slideTo — sets the correct starting slide.
-  //   4. document touchmove listener — keeps iPhone's
-  //      fullpage.js-pattern scroll block in place as a belt-and-
-  //      suspenders fallback against any future iOS version that
-  //      starts ignoring html overflow:hidden.
+  //   4. document touchmove listener — blocks page movement while a
+  //      finger is on the captured section. It cannot cancel momentum
+  //      after touchend, so it complements the captured scroll guard.
   const capture = useCallback((fromDirection: 'top' | 'bottom', sectionTopAbs: number) => {
     if (stateRef.current !== 'idle') return;
     stateRef.current = 'captured';
@@ -310,37 +309,22 @@ export function ThesisSectionMobile() {
   //     'bottom' + suspendCapture) for downward exits.
   //
   //   UP → Hero:
-  //     After release, smoothScrollToExit('up') animates from thesisTop
-  //     to 0. During this monotonically-decreasing scroll the forward-
-  //     crossing branch (which only runs on `currentScrollY > prevScrollY`)
-  //     is never entered, and the reverse branch requires
-  //     `prev > cachedTopAbs` which cannot hold when we start AT
-  //     cachedTopAbs and move upward from there. So the animation itself
-  //     cannot trigger any crossing — the previous cooldown was guarding
-  //     against a race that does not exist.
-  //
-  //     The bug this fix closes: after exiting upward, if the user
-  //     fast-scrolled back down within the 1200 ms suspend window
-  //     (extremely plausible — smooth scroll to Hero takes ~500 ms, user
-  //     reaction + fast swipe another ~300-500 ms, well inside the
-  //     window), the forward-crossing check's edge-triggered
-  //     `prev < cached && current >= cached` would fire once and be
-  //     silently rejected by the guard. There is no replay, so the
-  //     miss is permanent — Thesis slides past uncaptured until the next
-  //     reload. See the root-cause analysis that produced this fix.
-  //
-  //     Fix: release('up') leaves the suspend window alone (no new
-  //     cooldown) and passes null to stopCapture so the top sentinel is
-  //     not blocked either. Forward re-entry is immediately available
-  //     on the very next downward scroll event, which is the expected
-  //     behaviour for a user who deliberately reversed direction.
+  //     Keep forward/top re-entry available immediately, as in the final
+  //     April fix. Do not add a blanket suspend window or block the top.
+  //     Usually the exit starts exactly at Thesis top and needs no guard.
+  //     If iOS 27 is still settling a fling, however, it can start below
+  //     that top. Its upward exit then crosses the reverse-entry boundary.
+  //     Block only bottom/reverse capture in that case so the exit cannot
+  //     pull the user back to the last slide. Forward re-entry stays open.
   const release = useCallback((exitDirection: 'down' | 'up') => {
     if (stateRef.current !== 'captured') return;
     if (exitDirection === 'down') {
       stopCapture('bottom');
       suspendCapture();
     } else {
-      stopCapture(null);
+      const capturedTop = sectionTopAbsRef.current;
+      const exitingFromBelow = capturedTop != null && window.scrollY > capturedTop;
+      stopCapture(exitingFromBelow ? 'bottom' : null);
     }
   }, [stopCapture, suspendCapture]);
 
@@ -547,6 +531,17 @@ export function ThesisSectionMobile() {
       const currentScrollY = window.scrollY;
       const prevScrollY = prevScrollYRef.current;
       prevScrollYRef.current = currentScrollY;
+
+      if (stateRef.current === 'captured') {
+        const capturedTop = sectionTopAbsRef.current;
+        // iOS 27 preserves native momentum through the initial instant
+        // snap. An animated request interrupts that remaining fling.
+        // Do not restart the correction while it moves toward the target.
+        if (capturedTop != null && movedAwayFrom(capturedTop, prevScrollY, currentScrollY)) {
+          window.scrollTo({ top: capturedTop, behavior: 'smooth' });
+        }
+        return;
+      }
 
       // Pending-hash fallback: uses a fresh rect intentionally — hash nav
       // is not a momentum-driven scroll so the rect is stable. If this

@@ -691,3 +691,78 @@ Swiper issues #6691 and #7923 are open and unresolved. `touchReleaseOnEdges` has
 - Scroll-delta based reverse re-entry (do not re-introduce a bottom IntersectionObserver).
 - `blockedSentinel` + `captureSuspendedUntilRef` pair — they cover different dimensions, both are needed.
 - `ScrollToTop.tsx`'s hash-strip + `scrollTo(0, 0)` + poll sequence — this is the known fix for the GSAP ScrollTrigger pin race on desktop; re-enabling the native hash scroll will regress desktop.
+
+---
+
+## 11. iOS 27 momentum and the Thesis route move (2026-11-08)
+
+This section supplements the April record above. Its historical open issues and
+invariants describe that snapshot, not all the follow-up commits or today's routes.
+
+### History checked before changing capture
+
+The mobile capture implementation, Hero geometry, global capture CSS, hash-scroll
+helpers, and `ScrollToTop` were unchanged between the last release before the route
+move (`cb3bc8c`) and the About/Writing release (`669f9d7`). Later April fixes also
+matter: `574d454` preserves separate JavaScript and CSS touch gates and removes the
+upward exit's blanket suspension; `2406b7b` measures the absolute section position
+through the `offsetTop` chain; `29c451c` stabilizes mobile viewport geometry. Do not
+restore an earlier implementation from sections 1–10 without those follow-ups.
+
+### Root cause confirmed on native iOS
+
+The user reported iOS 27.0.1, in both Safari and Chrome, on direct loads and menu
+entry. An independent Claude Opus 5.5 review identified
+[WebKit 310169@main](https://commits.webkit.org/310169@main): instant `window.scrollTo`
+no longer interrupts native momentum on iOS. The same change appears in the
+[Safari 27.0 release notes](https://webkit.org/blog/18325/webkit-features-for-safari-27-0/)
+under scrolling, radar 41949531.
+
+An A/B test used the same local build and native UIKit touch gestures in dedicated
+iPhone 17 simulators, rather than desktop WebKit or JavaScript-generated scrolls:
+
+| Build / runtime | Thesis top | Final scrollY after the same fast flick | State |
+|---|---:|---:|---|
+| Before fix, iOS 26.5 | 714 | 714 | Captured, first slide |
+| Before fix, iOS 27.0 | 714 | 1331 | Still marked captured, but 617 px past its target |
+| After fix, iOS 27.0 | 714 | 714 | Captured, first slide |
+
+On iOS 27 the initial snap succeeds, then native deceleration keeps moving the
+viewport. `overflow: hidden` and `touchmove.preventDefault()` block new page
+gestures; they do not cancel a fling after the finger has lifted. Previously the
+captured scroll handler did nothing, leaving the page locked at the wrong position.
+
+### Fix and preserved behavior
+
+- While captured, request a smooth scroll to the cached section top only when the
+  viewport moves farther from that target. On native iOS 27 this interrupts the
+  remaining momentum. Do not restart a correction already moving toward its
+  target, and ignore subpixel noise. Keep the initial instant snap.
+- Continue using the offset cache during scrolling. Keep the menu-open guard before
+  updating the previous scroll position. No browser-version detection is needed.
+- Keep upward forward re-entry immediately available. An upward exit that starts
+  below the target while settling blocks only reverse/bottom capture, using the
+  existing directional timer, so the exit cannot recapture slide seven.
+- Retain the downward exit's 1200 ms suspension and bottom guard. Do not replay
+  crossings missed during that suspension.
+- Preserve Swiper's `allowTouchMove`, the uncaptured `touch-action: pan-y` override,
+  and the captured viewport height. Do not add a body-position lock or change the
+  gesture threshold.
+
+The route move also introduced a separate Header regression: selecting Thesis
+while already on `/thesis` scrolled to Hero without unmounting or releasing the
+captured slider. Same-route navigation now unlocks the menu, emits the existing
+hash-scroll request, and aligns `#thesis`. Cross-route navigation stays with Next.
+
+### Verification and limits
+
+The native iOS 27 simulator passed the complete 1→7→Graph→7→1→Hero→1 sequence,
+same-route menu selection, About→Thesis entry, and a drag held across the capture
+boundary before release. iOS 26.5 retained the first-entry lock. Component-effect
+tests cover drift in both directions, menu suppression, an exit during settling,
+immediate forward re-entry, and downward cooldown without delayed replay. Header
+tests execute the real hash helpers and preserve modified clicks and ordinary
+cross-route navigation. These tests failed against the respective unfixed code.
+
+Temporary opt-in diagnostics were removed before release. Native simulator results
+establish the iOS 27 behavior; they are not a claim of a physical iPhone 27.0.1 test.

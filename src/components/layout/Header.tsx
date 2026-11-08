@@ -8,6 +8,7 @@ import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute } from '@/lib/site';
+import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
 
 export function Header() {
   const headerRef = useRef<HTMLElement>(null);
@@ -86,13 +87,26 @@ export function Header() {
 
   // Release a mobile menu lock before Next.js scrolls the destination to
   // the top. Restoring the old position here would undo that navigation.
-  const handleNavClick = useCallback((event: React.MouseEvent) => {
+  const handleNavClick = useCallback((event: React.MouseEvent, href: string) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (pathname === '/thesis' && href === '/thesis') {
+      // A same-route Link would scroll to Hero without unmounting the
+      // captured mobile slider. Keep the original coordinated Thesis
+      // navigation: unlock the menu, notify capture, then align the section.
+      event.preventDefault();
+      manualUnlockRef.current = menuOpen;
+      unlockScroll(false);
+      setMenuOpen(false);
+      emitHashScrollRequest('thesis');
+      history.pushState(null, '', '#thesis');
+      scrollToHashTarget('thesis');
+      return;
+    }
     if (!menuOpen) return;
     manualUnlockRef.current = true;
     unlockScroll(false);
     setMenuOpen(false);
-  }, [menuOpen, unlockScroll]);
+  }, [pathname, menuOpen, unlockScroll]);
 
   useEffect(() => {
     if (!headerRef.current) return;
@@ -265,7 +279,7 @@ export function Header() {
                   href={item.href}
                   aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
                   className="nav-link relative py-4 text-[12px] font-normal leading-none tracking-[0.06em] text-[var(--color-text)] transition-opacity duration-150 ease-out hover:opacity-60 active:opacity-50"
-                  onClick={(e) => handleNavClick(e)}
+                  onClick={(e) => handleNavClick(e, item.href)}
                 >
                   {item.label}
                 </Link>
@@ -330,7 +344,7 @@ export function Header() {
                 data-menu-item
                 aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
                 className="py-2 text-[15px] font-normal tracking-[0.04em] uppercase text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50 aria-[current=page]:text-[var(--color-accent-text)]"
-                onClick={(e) => handleNavClick(e)}
+                onClick={(e) => handleNavClick(e, item.href)}
               >
                 {item.label}
               </Link>
