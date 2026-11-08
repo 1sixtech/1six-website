@@ -10,7 +10,6 @@ interface FooterLinkItem {
 const COMPANY_LINKS: FooterLinkItem[] = [
   ...NAV_ITEMS,
   { label: 'Investors', href: '/#investors' },
-  { label: 'Partnerships', href: '/#partnerships' },
 ];
 
 const CONTACT_LINKS: FooterLinkItem[] = [
@@ -36,7 +35,7 @@ function FooterColumn({
   links: FooterLinkItem[];
 }) {
   return (
-    <div className="text-right">
+    <div className="site-footer-column text-right">
       <p className="mb-2 text-[12px] font-normal leading-[1.2] tracking-[0.06em] text-[var(--color-sub-text1)]">
         {title}
       </p>
@@ -71,7 +70,7 @@ export function Footer() {
       <div className="block md:hidden px-[22px] py-10">
         <LogoFooter className="h-[48px] w-[50px] text-[var(--color-accent)] mb-8" />
 
-        <div className="mb-8 flex flex-wrap justify-end gap-x-12 gap-y-6">
+        <div className="site-footer-columns mb-8 flex flex-wrap justify-end gap-x-12 gap-y-6">
           <FooterColumn title="CONTACT" links={CONTACT_LINKS} />
           <FooterColumn title="SOCIAL" links={SOCIAL_LINKS} />
           <FooterColumn title="COMPANY" links={COMPANY_LINKS} />

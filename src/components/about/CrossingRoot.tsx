@@ -17,7 +17,6 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
     const meter = root.querySelector<HTMLElement>('.crossing-meter');
     const label = root.querySelector<HTMLElement>('[data-crossing-label-target]');
     const bands = Array.from(root.querySelectorAll<HTMLElement>('[data-crossing-band]'));
-    const titles = bands.map((band) => band.querySelector<HTMLElement>('h1, h2'));
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0;
     let start = 0;
@@ -42,19 +41,13 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
         lastCount = count;
       }
 
-      // On phones, name a section only after its heading passes the strip.
-      // A visible heading already tells the reader where they are.
+      // Keep a stable section cue beside the adoption/reading progress.
       if (!meter || !label || strip === 0) return;
-      let passed = -1;
-      let visibleTitle = false;
-      titles.forEach((title, index) => {
-        if (!title) return;
-        const rect = title.getBoundingClientRect();
-        if (rect.bottom <= strip) passed = index;
-        if (rect.bottom > strip && rect.top < window.innerHeight * 0.6) visibleTitle = true;
+      let current = 0;
+      bands.forEach((band, index) => {
+        if (band.getBoundingClientRect().top <= strip + 24) current = index;
       });
-      meter.dataset.title = visibleTitle || passed < 0 ? 'shown' : 'passed';
-      const name = bands[passed]?.dataset.crossingLabel;
+      const name = bands[current]?.dataset.crossingLabel;
       if (name && label.textContent !== name) label.textContent = name;
     };
 
@@ -65,11 +58,8 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
       const scroll = window.scrollY;
       start = root.getBoundingClientRect().top + scroll;
       finish = (end ?? root).getBoundingClientRect().bottom + scroll - window.innerHeight + 64;
-      const style = getComputedStyle(root);
-      const meterHeight = parseFloat(style.getPropertyValue('--crossing-meter-h')) || 0;
-      strip = meterHeight > 0
-        ? (parseFloat(style.getPropertyValue('--crossing-header')) || 0) + meterHeight
-        : 0;
+      const meterRect = meter?.getBoundingClientRect();
+      strip = meterRect && meterRect.height > 0 ? meterRect.bottom : 0;
       schedule();
     };
 
