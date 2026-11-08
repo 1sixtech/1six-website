@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, type RefObject } from 'react';
 import gsap from 'gsap';
 import * as videoPool from '@/lib/videoPool';
 import {
@@ -76,10 +76,10 @@ export function IntroOrchestrator({
   overlayRef,
   mainContentRef,
 }: IntroOrchestratorProps) {
-  const disposedRef = useRef(false);
-
   useEffect(() => {
-    disposedRef.current = false;
+    // Each effect generation owns its cancellation flag; StrictMode replay
+    // must never revive a previous setup's pending timers or microtasks.
+    let disposed = false;
     // Track the active reveal tween (clip-path or overlay fade) so the
     // cleanup can kill it if the orchestrator unmounts mid-reveal.
     let revealTween: gsap.core.Tween | null = null;
@@ -122,7 +122,7 @@ export function IntroOrchestrator({
     if (!introActive) {
       runReveal({ skipAnimation: true });
       return () => {
-        disposedRef.current = true;
+        disposed = true;
       };
     }
 
@@ -200,7 +200,7 @@ export function IntroOrchestrator({
       Promise.all([minTimer, webglReady]).then(() => 'ready' as const),
       hardCap,
     ]).then((reason) => {
-      if (disposedRef.current) return;
+      if (disposed) return;
       if (reason === 'hardcap') {
         const ready = getReadyKeys();
         console.warn('[intro] hardcap reached, forcing reveal', {
@@ -212,7 +212,7 @@ export function IntroOrchestrator({
     });
 
     return () => {
-      disposedRef.current = true;
+      disposed = true;
       window.removeEventListener('ascii:ready', onAsciiReady);
       fillTween.kill();
       revealTween?.kill();
@@ -242,7 +242,7 @@ export function IntroOrchestrator({
       // modes — this keeps the lock active during the hero scramble so the
       // user cannot scroll past "we haven't crossed the 16% yet." before
       // the 16% has finished scrambling. A route-leave safety net in
-      // HomeIntroMount clears a genuinely stuck lock if HeroSection never
+      // ThesisIntroMount clears a genuinely stuck lock if HeroSection never
       // unmounts normally (e.g. the user clicks Header About mid-scramble
       // in skip mode, which this review fix closes).
 
@@ -283,7 +283,7 @@ export function IntroOrchestrator({
         // by the time the microtask runs (second mount cycles through
         // cleanup + re-mount very fast in dev), skip the dispatch.
         queueMicrotask(() => {
-          if (disposedRef.current) return;
+          if (disposed) return;
           window.dispatchEvent(new CustomEvent('intro:revealed'));
           window.dispatchEvent(new CustomEvent('intro:done'));
         });
@@ -294,7 +294,7 @@ export function IntroOrchestrator({
       const overlay = overlayRef.current;
       if (!main || !overlay) {
         // Defensive fallback: refs should be populated by the parent
-        // HomeIntroMount before this effect runs. If they're null for any
+        // ThesisIntroMount before this effect runs. If they're null for any
         // reason, do NOT leave the intro stuck — drop the clip-path gate,
         // hide the overlay, mark seen, and dispatch both events so
         // downstream consumers can proceed. This path should never run in
@@ -305,13 +305,13 @@ export function IntroOrchestrator({
         // or its 2.5s safety fallback) in both modes; calling unlockScroll
         // from the defensive path would race HeroSection's scramble and let
         // the user scroll past "we haven't crossed the 16% yet." before the
-        // 16% has even rendered. The route-leave cleanup in HomeIntroMount
+        // 16% has even rendered. The route-leave cleanup in ThesisIntroMount
         // is the global safety net against a genuine stuck lock.
         removeCssGate();
         hideOverlayInstant();
         markSeen();
         queueMicrotask(() => {
-          if (disposedRef.current) return;
+          if (disposed) return;
           window.dispatchEvent(new CustomEvent('intro:revealed'));
           window.dispatchEvent(new CustomEvent('intro:done'));
         });
