@@ -3,6 +3,19 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.2.0] - 2026-11-08
+
+### Fixed
+
+- The company-logo fill loader now opens About, preparing its rotating 16 before revealing the first screen. Repeat visits and reduced motion skip the loader.
+- The mark initializes behind the loading mask, and readiness is reset when leaving the page. A slow or failed asset cannot leave the site permanently locked.
+- Mosaic readiness now waits for actual glyph-atlas data instead of an empty texture handle. Without WebGL, it waits for the replacement video frame or image to load.
+- Thesis enters directly with its existing text scramble, video warmup, and scroll capture. It no longer shows the company-logo loader.
+
+### Documentation
+
+- Recorded the page-entry ownership and regression checks in `docs/PAGE_ENTRY.md`, and synchronized the product and project instructions.
+
 ## [0.3.1.0] - 2026-11-08
 
 ### Fixed

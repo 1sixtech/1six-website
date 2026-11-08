@@ -766,3 +766,18 @@ cross-route navigation. These tests failed against the respective unfixed code.
 
 Temporary opt-in diagnostics were removed before release. Native simulator results
 establish the iOS 27 behavior; they are not a claim of a physical iPhone 27.0.1 test.
+
+---
+
+## 12. Company-logo loader moves to About (2026-11-08)
+
+After About became the landing page, the first screen's rotating 16 could still be
+loading when shown. The company-logo fill loader now belongs to `/` and waits on
+that mark. `PageEntry` keeps Thesis's text-scramble lock and its existing video
+warmup separate from the About loader. The scroll capture implementation, cached
+position math, touch gates, and directional cooldowns from section 11 are unchanged.
+
+The current entry ownership, bounded readiness wait, reduced-motion behavior, and
+regression checklist live in [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md). Earlier
+sections describe the loader where it lived at the time; they are not instructions
+to restore the old route coupling.
