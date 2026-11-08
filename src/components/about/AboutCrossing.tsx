@@ -1,12 +1,7 @@
 import { CrossingRoot } from './CrossingRoot';
 import { CrossingMark } from './CrossingMark';
 import { OnwardLink } from './OnwardLink';
-import { BACKERS, CONTACT_EMAIL, FIRMS, ORIGINS } from './aboutData';
-import type { ResearchEvidence } from './researchEvidence';
-
-interface AboutCrossingProps {
-  evidence: ResearchEvidence;
-}
+import { BACKERS, CONTACT_EMAIL, FIRMS, ORIGINS, PARTNERS } from './aboutData';
 
 interface NameListProps {
   names: string[];
@@ -39,11 +34,10 @@ function NameList({ names, stacked = false, className = '' }: NameListProps) {
 /**
  * About — "The crossing".
  *
- * The left third pins the ASCII "16" with CSS sticky while four bands scroll
- * past on the right. The mark starts 16% filled (the first 16%) and each
- * band carries a quarter of the next 84%, so it reads 100% at the contact.
+ * The left third pins the ASCII "16" with CSS sticky while the story scrolls
+ * past on the right. The mark starts 16% filled (the first 16%) and follows the scroll, so it reads 100% at the contact.
  */
-export function AboutCrossing({ evidence }: AboutCrossingProps) {
+export function AboutCrossing() {
   return (
     <CrossingRoot>
       {/* Mobile: the mark scrolls away, so the crossing rides under the
@@ -55,7 +49,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
         <span className="crossing-meter__label" data-crossing-label-target>
           about
         </span>
-        <span className="crossing-meter__count" />
+        <span className="crossing-meter__count" data-crossing-count>16%</span>
         <span className="crossing-meter__fill" />
       </div>
 
@@ -78,11 +72,33 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
                 ideals. we take action to make them real.
               </p>
               <p className="crossing-body">
-                we bring experience from Harvard, Ethereum, PhD programs, world-class
-                competitive programming (ICPC World Finals), special forces, and many
-                other uncommon paths of life to cross the first{' '}
+                we bring experience from Harvard College, Schwarzman Scholars, and
+                world-class competitive programming to cross the first{' '}
                 <span className="crossing-figure">16%</span>.
               </p>
+              <OnwardLink href="#products">what we build</OnwardLink>
+            </section>
+
+            <section
+              id="products"
+              tabIndex={-1}
+              className="crossing-band"
+              data-crossing-band="1"
+              data-crossing-label="products"
+              aria-labelledby="products-title"
+            >
+              <h2 id="products-title" className="crossing-heading">products.</h2>
+              <div className="crossing-product">
+                <p className="crossing-tag">01 / esports</p>
+                <a className="crossing-product__name" href="https://predict.everywhere.trade">
+                  <span>predict.</span><span>everywhere.trade</span>
+                </a>
+                <p className="crossing-body">An esports-focused prediction market.</p>
+                <a className="crossing-product__visit" href="https://predict.everywhere.trade">
+                  Visit website <span aria-hidden="true">↗</span>
+                </a>
+              </div>
+              <p className="crossing-product__coming">More Coming Soon</p>
               <OnwardLink href="#origins">where we come from</OnwardLink>
             </section>
 
@@ -90,7 +106,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               id="origins"
               tabIndex={-1}
               className="crossing-band"
-              data-crossing-band="1"
+              data-crossing-band="2"
               data-crossing-label="where we come from"
               aria-labelledby="origins-title"
             >
@@ -114,7 +130,7 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
               id="investors"
               tabIndex={-1}
               className="crossing-band"
-              data-crossing-band="2"
+              data-crossing-band="3"
               data-crossing-label="backed by"
               aria-labelledby="investors-title"
             >
@@ -133,65 +149,44 @@ export function AboutCrossing({ evidence }: AboutCrossingProps) {
                 <NameList names={FIRMS} className="crossing-firms__names" />
                 <p className="crossing-firms__more">and more</p>
               </div>
-              <OnwardLink href="#method">how we measure</OnwardLink>
+              <OnwardLink href="#partnerships">who we work with</OnwardLink>
             </section>
 
             <section
-              id="method"
+              id="partnerships"
               tabIndex={-1}
               className="crossing-band"
-              data-crossing-band="3"
-              data-crossing-label="we measure"
-              aria-labelledby="method-title"
+              data-crossing-band="4"
+              data-crossing-label="partnerships"
+              aria-labelledby="partnerships-title"
             >
-              <h2 id="method-title" className="crossing-heading">
-                we measure.
+              <h2 id="partnerships-title" className="crossing-heading">
+                partnerships.
               </h2>
-              <figure className="crossing-evidence">
-                {evidence.takeaways.length > 0 && (
-                  <blockquote cite={evidence.href}>
-                    <ul className="crossing-takeaways">
-                      {evidence.takeaways.map(({ label, text }) => (
-                        <li key={label || text}>
-                          {label && <strong>{label}</strong>} {text}
-                        </li>
-                      ))}
-                    </ul>
-                  </blockquote>
-                )}
-                <figcaption className="crossing-evidence__source">
-                  <span className="crossing-meta">
-                    1six research{' '}
-                    <span aria-hidden="true">·</span>{' '}
-                    <time dateTime={evidence.date}>{evidence.dateLabel}</time>
-                  </span>
-                  <OnwardLink href={evidence.href} direction="right" cite className="crossing-source">
-                    {evidence.title}
-                  </OnwardLink>
-                </figcaption>
-              </figure>
+              <ul className="crossing-partners">
+                {PARTNERS.map((partner) => <li key={partner}>{partner}</li>)}
+              </ul>
+              <OnwardLink href="#contact">work with us</OnwardLink>
             </section>
 
             <section
               id="contact"
               tabIndex={-1}
               className="crossing-band"
-              data-crossing-band="4"
-              data-crossing-label="write to us"
+              data-crossing-band="5"
+              data-crossing-label="work with us"
               aria-labelledby="contact-title"
             >
               <h2 id="contact-title" className="crossing-heading">
-                write to us.
+                work with us.
               </h2>
-              <p className="crossing-body crossing-contact__lede">
-                investors and candidates reach 1six at
+              <p className="crossing-close">
+                we build for <span className="crossing-close__figure">the next 84%</span>.
+                <br />want to build together?
               </p>
               <a className="crossing-email" href={`mailto:${CONTACT_EMAIL}`}>
                 {CONTACT_EMAIL}
               </a>
-              <p className="crossing-close">
-                we build for <span className="crossing-close__figure">the next 84%</span>.
-              </p>
               <span className="crossing-end" data-crossing-end aria-hidden="true" />
             </section>
           </div>

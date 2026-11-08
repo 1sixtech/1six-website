@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
-import { getArticles } from '@/lib/research';
+import { getArticles } from '@/lib/writing';
+import { WRITERS } from '@/lib/writingCatalog';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://1six.tech';
@@ -16,22 +17,27 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
-      url: `${baseUrl}/about`,
+      url: `${baseUrl}/thesis`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.8,
     },
     {
-      url: `${baseUrl}/research`,
+      url: `${baseUrl}/writing`,
       lastModified: new Date(latestArticle.date),
       changeFrequency: 'weekly',
       priority: 0.8,
     },
     ...articles.map((article) => ({
-      url: `${baseUrl}/research/${article.slug}`,
+      url: `${baseUrl}/writing/${article.slug}`,
       lastModified: new Date(article.date),
       changeFrequency: 'yearly' as const,
       priority: 0.7,
+    })),
+    ...WRITERS.map((writer) => ({
+      url: `${baseUrl}/writing/authors/${writer.slug}`,
+      changeFrequency: 'monthly' as const,
+      priority: 0.6,
     })),
   ];
 }

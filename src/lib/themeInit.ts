@@ -7,7 +7,7 @@
  *   the page ground at first paint and, under a fixed header (the glass one
  *   on Home and About), keeps that tint for the life of the page: a light
  *   first frame left a light strip above the dark page.
- * - On Home, the intro lock and the content clip (globals.css) apply before
+ * - On Thesis, the intro lock and the content clip (globals.css) apply before
  *   anything can paint or scroll.
  *
  * next/script's `beforeInteractive` does not block in the App Router: it is
@@ -38,7 +38,7 @@ document.documentElement.setAttribute('data-theme', theme);
 
 if (history.scrollRestoration) history.scrollRestoration = 'manual';
 
-if (window.location.pathname === '/') {
+if (window.location.pathname === '/thesis') {
   document.documentElement.classList.add('intro-lock');
   var shouldIntro = true;
 

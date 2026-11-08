@@ -50,13 +50,6 @@ const nextConfig: NextConfig = {
     // leaves the client unhydrated behind the intro overlay.
     optimizePackageImports: ['three'],
   },
-  redirects: async () => [
-    {
-      source: '/team',
-      destination: '/about',
-      permanent: true,
-    },
-  ],
   headers: async () => [
     {
       source: '/(.*)',
@@ -86,14 +79,14 @@ const nextConfig: NextConfig = {
       ],
     },
     {
-      // Research assets are synced from another repository at build time
-      // (scripts/sync-research.mjs). Opened on its own (a figure's link, a
+      // Writing assets are synced from another repository at build time
+      // (scripts/sync-writing.mjs). Opened on its own (a figure's link, a
       // new tab) an SVG is a document: this policy lets it draw but never
       // run script, in a sandbox with no origin of its own. It replaces the
       // site-wide policy above for these paths only (the last matching rule
       // wins for a header); inside an <img> an SVG never runs script anyway.
-      // The article pages themselves (/research/:slug) do not match.
-      source: '/research/:slug/:path+',
+      // Article and author pages under /writing do not match this policy.
+      source: '/writing-assets/:path*',
       headers: [
         {
           key: 'Content-Security-Policy',

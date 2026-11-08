@@ -12,7 +12,7 @@ function runThemeInit({
   phone = false,
   reducedMotion = false,
   introSeen = false,
-  pathname = '/',
+  pathname = '/thesis',
   storageThrows = false,
 } = {}) {
   const storage = new Map(stored === null ? [] : [['theme', stored]]);
@@ -85,7 +85,7 @@ test('theme bootstrap: storage that refuses access still gets the device default
   assert.equal(runThemeInit({ storageThrows: true }).root.attributes['data-theme'], 'light');
 });
 
-test('intro bootstrap: Home locks and plays the intro once per session, unless motion is reduced', () => {
+test('intro bootstrap: Thesis locks and plays the intro once per session, unless motion is reduced', () => {
   const first = runThemeInit();
   assert.ok(first.root.classes.has('intro-lock'));
   assert.equal(first.root.dataset.introActive, 'true');
@@ -99,7 +99,7 @@ test('intro bootstrap: Home locks and plays the intro once per session, unless m
     assert.equal(root.dataset.introActive, undefined, JSON.stringify(options));
   }
 
-  const about = runThemeInit({ pathname: '/about' });
+  const about = runThemeInit({ pathname: '/' });
   assert.equal(about.root.classes.size, 0);
   assert.deepEqual(about.root.dataset, {});
 

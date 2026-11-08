@@ -5,45 +5,45 @@
    body 17/19, support 15 (captions, tables), label 13. Grays come from
    the theme tokens. */
 
-.research-meta {
+.writing-meta {
   color: var(--color-sub-text2);
 }
 
-.research-body {
+.writing-body {
   font-size: 17px;
   line-height: 1.55;
   letter-spacing: -0.009em;
 }
 
 @media (min-width: 768px) {
-  .research-body {
+  .writing-body {
     font-size: 19px;
     line-height: 1.6;
   }
 }
 
-.research-body > :first-child {
+.writing-body > :first-child {
   margin-top: 0;
 }
 
-.research-body p {
+.writing-body p {
   margin: 1.15em 0;
 }
 
 /* Prose keeps a measure of about 70 characters in the wider column
    (Pretendard averages 0.43em a character, so the cap is set in em);
    figures, tables and code keep the full width. */
-.research-body > :is(p, ul, ol):not(.figure) {
+.writing-body > :is(p, ul, ol):not(.figure) {
   max-width: 32em;
 }
 
-.research-body h2,
-.research-body h3 {
+.writing-body h2,
+.writing-body h3 {
   scroll-margin-top: 80px;
   text-wrap: balance;
 }
 
-.research-body h2 {
+.writing-body h2 {
   margin: 56px 0 12px;
   font-size: 24px;
   font-weight: 500;
@@ -51,7 +51,7 @@
   letter-spacing: -0.02em;
 }
 
-.research-body h3 {
+.writing-body h3 {
   margin: 40px 0 8px;
   font-size: 20px;
   font-weight: 600;
@@ -61,81 +61,81 @@
 
 /* A heading sits close over its own text: the text's top margin would
    otherwise leave as much air under the heading as between paragraphs. */
-.research-body :is(h2, h3) + * {
+.writing-body :is(h2, h3) + * {
   margin-top: 0;
 }
 
 @media (min-width: 768px) {
-  .research-body h2 {
+  .writing-body h2 {
     font-size: 28px;
   }
 
-  .research-body h3 {
+  .writing-body h3 {
     font-size: 22px;
   }
 }
 
-.research-body a {
+.writing-body a {
   color: inherit;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--color-text) 35%, transparent);
   text-underline-offset: 3px;
 }
 
-.research-body a:hover {
+.writing-body a:hover {
   color: var(--color-accent-text);
   text-decoration-color: var(--color-accent-text);
 }
 
 /* Press feedback on touch, where hover does not exist (the tap highlight is
    off site-wide). Figures give their own (below). */
-.research-body a:not(.research-figure):active {
+.writing-body a:not(.writing-figure):active {
   color: var(--color-accent-text);
   text-decoration-color: var(--color-accent-text);
 }
 
-.research-body strong {
+.writing-body strong {
   font-weight: 600;
 }
 
-.research-body ul,
-.research-body ol {
+.writing-body ul,
+.writing-body ol {
   margin: 1em 0;
   padding-left: 1.25em;
 }
 
-.research-body ul {
+.writing-body ul {
   list-style: disc;
 }
 
-.research-body ol {
+.writing-body ol {
   list-style: decimal;
 }
 
-.research-body li {
+.writing-body li {
   margin: 0.4em 0;
 }
 
-.research-body li::marker {
+.writing-body li::marker {
   color: var(--color-sub-text1);
 }
 
-.research-body ul.takeaways {
+.writing-body ul.takeaways {
   list-style: none;
   margin: 1.2em 0 1.6em;
   padding: 0.15em 0 0.15em 16px;
   border-left: 2px solid var(--color-accent);
 }
 
-.research-body ul.takeaways li {
+.writing-body ul.takeaways li {
   margin: 0.75em 0;
 }
 
-.research-body p.figure {
+.writing-body p.figure {
   margin: 1.7em 0 0;
 }
 
-.research-body img {
+.writing-body img {
   width: 100%;
   height: auto;
   background: #fff;
@@ -150,7 +150,7 @@
    keep their legend in that corner. On a desktop the labels read at
    10-14px, and the mark waits for a hover, on the chart. */
 
-.research-body a.research-figure {
+.writing-body a.writing-figure {
   position: relative;
   display: block;
   text-decoration: none;
@@ -158,26 +158,26 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.research-body a.research-figure:focus-visible {
+.writing-body a.writing-figure:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
 
 /* Focus handed back after a tap closed the viewer: no ring for a finger. */
-.research-body a.research-figure[data-pointer-focus]:focus-visible {
+.writing-body a.writing-figure[data-pointer-focus]:focus-visible {
   outline: none;
 }
 
-.research-figure img {
+.writing-figure img {
   transition: opacity 100ms ease-out;
 }
 
 /* Press feedback where hover does not exist. */
-.research-figure:active img {
+.writing-figure:active img {
   opacity: 0.85;
 }
 
-.research-figure__hint {
+.writing-figure__hint {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
@@ -187,7 +187,7 @@
 @media (hover: hover) and (pointer: fine) {
   /* On the chart's corner, revealed by a hover. The figures keep a white
      ground in both themes, so the mark does too. */
-  .research-figure__hint {
+  .writing-figure__hint {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -204,8 +204,8 @@
     transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);
   }
 
-  .research-figure:hover .research-figure__hint,
-  .research-figure:focus-visible .research-figure__hint {
+  .writing-figure:hover .writing-figure__hint,
+  .writing-figure:focus-visible .writing-figure__hint {
     opacity: 1;
   }
 }
@@ -302,7 +302,7 @@ html:has(.figure-viewer[open]) {
   outline-offset: 2px;
 }
 
-.research-body p.caption {
+.writing-body p.caption {
   margin-top: 0.6em;
   max-width: 32em;
   font-size: 15px;
@@ -311,12 +311,12 @@ html:has(.figure-viewer[open]) {
   color: var(--color-sub-text2);
 }
 
-.research-body .table-scroll {
+.writing-body .table-scroll {
   margin: 1.5em 0;
   overflow-x: auto;
 }
 
-.research-body table {
+.writing-body table {
   width: 100%;
   min-width: 420px;
   border-collapse: collapse;
@@ -326,25 +326,25 @@ html:has(.figure-viewer[open]) {
   font-variant-numeric: tabular-nums;
 }
 
-.research-body th,
-.research-body td {
+.writing-body th,
+.writing-body td {
   padding: 8px 16px 8px 0;
   vertical-align: top;
   border-bottom: 1px solid var(--color-divider);
 }
 
-.research-body th[align='right'],
-.research-body td[align='right'] {
+.writing-body th[align='right'],
+.writing-body td[align='right'] {
   text-align: right;
 }
 
-.research-body th {
+.writing-body th {
   font-weight: 500;
   color: var(--color-sub-text2);
 }
 
 /* Monospace keeps its own spacing: the body's tightening is for the sans. */
-.research-body :not(pre) > code {
+.writing-body :not(pre) > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.84em;
   letter-spacing: 0;
@@ -352,7 +352,7 @@ html:has(.figure-viewer[open]) {
   padding: 0.12em 0.35em;
 }
 
-.research-body pre {
+.writing-body pre {
   margin: 1.4em 0;
   padding: 16px 18px;
   overflow-x: auto;
@@ -360,8 +360,194 @@ html:has(.figure-viewer[open]) {
   background: var(--color-card);
 }
 
-.research-body pre code {
+.writing-body pre code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.55;
+}
+
+/* Writing index and authors: a quiet editorial list with explicit paths. */
+.writing-page-title {
+  font-size: clamp(36px, 5vw, 48px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.writing-page-description {
+  margin-top: 16px;
+  font-size: 19px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  color: var(--color-sub-text2);
+}
+
+.writing-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin-block: 40px 12px;
+}
+
+.writing-filters a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding-block: 8px;
+  border-bottom: 2px solid transparent;
+  font-size: 15px;
+  color: var(--color-sub-text2);
+  transition: color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.writing-filters a[aria-current='page'] {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.writing-filter-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-sub-text1);
+}
+
+.writing-list {
+  border-bottom: 1px solid var(--color-divider);
+  padding: 0;
+  list-style: none;
+}
+
+.writing-entry {
+  padding-block: 32px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.writing-entry__category {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-accent-text);
+}
+
+.writing-entry__title {
+  margin-top: 10px;
+  font-size: clamp(24px, 3vw, 30px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.writing-entry__byline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-sub-text2);
+}
+
+.writing-entry__byline a,
+.writing-author-link {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 4px;
+}
+
+.writing-entry__summary {
+  margin-top: 16px;
+  max-width: 32em;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: -0.009em;
+  color: var(--color-sub-text2);
+}
+
+.writing-read-more,
+.writing-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding-block: 8px;
+  font-size: 15px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 5px;
+}
+
+.writing-read-more { margin-top: 8px; }
+.writing-back { margin-bottom: 28px; }
+
+.writing-empty {
+  border-top: 1px solid var(--color-divider);
+  padding-block: 40px;
+  color: var(--color-sub-text2);
+  font-size: 17px;
+}
+
+.writing-profile { margin-bottom: 56px; }
+.writing-profile .writing-page-title { margin-top: 12px; }
+
+.writing-profile__bio {
+  margin-top: 24px;
+  max-width: 28em;
+  font-size: 20px;
+  line-height: 1.45;
+  letter-spacing: -0.015em;
+}
+
+.writing-profile__credentials {
+  margin-top: 20px;
+  font-size: 15px;
+  color: var(--color-sub-text2);
+}
+
+.writing-profile__heading {
+  margin-bottom: 24px;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.writing-list a,
+.writing-back,
+.writing-read-more,
+.writing-author-link,
+.writing-category-link {
+  transition: color 160ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .writing-list a:hover,
+  .writing-filters a:hover,
+  .writing-back:hover,
+  .writing-read-more:hover,
+  .writing-author-link:hover,
+  .writing-category-link:hover {
+    color: var(--color-accent-text);
+  }
+}
+
+.writing-list a:active,
+.writing-filters a:active,
+.writing-back:active,
+.writing-read-more:active { opacity: 0.6; }
+
+.writing-list a:focus-visible,
+.writing-filters a:focus-visible,
+.writing-back:focus-visible,
+.writing-read-more:focus-visible,
+.writing-author-link:focus-visible,
+.writing-category-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+@media (min-width: 768px) {
+  .writing-entry__summary { font-size: 19px; }
 }

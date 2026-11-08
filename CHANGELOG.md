@@ -3,6 +3,41 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.0.0] - 2026-11-08
+
+Meet the company first, explore the thesis, and browse the team's writing.
+
+### Added
+
+- Product introduction for predict.everywhere.trade, with its esports prediction-market description, website link, and more-to-come notice.
+- Partnerships with USA Esports Association, KeSPA, AESF, IESF, and Lighter.
+- Writing filters for Research, Op-ed, and Announcements, with shareable category URLs and clear empty states.
+- Clickable author names and a Dean N. profile with his ICPC Asia Regional First Prizes in 2021 and 2022 and his published writing.
+- A percentage beside the desktop ASCII mark's red line, synchronized with the mobile meter.
+- A company X link in the footer alongside navigation and contact details.
+
+### Changed
+
+- About is now the homepage. The existing thesis experience lives at `/thesis`, and Research becomes `/writing` throughout navigation, metadata, and the sitemap.
+- The home story proceeds through products, team origins, backers, partnerships, and a direct invitation to work together.
+- The crossing follows scroll continuously from 16% to 100%; reduced motion shows the completed state.
+- Team origins now feature Harvard College, Schwarzman Scholars, IOI Medalists, ICPC World Finalists, and Codeforces Grandmasters.
+- The thesis moves protocols from experiment to “everyday, everywhere.”
+- The footer copyright reads 2026–2027. Writing appears newest first and supports category metadata in the source articles.
+
+### Fixed
+
+- Thesis intro state now initializes on client navigation as well as direct loads. Leaving during the intro clears scroll locks and the page's circular reveal mask.
+- StrictMode replay no longer lets an obsolete intro effect launch another reveal.
+- Mobile menu closure restores the scroll position after a desktop-to-mobile transition.
+- Thesis device detection and callback ordering pass the React Compiler lint rules. Lint excludes generated agent worktrees and reports.
+
+### Removed
+
+- The “we measure” home section and its article-extraction dependency.
+- Needham & Co., special forces, and the protocol pedigree group.
+- Obsolete About and Research routes and the old Team redirect.
+
 ## [0.2.0.0] - 2026-11-05
 
 The fundraising pass: an About page built for investors, readable research on

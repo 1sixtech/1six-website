@@ -2,31 +2,23 @@
 
 import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import gsap from 'gsap';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
-import { CONTACT_EMAIL, COPYRIGHT, isCurrentRoute } from '@/lib/site';
-
-const NAV_ITEMS = [
-  { label: 'THESIS', href: '/#thesis' },
-  { label: 'RESEARCH', href: '/research' },
-  { label: 'ABOUT', href: '/about' },
-];
+import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute } from '@/lib/site';
 
 export function Header() {
   const headerRef = useRef<HTMLElement>(null);
-  const router = useRouter();
   const pathname = usePathname();
   const hasScrolled = useScrollReveal();
-  // On the home route the header is hidden until first scroll (tied to the
+  // On the thesis route the header is hidden until first scroll (tied to the
   // intro reveal experience). On all other routes it should be visible from
   // first paint — there is no intro sequence to coordinate with.
-  const isHomeRoute = pathname === '/';
-  const isResearchRoute = pathname.startsWith('/research');
-  const isVisible = !isHomeRoute || hasScrolled;
+  const isThesisRoute = pathname === '/thesis';
+  const isWritingRoute = pathname.startsWith('/writing');
+  const isVisible = !isThesisRoute || hasScrolled;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -92,57 +84,15 @@ export function Header() {
     }
   }, []);
 
-  /**
-   * Handle nav link clicks. For same-page hash links (/#thesis, /#products),
-   * use programmatic scrollTo which generates 'scroll' events, not
-   * 'wheel'/'touch' events, so it bypasses the ThesisSection's GSAP Observer.
-   */
-  const handleNavClick = useCallback((e: React.MouseEvent, href: string) => {
-    const hashMatch = href.match(/^\/?#(.+)$/);
-    if (!hashMatch) {
-      // Non-hash link (e.g. /about): unlock scroll WITHOUT restoring
-      // position, then close menu and let Next.js Link handle navigation.
-      //
-      // Why not just setMenuOpen(false) and let the effect handle unlock?
-      // The menuOpen effect calls unlockScroll(true), which queues a rAF
-      // that restores scrollY to the saved position. That rAF fires AFTER
-      // Next.js's scroll-to-top handler, overriding it — so the destination
-      // page starts at the old scroll position instead of the top.
-      //
-      // By manually unlocking here (matching the hash-link pattern), we
-      // skip the rAF restoration entirely. Next.js's own scroll-to-top
-      // takes effect uncontested.
-      //
-      // The menuOpen guard (dataset.menuOpen) is cleared immediately, same
-      // as the hash path. Any phantom scroll event from removing
-      // position:fixed that reaches ThesisSectionMobile before unmount is
-      // harmless — the component's unmount cleanup removes all scroll locks.
-      manualUnlockRef.current = true;
-      unlockScroll(false);
-      setMenuOpen(false);
-      return;
-    }
-
-    e.preventDefault();
-    const hash = hashMatch[1];
-
-    if (pathname === '/') {
-      // Manually unlock scroll (without restoring position) before
-      // closing menu, so the body is scrollable for scrollToHash.
-      // Mark as manual so the menuOpen effect doesn't double-unlock.
-      manualUnlockRef.current = true;
-      unlockScroll(false);
-      setMenuOpen(false);
-      emitHashScrollRequest(hash);
-      history.pushState(null, '', `#${hash}`);
-      requestAnimationFrame(() => {
-        scrollToHashTarget(hash);
-      });
-    } else {
-      setMenuOpen(false);
-      router.push(`/#${hash}`, { scroll: false });
-    }
-  }, [pathname, router, unlockScroll]);
+  // Release a mobile menu lock before Next.js scrolls the destination to
+  // the top. Restoring the old position here would undo that navigation.
+  const handleNavClick = useCallback((event: React.MouseEvent) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!menuOpen) return;
+    manualUnlockRef.current = true;
+    unlockScroll(false);
+    setMenuOpen(false);
+  }, [menuOpen, unlockScroll]);
 
   useEffect(() => {
     if (!headerRef.current) return;
@@ -152,8 +102,8 @@ export function Header() {
         duration: 0.4,
         ease: 'power2.out',
       });
-    } else if (isHomeRoute) {
-      // Returning to the home route after visiting another page:
+    } else if (isThesisRoute) {
+      // Returning to the thesis route after visiting another page:
       // useScrollReveal resets isVisible to false, React applies
       // style={{ transform: 'translateY(-100%)' }}, and we need GSAP's
       // internal transform cache to match so the next gsap.to({y:0})
@@ -161,7 +111,7 @@ export function Header() {
       // cached y=0 and producing a zero-length (invisible) tween.
       gsap.set(headerRef.current, { y: '-100%' });
     }
-  }, [isVisible, isHomeRoute]);
+  }, [isVisible, isThesisRoute]);
 
   // Menu open: the surface fades in, then the links settle in a short
   // stagger. Focus moves into the dialog so keyboard and screen-reader
@@ -232,9 +182,9 @@ export function Header() {
   // The restore only runs when a menu was actually open. On first mount
   // menuOpen is already false, and an unconditional unlockScroll(true)
   // scrolled to the saved Y (0) one frame after load — throwing away the
-  // browser's own scroll to a URL fragment, so a shared /about#investors or
-  // /research/...#results link always landed at the top. Home is unaffected
-  // either way: ScrollToTop strips and replays the hash there.
+  // browser's own scroll to a URL fragment, so a shared /#investors or
+  // /writing/...#results link always landed at the top. Thesis uses
+  // ScrollToTop to coordinate fragment navigation with its scroll pin.
   useEffect(() => {
     if (menuOpen) {
       wasMenuOpenRef.current = true;
@@ -284,9 +234,9 @@ export function Header() {
           can override them; the transform stays inline because GSAP owns it. */}
       <header
         ref={headerRef}
-        data-surface={isResearchRoute ? 'solid' : 'glass'}
+        data-surface={isWritingRoute ? 'solid' : 'glass'}
         className="site-header fixed top-0 left-0 right-0 z-50 h-[var(--site-header-h)]"
-        style={{ transform: isHomeRoute ? 'translateY(-100%)' : 'translateY(0)' }}
+        style={{ transform: isThesisRoute ? 'translateY(-100%)' : 'translateY(0)' }}
       >
         <div className="relative mx-auto h-full w-full max-w-[1440px]">
           {/* Logo: mobile left-[22px] / desktop left-[calc(4.17%+24.5px)].
@@ -315,7 +265,7 @@ export function Header() {
                   href={item.href}
                   aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
                   className="nav-link relative py-4 text-[12px] font-normal leading-none tracking-[0.06em] text-[var(--color-text)] transition-opacity duration-150 ease-out hover:opacity-60 active:opacity-50"
-                  onClick={(e) => handleNavClick(e, item.href)}
+                  onClick={(e) => handleNavClick(e)}
                 >
                   {item.label}
                 </Link>
@@ -380,7 +330,7 @@ export function Header() {
                 data-menu-item
                 aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
                 className="py-2 text-[15px] font-normal tracking-[0.04em] uppercase text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50 aria-[current=page]:text-[var(--color-accent-text)]"
-                onClick={(e) => handleNavClick(e, item.href)}
+                onClick={(e) => handleNavClick(e)}
               >
                 {item.label}
               </Link>

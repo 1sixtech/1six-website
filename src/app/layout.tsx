@@ -6,7 +6,7 @@ import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
-import { HomeIntroMount } from '@/components/intro/HomeIntroMount';
+import { ThesisIntroMount } from '@/components/intro/ThesisIntroMount';
 import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
 /**
@@ -38,8 +38,7 @@ export const metadata: Metadata = {
   description:
     'The next wave of global finance — built on behavior, not hope.',
 
-  // Products stay off the site for now, metadata included (the JSON-LD below
-  // lists only the company's own profiles).
+  // The corporate site connects the team, product, thesis, and writing.
   keywords: [
     '1SIX',
     '1SIX Technologies',
@@ -153,7 +152,7 @@ export default function RootLayout({
           <main id="main-content">{children}</main>
           <Footer />
         </ThemeProvider>
-        <HomeIntroMount />
+        <ThesisIntroMount />
         <Analytics />
       </body>
     </html>

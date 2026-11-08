@@ -4,25 +4,25 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-// research.ts reads content/research and public/ under the working directory,
+// writing.ts reads content/writing and public/ under the working directory,
 // which the build syncs from another repository: run it on a fixture instead.
 const SLUG = '001-fixture';
-const root = mkdtempSync(path.join(tmpdir(), 'research-test-'));
+const root = mkdtempSync(path.join(tmpdir(), 'writing-test-'));
 const write = (file, text) => {
   mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
   writeFileSync(path.join(root, file), text);
 };
 const svg = (attributes) => `<svg xmlns="http://www.w3.org/2000/svg" ${attributes}><rect width="1" height="1"/></svg>`;
-write(`public/research/${SLUG}/assets/chart.svg`, svg('viewBox="0 0 760 330" width="760" height="330"'));
-write(`public/research/${SLUG}/assets/stroked.svg`, svg('stroke-width="2" width="12.5" height="40"'));
-write(`public/research/${SLUG}/assets/fluid.svg`, svg('viewBox="0 0 10 10" width="100%" height="100%"'));
-write(`public/research/${SLUG}/top.svg`, svg('width="10" height="20"'));
+write(`public/writing-assets/${SLUG}/assets/chart.svg`, svg('viewBox="0 0 760 330" width="760" height="330"'));
+write(`public/writing-assets/${SLUG}/assets/stroked.svg`, svg('stroke-width="2" width="12.5" height="40"'));
+write(`public/writing-assets/${SLUG}/assets/fluid.svg`, svg('viewBox="0 0 10 10" width="100%" height="100%"'));
+write(`public/writing-assets/${SLUG}/top.svg`, svg('width="10" height="20"'));
 // Outside public/: a ../ path in the article must not reach it.
 write('outside.svg', svg('width="1234" height="5678"'));
 // A directory named like an SVG is not a file to read.
-mkdirSync(path.join(root, `public/research/${SLUG}/assets/folder.svg`), { recursive: true });
+mkdirSync(path.join(root, `public/writing-assets/${SLUG}/assets/folder.svg`), { recursive: true });
 write(
-  `content/research/${SLUG}/README.md`,
+  `content/writing/${SLUG}/README.md`,
   `---
 title: Fixture
 author: Tester
@@ -45,7 +45,7 @@ date: 2026-01-02
 
 ![Gone](assets/missing.svg)
 
-![Top](/research/${SLUG}/top.svg)
+![Top](/writing-assets/${SLUG}/top.svg)
 
 ![Say "hi"](assets/chart.svg)
 
@@ -79,7 +79,7 @@ An inline ![icon](assets/chart.svg) in a sentence, and [a source](https://exampl
 
 const cwd = process.cwd();
 process.chdir(root);
-const { getArticle, isSafeLinkTarget, unsafeArticleHtml } = await import('./research.ts');
+const { getArticle, isSafeLinkTarget, unsafeArticleHtml } = await import('./writing.ts');
 after(() => {
   process.chdir(cwd);
   rmSync(root, { recursive: true, force: true });
@@ -91,7 +91,7 @@ const imgTags = (html) => html.match(/<img\b[^>]*>/g) ?? [];
 /** Each figure link, with the image it wraps. */
 function figures(html) {
   return Array.from(
-    html.matchAll(/<p class="figure"><a class="research-figure"([^>]*)>(<img\b[^>]*>)(<span class="research-figure__hint" aria-hidden="true">[\s\S]*?<\/span>)<\/a><\/p>/g),
+    html.matchAll(/<p class="figure"><a class="writing-figure"([^>]*)>(<img\b[^>]*>)(<span class="writing-figure__hint" aria-hidden="true">[\s\S]*?<\/span>)<\/a><\/p>/g),
     ([, link, img, hint]) => ({ href: attr(link, 'href'), label: attr(link, 'aria-label'), target: attr(link, 'target'), img, hint }),
   );
 }
@@ -99,7 +99,7 @@ function figures(html) {
 test('an image alone in its paragraph becomes a figure that links to its own file', () => {
   const { html } = getArticle(SLUG);
   const found = figures(html);
-  const base = `/research/${SLUG}`;
+  const base = `/writing-assets/${SLUG}`;
 
   assert.deepEqual(
     found.map(({ href, label }) => [href, label]),
@@ -176,7 +176,7 @@ test('a link to anything but the web, mail, a #fragment or a relative path keeps
 });
 
 test('isSafeLinkTarget reads the scheme as a browser would', () => {
-  for (const safe of ['https://a.b', 'http://a.b', 'MAILTO:x@y.z', '#top', '/research', './x.md', 'x/y', '?q=1']) {
+  for (const safe of ['https://a.b', 'http://a.b', 'MAILTO:x@y.z', '#top', '/writing', './x.md', 'x/y', '?q=1']) {
     assert.equal(isSafeLinkTarget(safe), true, safe);
   }
   for (const unsafe of [
@@ -222,7 +222,7 @@ test('unsafeArticleHtml passes what the renderer emits and flags anything else',
     '<pre><code class="language-ts">let a = b &gt; c;\n</code></pre>\n<blockquote>\n<p>q</p>\n</blockquote>\n<hr>',
     '<ol start="3">\n<li><input checked="" disabled="" type="checkbox"> done</li>\n</ol>',
     '<div class="table-scroll"><table>\n<thead>\n<tr>\n<th align="center">a</th>\n</tr>\n</thead>\n</table></div>',
-    '<p class="figure"><a class="research-figure" href="/research/x/a.svg" aria-label="Enlarge figure: it&#39;s"><img loading="lazy" decoding="async" width="10" height="20" src="/research/x/a.svg" alt="it&#39;s"><span class="research-figure__hint" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 4h6v6"/></svg></span></a></p>',
+    '<p class="figure"><a class="writing-figure" href="/writing/x/a.svg" aria-label="Enlarge figure: it&#39;s"><img loading="lazy" decoding="async" width="10" height="20" src="/writing/x/a.svg" alt="it&#39;s"><span class="writing-figure__hint" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 4h6v6"/></svg></span></a></p>',
   ]) {
     assert.equal(unsafeArticleHtml(safe), null, safe);
   }
@@ -243,5 +243,33 @@ test('unsafeArticleHtml passes what the renderer emits and flags anything else',
     '<p>a < b</p>',
   ]) {
     assert.notEqual(unsafeArticleHtml(unsafe), null, unsafe);
+  }
+});
+
+test('publication metadata connects categories and authors and orders newest writing first', async () => {
+  const { getArticles } = await import('./writing.ts');
+  const samples = [
+    ['002-opinion', 'op-ed', '2026-02-01'],
+    ['003-news', 'announcements', '2026-01-15'],
+    ['004-opinion', 'OP-ED', '2026-02-01'],
+  ];
+  try {
+    for (const [slug, category, date] of samples) {
+      write(`content/writing/${slug}/README.md`, `---\ntitle: ${slug}\nauthor: Dean N.\ndate: ${date}\ncategory: ${category}\n---\n\nA published piece.`);
+    }
+    const opinion = getArticle('002-opinion');
+    assert.equal(opinion.category, 'op-ed');
+    assert.equal(opinion.authorSlug, 'dean-n');
+    assert.equal(getArticle('003-news').category, 'announcements');
+    assert.equal(getArticle('004-opinion').category, 'op-ed');
+    assert.equal(getArticle(SLUG).category, 'research');
+    assert.equal(getArticle(SLUG).authorSlug, null);
+    assert.deepEqual(getArticles().slice(0, 3).map((article) => article.slug), ['004-opinion', '002-opinion', '003-news']);
+    write('content/writing/005-invalid/README.md', '---\ntitle: Invalid\ncategory: oped\n---\n\nText.');
+    assert.throws(() => getArticle('005-invalid'), /Unknown writing category: oped/);
+  } finally {
+    for (const slug of ['002-opinion', '003-news', '004-opinion', '005-invalid']) {
+      rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
+    }
   }
 });

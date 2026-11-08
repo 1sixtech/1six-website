@@ -1,6 +1,6 @@
-import './research.css';
+import './writing.css';
 
-export default function ResearchLayout({
+export default function WritingLayout({
   children,
 }: {
   children: React.ReactNode;

@@ -24,7 +24,9 @@ export function CrossingMark() {
         <div className="crossing-mark__ink">
           <AsciiTeamSymbol onReady={() => setReady(true)} />
         </div>
-        <span className="crossing-mark__level" />
+        <span className="crossing-mark__level">
+          <span className="crossing-mark__count" data-crossing-count>16%</span>
+        </span>
       </div>
     </div>
   );
