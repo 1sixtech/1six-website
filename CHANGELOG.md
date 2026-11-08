@@ -31,7 +31,7 @@ Meet the company first, explore the thesis, and browse the team's writing.
 - StrictMode replay no longer lets an obsolete intro effect launch another reveal.
 - Mobile menu closure restores the scroll position after a desktop-to-mobile transition.
 - Thesis device detection and callback ordering pass the React Compiler lint rules. Lint excludes generated agent worktrees and reports.
-- Vercel uses the repository's package build script, so article-sync path changes cannot leave its dashboard build command pointing at a removed file.
+- Vercel uses the package build script through `vercel.json`, replacing the fixed command that pointed at the removed article-sync file.
 
 ### Removed
 

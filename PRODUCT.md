@@ -17,34 +17,39 @@ web
 
 ## Positioning
 
-"Adoption comes first": 1SIX designs from observed behavior (how people actually trade, watch, and engage) rather than ideology, to move internet-native protocols from experiment to default infrastructure. The company publishes its own measurements (Research) instead of adjectives.
+"Adoption comes first": 1SIX designs from observed behavior (how people actually trade, watch, and engage) rather than ideology, to move internet-native protocols from experiment to everyday, everywhere. Writing brings together the company's research, op-eds, and announcements; only published articles appear.
 
 ## Operating Context
 
 - The site supports fundraising conversations; it is not a sales funnel. Investors usually arrive through warm intros and decks, then use the site to check the story and the people.
-- Products stay off the site for now (confirmed 2026-11-04): no product names, screenshots, or links on any page. Copy about products must read honestly without naming one.
+- The November 2026 website brief authorizes a product introduction for predict.everywhere.trade: "An esports-focused prediction market", the provided https://predict.everywhere.trade link, and "More Coming Soon". The final logo has not been supplied, so the name appears as text. The provided domain did not resolve during release verification; do not claim the product is live or substitute an unconfirmed URL.
+- "powered by Lighter" is withheld at the owner's request. Lighter remains in the separately authorized partnership list.
 
 ## Capabilities and Constraints
 
-- Static marketing site on Next.js 16 / Vercel; copy lives in components; no CMS. Research articles sync at build time from the public `1sixtech/noctis-articles` repo.
-- The thesis scroll, intro sequence, and hero scramble logic carry a long bug history (THESIS_SCROLL_HISTORY.md, docs/PHASE5_GRID_PLAN.md): treat `ThesisSection.tsx`, `ThesisSectionMobile.tsx`, `thesisData.tsx`, `IntroOrchestrator.tsx`, `HeroSection.tsx`, and `hashScroll.ts` as frozen.
+- Static marketing site on Next.js 16 / Vercel; copy lives in components; no CMS. Writing syncs at build time from the public `1sixtech/noctis-articles` repo through `scripts/sync-writing.mjs`; `WRITING_GIT_REF` optionally selects a reviewed commit or tag (default `main`).
+- The thesis scroll, intro sequence, and hero scramble logic carry a long bug history ([scroll history](THESIS_SCROLL_HISTORY.md), [grid plan](docs/PHASE5_GRID_PLAN.md)). The November 2026 feedback authorized the route move, fifth-slide wording, lint fixes, and intro lifecycle fixes. Keep changes to `ThesisSection.tsx`, `ThesisSectionMobile.tsx`, `thesisData.tsx`, `IntroOrchestrator.tsx`, `HeroSection.tsx`, and `hashScroll.ts` focused and verify desktop/mobile capture, direct/client entry, repeat visits, and route-leave cleanup.
 - Contact: investors and candidates reach 1SIX at contact@1six.tech (confirmed 2026-11-04).
-- The homepage stays thesis-only (confirmed 2026-11-04): no proof block of research or backers on Home; copy is tightened and the world map is tied to "the next 84%".
-- The intro cadence (full logo intro once per tab session) and the Home header's reveal-on-first-scroll stay as they are (confirmed 2026-11-04).
+- About is the homepage at `/`: "we don't dream. we build.", products, origins, backers, partnerships, and "work with us", in that order. The ASCII "16" fills continuously from 16% to 100%, with a desktop percentage and a sticky mobile meter; reduced motion shows the complete state.
+- The existing thesis experience lives at `/thesis`, including the world map tied to "the next 84%". Its full logo intro runs once per tab session and its header reveals on first scroll. Other routes show the header immediately and must never inherit a thesis scroll lock or reveal mask.
+- Navigation is About (`/`), Thesis (`/thesis`), Writing (`/writing`). The old `/about`, `/research`, and `/team` routes are removed. The footer repeats the page links, contact@1six.tech, https://x.com/1sixtech, and the 2026–2027 copyright.
+- Writing has Research, Op-ed, and Announcements filters, shareable category URLs, independent author links, and useful empty states. Articles appear newest first. Missing category metadata defaults to Research; an unrecognized explicit category fails the build.
 
 ## Brand Commitments
 
 - Name: 1SIX (wordmark and titles), written "1six" in lowercase body copy; lowercase manifesto voice.
-- The team is presented collectively, without individual names (confirmed 2026-11-04).
+- The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction.
 - Accent #FF3700 on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes.
 - ASCII-mosaic WebGL imagery (desert, graph, "16" symbol, world map) is the visual signature.
 
 ## Evidence on Hand
 
 - Backers: Naval Ravikant, Charlie Songhurst, Ken Ng (Uniswap Foundation co-founder), Loi Luu (WBTC creator), Lemniscap, Lambda, "and more".
-- Team pedigree: MIT, Harvard, Tsinghua, Schwarzman Scholars, Ethereum Foundation, Starknet Foundation, ICPC World Finalists, Codeforces Grandmasters, Needham & Co., PhD programs, special forces.
-- Research: "How Hyperliquid data feed latency is measured" (Dean N., 30 Oct 2026) at /research.
-- Absent, never fabricate: individual names or bios, traction metrics, user counts, revenue, customer logos, testimonials, press, round size or terms, office locations.
+- Team origins: Harvard College and Schwarzman Scholars; IOI Medalists, ICPC World Finalists, and Codeforces Grandmasters. The older institution, protocol, finance, and special-forces claims are no longer part of the site.
+- Partnerships: USA Esports Association, KeSPA, AESF, IESF, and Lighter. These names are authorized; do not invent logo art or describe them as customers.
+- Research: "How Hyperliquid data feed latency is measured" (Dean N., 30 Oct 2026) at `/writing/001-hyperliquid-data-feed-latency`. The former "we measure" home section is removed; the article remains published.
+- Dean N.: First Prize, ICPC Asia Regional, 2021 and 2022, at `/writing/authors/dean-n`. His short bio describes his published work on financial infrastructure. Do not attribute the team's collective ICPC World Finalist credential to Dean.
+- Absent, never fabricate: additional names or bios, final product or partner logos, traction metrics, user counts, revenue, customer logos, testimonials, press, round size or terms, office locations.
 
 ## Product Principles
 
