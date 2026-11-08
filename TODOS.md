@@ -66,9 +66,11 @@ The original problem statements below describe the earlier release; each resolut
 
 **What:** Cover the first About visit while its rotating 16 loads, instead of waiting on Thesis assets after entering the site.
 
-**Resolution:** The logo loader belongs to About; its eager mark reports readiness from a rendered mosaic with loaded glyph data or a decoded fallback. The loader removes its own mask and lock. Thesis retains its independent text scramble and video warmup. Route cleanup and repeat/reduced-motion behavior have effect regression tests.
+**Resolution:** Originally the logo loader moved to About; its eager mark reports readiness from a rendered mosaic with loaded glyph data or a decoded fallback. The loader removes its own mask and lock. Thesis retains its independent text scramble and video warmup. Route cleanup and repeat/reduced-motion behavior have effect regression tests.
 
 **Completed:** v0.3.2.0 (2026-11-08)
+
+**Current behavior:** v0.3.3.0 extends the first visual entrance to About and Thesis, keeps Writing immediate, and adds non-blocking shared byte preparation. See [page entry](docs/PAGE_ENTRY.md).
 
 ### Fix the two lint errors in ThesisSection.tsx
 
