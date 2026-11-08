@@ -1,11 +1,11 @@
 {
 	"name": "1six-website",
 	"private": true,
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"type": "module",
 	"scripts": {
 		"dev": "next dev --turbopack",
-		"build": "node scripts/sync-research.mjs && next build",
+		"build": "node scripts/sync-writing.mjs && next build",
 		"start": "next start",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",

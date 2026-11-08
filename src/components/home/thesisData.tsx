@@ -156,7 +156,7 @@ export const THESIS_STATES: ThesisState[] = [
         <span> change that.</span>
         <br />
         <span>to move these protocols from experiment to </span>
-        <span className="text-[var(--color-accent)]">infrastructure.</span>
+        <span>everyday,</span><br /><span className="text-[var(--color-accent)]">everywhere.</span>
       </>
     ),
     mobileContent: (
@@ -166,7 +166,7 @@ export const THESIS_STATES: ThesisState[] = [
           we are here to change that.<br />to move these protocols
         </p>
         <p className="text-[24px] leading-[1.25] tracking-[-0.48px]" style={{ color: 'var(--color-text)' }}>
-          from experiment to <span className="text-[var(--color-accent)]">infrastructure.</span>
+          from experiment to everyday,<br /><span className="text-[var(--color-accent)]">everywhere.</span>
         </p>
       </div>
     ),

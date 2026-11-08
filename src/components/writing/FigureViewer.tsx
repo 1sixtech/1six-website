@@ -17,7 +17,7 @@ interface Opener {
 /**
  * Full-size view for research figures. The charts are drawn 760-900 units
  * wide with 14-17px labels, and a phone column shrinks them to 5-7px. A tap
- * on a figure (a.research-figure, see lib/research.ts) opens it here at its
+ * on a figure (a.writing-figure, see lib/writing.ts) opens it here at its
  * own size: wider than the screen, it pans sideways, and it can be pinched.
  * Modified clicks keep the link's own behavior (open the file elsewhere),
  * and without script the link opens the file itself.
@@ -37,7 +37,7 @@ export function FigureViewer() {
       if (event.defaultPrevented || event.button !== 0) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const target = event.target instanceof Element ? event.target : null;
-      const link = target?.closest('a.research-figure');
+      const link = target?.closest('a.writing-figure');
       const image = link?.querySelector('img');
       if (!(link instanceof HTMLAnchorElement) || !image) return;
       // Without a modal <dialog> (Safari before 15.4) the link opens the file.

@@ -17,7 +17,7 @@ This project prioritizes **high quality above all else**. When working on this c
 
 ```bash
 pnpm dev          # Dev server with Turbopack
-pnpm build        # Production build
+pnpm build        # Sync writing, then build production output
 pnpm start        # Start production server
 pnpm lint         # ESLint (Next.js default config)
 pnpm test         # Unit tests (Node's built-in runner, src/**/*.test.mjs)
@@ -25,15 +25,23 @@ pnpm test         # Unit tests (Node's built-in runner, src/**/*.test.mjs)
 
 Package manager: **pnpm** (`engine-strict=true` in `.npmrc`).
 
+On a fresh checkout, run `pnpm install`, then `node scripts/sync-writing.mjs` before
+`pnpm dev`. Writing content and assets are downloaded from GitHub and ignored by git;
+`pnpm build` runs that sync automatically. No environment variables are required.
+`WRITING_GIT_REF` optionally selects a reviewed article commit or tag instead of `main`.
+
 ## Project Structure
 
 ```
 src/
   app/                        # Next.js App Router
     layout.tsx                # Root layout (metadata, theme, analytics)
-    page.tsx                  # Home page
+    page.tsx                  # About homepage ("the crossing")
+    thesis/page.tsx            # Thesis, intro hero, graph, and world map
+    writing/                  # Writing index, writing.css, and shared layout
+      [slug]/page.tsx          # Published article
+      authors/[slug]/page.tsx  # Confirmed writer profile and published articles
     globals.css               # Tailwind v4 @theme, CSS variables, keyframes
-    about/page.tsx            # About page ("the crossing"), about.css page styles
     error.tsx                 # Error boundary
     not-found.tsx             # 404 page
     robots.ts, sitemap.ts, manifest.ts
@@ -43,13 +51,15 @@ src/
       AsciiHero.tsx, AsciiThesis.tsx, AsciiGraph.tsx, AsciiMap.tsx, ...
       mapGeometry.ts          # World map framing, glyph pitch and weight
       pixelScale.ts           # CSS-px mosaic options -> device px (pixelRatioCap)
-    home/                     # Homepage section components
+    home/                     # Thesis page components (directory name retained)
       HeroSection.tsx         # Staggered ASCII scramble intro
       ThesisSection.tsx       # GSAP pinned scroll section
       ThesisGraph.tsx, ProductMap.tsx (the world map), ProductsHeading.tsx, ...
-    about/                    # About page: AboutCrossing (bands), CrossingMark (sticky ASCII 16 + fill),
-                              # aboutData.ts (confirmed pedigree/backers), researchEvidence.ts
-    research/                 # FigureViewer.tsx (full-size view of an article's figures)
+    about/                    # AboutCrossing (home bands), CrossingMark (ASCII 16 + percentage),
+                              # CrossingRoot/crossingProgress (continuous fill), about.css,
+                              # aboutData.ts (confirmed origins, backers, partnerships)
+    intro/                    # ThesisIntroMount, IntroOrchestrator, IntroOverlay
+    writing/                  # WritingIndex filters, ArticleList, full-size FigureViewer
     team/                     # CareersSection.tsx (parked, not rendered)
     layout/                   # Header.tsx, Footer.tsx
     ui/                       # Reusable: ScrollRevealWrapper, RollingNumber, ThemeToggle, Logo
@@ -59,16 +69,21 @@ src/
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
-    site.ts                   # CONTACT_EMAIL, COPYRIGHT, isCurrentRoute()
-    research.ts               # Research articles (synced at build by scripts/sync-research.mjs)
-    themeInit.ts              # Theme + Home intro bootstrap, inlined in <head>
+    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
+    writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
+    writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
+    themeInit.ts              # Theme + Thesis intro bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
       asciiMosaicFilter.ts    # ASCII rendering algorithm
       texturedMesh.ts         # Mesh + texture handling
       orbitControls.ts        # Camera controls
+content/writing/              # Downloaded article Markdown (gitignored)
 public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
+  writing-assets/             # Downloaded article assets (gitignored)
+scripts/sync-writing.mjs       # Sync from 1sixtech/noctis-articles
+vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
 
 ## Architecture & Key Patterns
@@ -78,7 +93,22 @@ public/
 - **Server components** by default (pages, layouts, metadata exports)
 - **`'use client'`** directive for interactive components (animations, state, events)
 - **Dynamic imports** with `ssr: false` for Three.js components (`AsciiCanvas`)
-- No API routes, no database — static marketing content hardcoded in components
+- No API routes or database; marketing copy lives in components and published writing is synced at build time
+
+### Writing
+
+- `scripts/sync-writing.mjs` downloads numbered article folders from `1sixtech/noctis-articles` into
+  `content/writing/` and their assets into `public/writing-assets/`. `WRITING_GIT_REF` defaults to `main`.
+- Frontmatter accepts `title`, `author`, `date`, `summary`, and `category`. Category IDs are `research`,
+  `op-ed`, and `announcements` (case-insensitive); omitted categories default to Research, and invalid
+  explicit categories fail the build. Articles sort newest first, with article number as the tie-breaker.
+- `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
+  filters show all articles. Empty categories show an explanation and a link back to all writing.
+- Confirmed author profiles live in `writingCatalog.ts`. Article bylines resolve by author name;
+  an unknown author remains plain text. Profiles list only that author's published articles.
+- Synced Markdown is untrusted: raw HTML is escaped, unsafe links lose their target, and unexpected
+  rendered tags or attributes fail the build. Figures open at full size. `/writing-assets/:path*`
+  has a sandboxed CSP for standalone assets; article and author pages keep the site's normal policy.
 
 ### Theme System
 
@@ -98,10 +128,16 @@ public/
 | **GSAP** + ScrollTrigger + Observer | Scroll-driven animations, pinned sections |
 | **Three.js** via `AscMosaic` | WebGL ASCII mosaic rendering from video/images |
 | **use-scramble** | Character scramble text reveal effects |
-| **CSS transitions + IntersectionObserver** | About page fill: the sticky ASCII "16" fills 16% → 100% band by band |
+| **Passive scroll + requestAnimationFrame** | Home crossing: continuous 16% → 100% fill, desktop percentage, and sticky mobile meter |
 | **View Transitions** | Whole-page cross-fade on theme switch (ThemeProvider) |
 
 GSAP animations must be cleaned up with `useGSAP()` context or manual `gsap.context()` + `revert()`. Always check `useReducedMotion()` and skip or simplify animations accordingly.
+
+The logo intro and first-scroll header reveal belong only to `/thesis`. The head bootstrap prepares
+initial loads; `ThesisIntroMount` prepares client navigation before child passive effects. Leaving
+Thesis clears intro flags, the scroll lock, the circular reveal mask, and pooled videos. Keep effect
+replay safe: an obsolete `IntroOrchestrator` effect must never start another reveal. Home and Writing
+show the header immediately. The crossing listens for reduced-motion changes and writes 100% directly.
 
 ### Three.js / AscMosaic
 
@@ -130,7 +166,8 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 
 ### Performance
 
-- `IntroOrchestrator` warms the Home videos (`videoPool.warmupAll`) while the intro runs
+- `IntroOrchestrator` warms the Thesis videos (`videoPool.warmupAll`) while the intro runs
+- `CrossingRoot` writes fill values only to `.crossing-mark` and `.crossing-meter__fill`, keeping per-frame style changes off the full story root
 - `/resource/*` and `/fonts/*` cached with `Cache-Control: immutable, 1 year`
 - Image optimization: webp + avif formats via Next.js
 - Turbopack for dev server
@@ -176,48 +213,70 @@ import './globals.css';
 
 - 2-space indentation, semicolons, single quotes, trailing commas
 - No Prettier config — consistent manual formatting
-- ESLint: Next.js default config (`next lint`)
+- ESLint: Next.js flat config, run through `pnpm lint` (`eslint .`)
 
 ## Routes
 
 | Path | Description |
 |------|-------------|
-| `/` | Homepage (hero, thesis, products) |
-| `/about` | Team pedigree, backers, research, contact |
-| `/team` | Permanent redirect -> `/about` |
+| `/` | About: statement, products, origins, backers, partnerships, contact |
+| `/thesis` | Existing hero, thesis scroll, graph, and world map |
+| `/writing` | Published writing with All, Research, Op-ed, and Announcements filters |
+| `/writing/[slug]` | Article with contents, author link, and full-size figures |
+| `/writing/authors/[slug]` | Confirmed writer profile and published articles |
 
-Hash navigation: `/#thesis`, `/#products`
+Navigation order is About, Thesis, Writing. `/about`, `/research`, and `/team` are removed without
+redirects. Unknown article and author slugs return 404.
 
-SEO: `robots.ts`, `sitemap.ts`, `manifest.ts` (PWA)
+Home anchors: `/#products`, `/#origins`, `/#investors`, `/#partnerships`, `/#contact`.
+Thesis anchors: `/thesis#thesis`, `/thesis#products`.
+
+SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
+and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
 
 ## Deployment
 
-- **Platform**: Vercel (inferred from `@vercel/analytics`)
+- **Platform**: Vercel. `vercel.json` sets `buildCommand` to `pnpm build`, so deployments use the
+  repository's current writing-sync script instead of the retired research-sync command.
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Pure logic is tested; there is no DOM or browser test runner.
+  stripped natively). Tests cover pure logic, article safety, and actual crossing/intro effects with
+  controlled dependencies. There is no DOM test package or in-repo browser runner; use gstack `/browse`
+  for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 
 ## Key Dependencies
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| next | ^16.2.2 | Framework (App Router) |
+| next | ^16.2.12 | Framework (App Router) |
 | react | ^19.0.0 | UI library |
 | three | ^0.183.2 | WebGL / ASCII mosaic rendering |
 | gsap | ^3.14.2 | Scroll animations (ScrollTrigger, Observer) |
 | @gsap/react | ^2.1.2 | GSAP React integration (useGSAP) |
 | use-scramble | ^2.2.15 | Character scramble text effects |
 | tailwindcss | ^4.0.0 | Utility-first CSS (v4 with @theme) |
-| sharp | ^0.34.5 | Image optimization |
+| sharp | ^0.35.3 | Image optimization |
+| marked | ^18.1.2 | Article Markdown parsing with a constrained renderer |
+| swiper | ^12.1.3 | Mobile thesis slides |
 
 ## Important Notes
 
 - Three.js is transpiled via `next.config.ts` (`transpilePackages: ['three']`)
-- GSAP and Three.js use experimental `optimizePackageImports`
+- Only Three.js uses experimental `optimizePackageImports`; GSAP is excluded because its plugin registration and ticker must stay intact
 - Some sections are hidden/incomplete: `CareersSection` content not ready
-- No environment variables required for local development
+- Confirmed product, author, partner, and pedigree claims are recorded in [PRODUCT.md](PRODUCT.md); do not invent facts or logos
 - Assets in `/public/resource/` include large video files — not included in git history tracking for new clones
+
+## Documentation
+
+- [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
+- [TODOS.md](TODOS.md): remaining work and completed release items.
+- [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
+- [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): historical scroll decisions and regressions (April 2026).
+- [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
+- [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.
+- [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md): synchronized project instructions.
 
 ---
 

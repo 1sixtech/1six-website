@@ -2,7 +2,13 @@
 export const CONTACT_EMAIL = 'contact@1six.tech';
 
 /** The copyright line, shared by the footer and the phone menu. */
-export const COPYRIGHT = '© 2025–2026 1SIX Technologies Inc.';
+export const COPYRIGHT = '© 2026 - 2027 1SIX Technologies Inc.';
+
+export const NAV_ITEMS = [
+  { label: 'About', href: '/' },
+  { label: 'Thesis', href: '/thesis' },
+  { label: 'Writing', href: '/writing' },
+] as const;
 
 /**
  * Whether a nav href names the page the visitor is on. Hash links such as

@@ -7,10 +7,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = '1sixtech/noctis-articles';
-const REF = process.env.RESEARCH_GIT_REF ?? 'main';
+const REF = process.env.WRITING_GIT_REF ?? 'main';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const contentRoot = path.join(root, 'content/research');
-const publicRoot = path.join(root, 'public/research');
+const contentRoot = path.join(root, 'content/writing');
+const publicRoot = path.join(root, 'public/writing-assets');
 
 function rawUrl(file) {
   const encoded = file.split('/').map(encodeURIComponent).join('/');
@@ -73,7 +73,7 @@ async function main() {
     }),
   );
 
-  console.log(`Synced ${readmes.length} research article(s) from ${REPO}@${REF}`);
+  console.log(`Synced ${readmes.length} writing article(s) from ${REPO}@${REF}`);
 }
 
 main().catch((error) => {

@@ -16,24 +16,12 @@ export interface Backer {
 
 export const ORIGINS: OriginGroup[] = [
   {
-    discipline: 'research & academia',
-    names: ['MIT', 'Harvard', 'Tsinghua', 'Schwarzman Scholars', 'PhD programs'],
-  },
-  {
-    discipline: 'protocols',
-    names: ['Ethereum Foundation', 'Starknet Foundation'],
+    discipline: 'institutions',
+    names: ['Harvard College', 'Schwarzman Scholars'],
   },
   {
     discipline: 'competitive programming',
-    names: ['ICPC World Finalists', 'Codeforces Grandmasters'],
-  },
-  {
-    discipline: 'markets',
-    names: ['Needham & Co.'],
-  },
-  {
-    discipline: 'service',
-    names: ['special forces'],
+    names: ['IOI Medalists', 'ICPC World Finalists', 'Codeforces Grandmasters'],
   },
 ];
 
@@ -46,10 +34,12 @@ export const BACKERS: Backer[] = [
 
 export const FIRMS = ['Lemniscap', 'Lambda'];
 
-export { CONTACT_EMAIL } from '@/lib/site';
+export const PARTNERS = [
+  'USA Esports Association',
+  'KeSPA',
+  'AESF',
+  'IESF',
+  'Lighter',
+] as const;
 
-/**
- * Fill level per band, in percent: the statement starts at the first 16%,
- * and each of the four bands after it carries a quarter of the next 84%.
- */
-export const CROSSING_LEVELS = [16, 37, 58, 79, 100] as const;
+export { CONTACT_EMAIL } from '@/lib/site';

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Observer } from 'gsap/Observer';
@@ -52,6 +52,14 @@ if (typeof window !== 'undefined') {
   }
 }
 
+const MOBILE_QUERY = '(max-width: 767px)';
+const readMobile = () => window.matchMedia(MOBILE_QUERY).matches;
+const subscribeMobile = (onChange: () => void) => {
+  const query = window.matchMedia(MOBILE_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+};
+
 // Data and helper components imported from shared thesisData.tsx
 
 export function ThesisSection() {
@@ -59,16 +67,8 @@ export function ThesisSection() {
   // isMobile starts as null (unknown) to distinguish SSR/pre-hydration from
   // actual desktop. GSAP setup is gated on isMobile !== null to prevent
   // pin-spacer DOM insertion before we know whether to show Swiper instead.
-  const [isMobile, setIsMobile] = useState<boolean | null>(null);
+  const isMobile = useSyncExternalStore(subscribeMobile, readMobile, () => null);
   const prefersReducedMotion = useReducedMotion();
-
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
 
   // Mobile: use Swiper instead of GSAP pin (avoids iOS compositor conflicts).
   const useMobileSwiper = isMobile === true && !prefersReducedMotion;
@@ -123,6 +123,18 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
     },
     []
   );
+
+  // Set up a specific page as visible (for entering from a direction)
+  const showPage = useCallback((index: number) => {
+    contentRefs.current.forEach((el, i) => {
+      if (el) {
+        gsap.set(el, { autoAlpha: i === index ? 1 : 0, yPercent: 0 });
+      }
+    });
+    indexRef.current = index;
+    setCurrentIndex(index);
+  }, []);
+
 
   // Core transition: discrete page-by-page with crossfade.
   //
@@ -239,7 +251,7 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
       { autoAlpha: 1, yPercent: 0, duration: 0.5, ease: 'power2.out' },
       '<0.05'
     );
-  }, []);
+  }, [showPage]);
 
   // Jump to specific page (for dot clicks)
   const jumpToPage = useCallback((targetIndex: number) => {
@@ -286,16 +298,6 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
     );
   }, []);
 
-  // Set up a specific page as visible (for entering from a direction)
-  const showPage = useCallback((index: number) => {
-    contentRefs.current.forEach((el, i) => {
-      if (el) {
-        gsap.set(el, { autoAlpha: i === index ? 1 : 0, yPercent: 0 });
-      }
-    });
-    indexRef.current = index;
-    setCurrentIndex(index);
-  }, []);
 
   useGSAP(() => {
     if (prefersReducedMotion) return;

@@ -47,7 +47,7 @@ test('Pretendard slices are all served, the preloads cover every page, and the f
   }
 
   // About adds the slice with the curly apostrophe of its h1 (we don’t dream).
-  const about = read('../about/page.tsx').match(/APOSTROPHE_SLICE = '([^']+)'/)?.[1];
+  const about = read('../page.tsx').match(/APOSTROPHE_SLICE = '([^']+)'/)?.[1];
   const apostrophe = slices.find(({ url }) => url === about);
   assert.ok(apostrophe, `About's ${about} is not one of the slices`);
   assert.ok(apostrophe.ranges.some(([from, to]) => 0x2019 >= from && 0x2019 <= to), 'it carries U+2019');

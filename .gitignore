@@ -28,5 +28,5 @@ vite.config.ts.timestamp-*
 *.tsbuildinfo
 
 # Fetched from noctis-articles during the build
-/content/research/
-/public/research/
+/content/writing/
+/public/writing-assets/

@@ -1,24 +1,27 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Marked } from 'marked';
+import { getWriterByName, isWritingCategory, type WritingCategory } from './writingCatalog.ts';
 
-const CONTENT_DIR = path.join(process.cwd(), 'content/research');
+const CONTENT_DIR = path.join(process.cwd(), 'content/writing');
 const SLUG = /^[0-9]{3}-[a-z0-9-]+$/;
 
-export type ResearchHeading = {
+export type WritingHeading = {
   id: string;
   text: string;
 };
 
-export type ResearchArticle = {
+export type WritingArticle = {
   slug: string;
   number: string;
   title: string;
   author: string;
+  authorSlug: string | null;
+  category: WritingCategory;
   date: string;
   dateLabel: string;
   summary: string;
-  headings: ResearchHeading[];
+  headings: WritingHeading[];
   html: string;
 };
 
@@ -27,6 +30,7 @@ type Frontmatter = {
   author?: string;
   date?: string;
   summary?: string;
+  category?: string;
 };
 
 function splitFrontmatter(markdown: string): { data: Frontmatter; body: string } {
@@ -43,7 +47,7 @@ function splitFrontmatter(markdown: string): { data: Frontmatter; body: string }
     if (!match) continue;
     const key = match[1];
     const value = match[2].trim().replace(/^["']|["']$/g, '');
-    if (key === 'title' || key === 'author' || key === 'date' || key === 'summary') {
+    if (key === 'title' || key === 'author' || key === 'date' || key === 'summary' || key === 'category') {
       data[key] = value;
     }
   }
@@ -55,6 +59,7 @@ function extractArticle(markdown: string): {
   author: string;
   date: string;
   summary: string;
+  category: WritingCategory;
   body: string;
 } {
   const normalized = markdown.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -74,12 +79,19 @@ function extractArticle(markdown: string): {
   const title = data.title || titleLine?.[1]?.trim() || 'Untitled';
   const author = data.author || authorLine?.[1]?.trim() || '1SIX';
   const date = data.date || dateLine?.[1] || '';
+  // Research is the default publication type. Explicit categories are
+  // validated so a typo cannot silently place an op-ed in the wrong section.
+  const category = data.category?.toLowerCase() || 'research';
+  if (!isWritingCategory(category)) {
+    throw new Error(`Unknown writing category: ${data.category}`);
+  }
 
   return {
     title,
     author,
     date,
     summary: data.summary || summaryFrom(body),
+    category,
     body,
   };
 }
@@ -106,7 +118,7 @@ function summaryFrom(body: string): string {
     .trim();
 }
 
-export function formatResearchDate(iso: string): string {
+export function formatWritingDate(iso: string): string {
   const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return iso;
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
@@ -168,7 +180,7 @@ export function isSafeLinkTarget(href: string): boolean {
 
 /**
  * Articles are synced at build time from another repository
- * (scripts/sync-research.mjs), so they are rendered as untrusted input: raw
+ * (scripts/sync-writing.mjs), so they are rendered as untrusted input: raw
  * HTML inside them is shown as text, never emitted as markup, and a link
  * to anything but the web, mail, a #fragment or a relative path (a
  * javascript: link, an autolink to one, a reference to one) keeps its words
@@ -218,7 +230,7 @@ function svgSize(publicPath: string): { width: string; height: string } | null {
 
 /** The "open at full size" mark on a figure: two arrows pointing out. */
 const ENLARGE_ICON =
-  '<span class="research-figure__hint" aria-hidden="true">' +
+  '<span class="writing-figure__hint" aria-hidden="true">' +
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false">' +
   '<path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/>' +
   '</svg></span>';
@@ -270,9 +282,9 @@ export function unsafeArticleHtml(html: string): string | null {
   return html.slice(end).includes('<') ? 'a "<" that opens no tag' : null;
 }
 
-function renderBody(slug: string, body: string): { html: string; headings: ResearchHeading[] } {
+function renderBody(slug: string, body: string): { html: string; headings: WritingHeading[] } {
   const parsed = markdown.parse(body) as string;
-  const headings: ResearchHeading[] = [];
+  const headings: WritingHeading[] = [];
   const used = new Set<string>();
 
   let html = parsed.replace(/<h([23])>([\s\S]*?)<\/h\1>/g, (_, level: string, inner: string) => {
@@ -295,7 +307,7 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
   );
   html = html.replace(/<p><em>(Figure [\s\S]*?)<\/em><\/p>/g, '<p class="caption">$1</p>');
   html = html.replace(/<img\b([^>]*?)src="([^"]+)"([^>]*)>/g, (match, before: string, src: string, after: string) => {
-    const local = /^(https?:|\/)/.test(src) ? src : `/research/${slug}/${src.replace(/^\.\//, '')}`;
+    const local = /^(https?:|\/)/.test(src) ? src : `/writing-assets/${slug}/${src.replace(/^\.\//, '')}`;
     let tag = `<img${before}src="${local}"${after}>`;
     // A lazy image with no size takes no space until it loads, and the text
     // below jumps when it does; the SVG's own size reserves its box.
@@ -315,7 +327,7 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
     if (!src) return match;
     const alt = img.match(/\balt="([^"]*)"/)?.[1] ?? '';
     const label = alt ? `Enlarge figure: ${alt}` : 'Enlarge figure';
-    return `<p class="figure"><a class="research-figure" href="${src}" aria-label="${label}">${img}${ENLARGE_ICON}</a></p>`;
+    return `<p class="figure"><a class="writing-figure" href="${src}" aria-label="${label}">${img}${ENLARGE_ICON}</a></p>`;
   });
   html = html.replace(
     /<a href="(https?:[^"]+)"/g,
@@ -327,12 +339,12 @@ function renderBody(slug: string, body: string): { html: string; headings: Resea
   // Fail the build rather than publish markup this renderer cannot produce.
   const unsafe = unsafeArticleHtml(html);
   if (unsafe) {
-    throw new Error(`research: ${slug} rendered ${unsafe.slice(0, 160)}, which the article renderer never emits; refusing to publish it.`);
+    throw new Error(`writing: ${slug} rendered ${unsafe.slice(0, 160)}, which the article renderer never emits; refusing to publish it.`);
   }
   return { html, headings };
 }
 
-function loadArticle(slug: string): ResearchArticle {
+function loadArticle(slug: string): WritingArticle {
   const markdown = readFileSync(path.join(CONTENT_DIR, slug, 'README.md'), 'utf8');
   const extracted = extractArticle(markdown);
   const rendered = renderBody(slug, extracted.body);
@@ -341,29 +353,31 @@ function loadArticle(slug: string): ResearchArticle {
     number: slug.slice(0, 3),
     title: extracted.title,
     author: extracted.author,
+    authorSlug: getWriterByName(extracted.author)?.slug ?? null,
+    category: extracted.category,
     date: extracted.date,
-    dateLabel: formatResearchDate(extracted.date),
+    dateLabel: formatWritingDate(extracted.date),
     summary: extracted.summary,
     headings: rendered.headings,
     html: rendered.html,
   };
 }
 
-export function getArticles(): ResearchArticle[] {
+export function getArticles(): WritingArticle[] {
   if (!existsSync(CONTENT_DIR)) {
-    throw new Error('Missing content/research. Run node scripts/sync-research.mjs before building.');
+    throw new Error('Missing content/writing. Run node scripts/sync-writing.mjs before building.');
   }
   const slugs = readdirSync(CONTENT_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && SLUG.test(entry.name))
     .map((entry) => entry.name)
     .filter((slug) => existsSync(path.join(CONTENT_DIR, slug, 'README.md')));
   if (slugs.length === 0) {
-    throw new Error('content/research has no articles.');
+    throw new Error('content/writing has no articles.');
   }
-  return slugs.map(loadArticle).sort((a, b) => a.number.localeCompare(b.number));
+  return slugs.map(loadArticle).sort((a, b) => b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
 }
 
-export function getArticle(slug: string): ResearchArticle | null {
+export function getArticle(slug: string): WritingArticle | null {
   if (!SLUG.test(slug)) return null;
   return getArticles().find((article) => article.slug === slug) ?? null;
 }

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { LogoFooter } from '@/components/ui/Logo';
-import { CONTACT_EMAIL, COPYRIGHT } from '@/lib/site';
+import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS } from '@/lib/site';
 
 interface FooterLinkItem {
   label: string;
@@ -8,14 +8,17 @@ interface FooterLinkItem {
 }
 
 const COMPANY_LINKS: FooterLinkItem[] = [
-  { label: 'Thesis', href: '/#thesis' },
-  { label: 'Research', href: '/research' },
-  { label: 'About', href: '/about' },
-  { label: 'Investors', href: '/about#investors' },
+  ...NAV_ITEMS,
+  { label: 'Investors', href: '/#investors' },
+  { label: 'Partnerships', href: '/#partnerships' },
 ];
 
 const CONTACT_LINKS: FooterLinkItem[] = [
   { label: CONTACT_EMAIL, href: `mailto:${CONTACT_EMAIL}` },
+];
+
+const SOCIAL_LINKS: FooterLinkItem[] = [
+  { label: 'X / Twitter', href: 'https://x.com/1sixtech' },
 ];
 
 // A column is a label over its links, and the two must not read alike:
@@ -40,7 +43,7 @@ function FooterColumn({
       <ul className="flex flex-col items-end">
         {links.map((link) => (
           <li key={link.label}>
-            {link.href.startsWith('mailto:') ? (
+            {link.href.startsWith('mailto:') || link.href.startsWith('https:') ? (
               <a href={link.href} className={linkClass}>
                 {link.label}
               </a>
@@ -70,6 +73,7 @@ export function Footer() {
 
         <div className="mb-8 flex flex-wrap justify-end gap-x-12 gap-y-6">
           <FooterColumn title="CONTACT" links={CONTACT_LINKS} />
+          <FooterColumn title="SOCIAL" links={SOCIAL_LINKS} />
           <FooterColumn title="COMPANY" links={COMPANY_LINKS} />
         </div>
 
@@ -93,6 +97,7 @@ export function Footer() {
 
         <div className="absolute right-[3.33%] top-[10.53%] flex gap-16">
           <FooterColumn title="CONTACT" links={CONTACT_LINKS} />
+          <FooterColumn title="SOCIAL" links={SOCIAL_LINKS} />
           <FooterColumn title="COMPANY" links={COMPANY_LINKS} />
         </div>
       </div>

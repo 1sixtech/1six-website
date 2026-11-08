@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { FigureViewer } from '@/components/research/FigureViewer';
-import { getArticle, getArticles } from '@/lib/research';
+import { FigureViewer } from '@/components/writing/FigureViewer';
+import { getArticle, getArticles } from '@/lib/writing';
+import { categoryLabel } from '@/lib/writingCatalog';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -17,9 +18,9 @@ export const dynamicParams = false;
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const article = getArticle(slug);
-  if (!article) return { title: 'Research' };
+  if (!article) return { title: 'Writing' };
 
-  const url = `https://1six.tech/research/${article.slug}`;
+  const url = `https://1six.tech/writing/${article.slug}`;
   return {
     title: article.title,
     description: article.summary,
@@ -48,25 +49,31 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function ResearchArticlePage({ params }: Props) {
+export default async function WritingArticlePage({ params }: Props) {
   const { slug } = await params;
   const article = getArticle(slug);
   if (!article) notFound();
 
   return (
     <article>
-      <p className="research-meta text-[13px] tracking-[0.01em]">
-        <Link href="/research" className="transition-colors hover:text-[var(--color-accent-text)] active:text-[var(--color-accent-text)]">
-          Research
+      <p className="writing-meta text-[13px] tracking-[0.01em]">
+        <Link href="/writing" className="transition-colors hover:text-[var(--color-accent-text)] active:text-[var(--color-accent-text)]">
+          Writing
         </Link>
         <span aria-hidden="true"> · </span>
-        {article.number}
+        <Link href={`/writing?category=${article.category}`} className="writing-category-link">
+          {categoryLabel(article.category)}
+        </Link>
       </p>
       <h1 className="mt-4 text-[32px] font-medium leading-[1.12] tracking-[-0.025em] text-balance md:text-[40px]">
         {article.title}
       </h1>
-      <p className="research-meta mt-4 text-[13px] tracking-[0.01em]">
-        {article.author}
+      <p className="writing-meta mt-4 text-[13px] tracking-[0.01em]">
+        {article.authorSlug ? (
+          <Link href={`/writing/authors/${article.authorSlug}`} className="writing-author-link">
+            {article.author}
+          </Link>
+        ) : article.author}
         <span aria-hidden="true"> · </span>
         <time dateTime={article.date}>{article.dateLabel}</time>
       </p>
@@ -76,7 +83,7 @@ export default async function ResearchArticlePage({ params }: Props) {
           className="mt-8 border-y border-[var(--color-divider)] pt-4 pb-5"
           aria-label="Contents"
         >
-          <p className="research-meta text-[13px] tracking-[0.01em]">Contents</p>
+          <p className="writing-meta text-[13px] tracking-[0.01em]">Contents</p>
           <ol className="mt-3 flex list-none flex-col gap-2 p-0">
             {article.headings.map((heading) => (
               <li key={heading.id}>
@@ -93,7 +100,7 @@ export default async function ResearchArticlePage({ params }: Props) {
       )}
 
       <div
-        className="research-body mt-8"
+        className="writing-body mt-8"
         dangerouslySetInnerHTML={{ __html: article.html }}
       />
       <FigureViewer />
