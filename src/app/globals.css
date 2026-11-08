@@ -67,25 +67,28 @@
 /* ══════════════════════════════════════════════════════════
    Entry lock — About logo loader or Thesis text scramble
    ══════════════════════════════════════════════════════════ */
-html.intro-lock {
+html.intro-lock,
+html.thesis-entry-lock {
   overflow: hidden !important;
   overscroll-behavior: none;
 }
-html.intro-lock body {
+html.intro-lock body,
+html.thesis-entry-lock body {
   overflow: hidden !important;
   touch-action: none;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: auto;
 }
-/* About's full loader covers the page until its reveal finishes. Thesis
+/* The site loader covers the page until its reveal finishes. Thesis
    keeps only the scrolling lock while its text scramble runs. */
 html.intro-lock[data-intro-active='true'] body {
   pointer-events: none !important;
 }
 
-/* Repeat About visits and reduced motion skip the loader without locking
+/* Repeat site visits and reduced motion skip the loader without locking
    the page. Hide the overlay before paint, not just in a passive effect. */
 html[data-intro-skip='true'] .intro-overlay {
+  visibility: hidden;
   display: none !important;
 }
 
@@ -103,9 +106,14 @@ html[data-intro-active="true"] #main-content {
 }
 
 .intro-overlay {
+  visibility: hidden;
   /* Hardware-accelerate the overlay so its eventual opacity fade is
      composited rather than repainted. */
   will-change: opacity;
+}
+
+html[data-intro-active="true"] .intro-overlay {
+  visibility: visible;
 }
 
 .intro-logo-wrap {

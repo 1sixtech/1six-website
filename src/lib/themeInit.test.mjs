@@ -13,6 +13,7 @@ function runThemeInit({
   reducedMotion = false,
   introSeen = false,
   pathname = '/',
+  hash = '',
   storageThrows = false,
 } = {}) {
   const storage = new Map(stored === null ? [] : [['theme', stored]]);
@@ -20,23 +21,25 @@ function runThemeInit({
     if (storageThrows) throw new Error('SecurityError: storage is disabled');
   };
   const listeners = {};
+  const timers = [];
   const root = { attributes: {}, classes: new Set(), dataset: {} };
-  const state = { root, storage, listeners, reloads: 0, history: { scrollRestoration: 'auto' } };
+  const state = { root, storage, listeners, reloads: 0, timers, history: { scrollRestoration: 'auto' } };
   const context = vm.createContext({
     localStorage: {
       getItem: (key) => (guard(), storage.get(key) ?? null),
       setItem: (key, value) => (guard(), storage.set(key, String(value))),
     },
     sessionStorage: {
-      getItem: (key) => (guard(), key === 'aboutIntroSeen' && introSeen ? '1' : null),
+      getItem: (key) => (guard(), key === 'siteIntroSeen' && introSeen ? '1' : null),
     },
     history: state.history,
+    setTimeout: (callback) => timers.push(callback),
     document: {
       documentElement: {
         setAttribute: (name, value) => {
           root.attributes[name] = value;
         },
-        classList: { add: (name) => root.classes.add(name) },
+        classList: { add: (name) => root.classes.add(name), remove: (...names) => names.forEach((name) => root.classes.delete(name)) },
         dataset: root.dataset,
       },
     },
@@ -47,7 +50,7 @@ function runThemeInit({
           (query === '(prefers-reduced-motion: reduce)' && reducedMotion),
       }),
       location: {
-        pathname,
+        pathname, hash,
         reload: () => {
           state.reloads += 1;
         },
@@ -85,7 +88,7 @@ test('theme bootstrap: storage that refuses access still gets the device default
   assert.equal(runThemeInit({ storageThrows: true }).root.attributes['data-theme'], 'light');
 });
 
-test('intro bootstrap: About owns the logo loader; Thesis keeps only its scramble lock', () => {
+test('intro bootstrap: both visual routes may show the logo; Writing is immediate', () => {
   const first = runThemeInit();
   assert.ok(first.root.classes.has('intro-lock'));
   assert.equal(first.root.dataset.introActive, 'true');
@@ -101,11 +104,15 @@ test('intro bootstrap: About owns the logo loader; Thesis keeps only its scrambl
 
   const thesis = runThemeInit({ pathname: '/thesis' });
   assert.ok(thesis.root.classes.has('intro-lock'));
-  assert.deepEqual(thesis.root.dataset, {}, 'no company logo or circular mask on Thesis');
+  assert.equal(thesis.root.dataset.introActive, 'true');
+  assert.ok(thesis.root.classes.has('thesis-entry-lock'));
+  const returning = runThemeInit({ pathname: '/thesis', introSeen: true });
+  assert.ok(returning.root.classes.has('thesis-entry-lock'));
+  assert.equal(returning.root.classes.has('intro-lock'), false);
 
   const writing = runThemeInit({ pathname: '/writing' });
   assert.equal(writing.root.classes.size, 0);
-  assert.deepEqual(writing.root.dataset, {});
+  assert.equal(writing.root.dataset.introSkip, 'true');
 
   // A page restored from the back-forward cache reloads, so the intro and
   // canvases start clean; a normal show does not.
@@ -113,4 +120,33 @@ test('intro bootstrap: About owns the logo loader; Thesis keeps only its scrambl
   assert.equal(first.reloads, 0);
   first.listeners.pageshow({ persisted: true });
   assert.equal(first.reloads, 1);
+});
+
+
+test('entry watchdog: blocked application chunks release both locks and prevent a late full intro', () => {
+  const entry = runThemeInit({ pathname: '/thesis' });
+  entry.timers[0]();
+  assert.equal(entry.root.classes.size, 0);
+  assert.equal(entry.root.dataset.introActive, undefined);
+  assert.equal(entry.root.dataset.introExpired, 'true');
+});
+
+test('entry watchdog: hydrated navigation retains ownership of its current locks', () => {
+  const entry = runThemeInit({ pathname: '/thesis' });
+  entry.root.dataset.entryHydrated = 'true';
+  entry.timers[0]();
+  assert.ok(entry.root.classes.has('intro-lock'));
+  assert.ok(entry.root.classes.has('thesis-entry-lock'));
+});
+
+
+test('entry bootstrap: direct anchors retain their first-screen policy', () => {
+  for (const hash of ['#thesis', '#products']) {
+    const entry = runThemeInit({ pathname: '/thesis', hash });
+    assert.equal(entry.root.dataset.introActive, 'true');
+    assert.equal(entry.root.classes.has('thesis-entry-lock'), false);
+  }
+  const text = runThemeInit({ hash: '#investors' });
+  assert.equal(text.root.classes.size, 0);
+  assert.equal(text.root.dataset.introSkip, 'true');
 });

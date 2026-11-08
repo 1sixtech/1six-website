@@ -1,5 +1,7 @@
 'use client';
 
+import { useCallback, useLayoutEffect, useRef } from 'react';
+import { setRouteVisualReady } from '@/lib/introState';
 import { AsciiMapCanvas } from '@/components/ascii/AsciiMap';
 
 /**
@@ -20,6 +22,15 @@ import { AsciiMapCanvas } from '@/components/ascii/AsciiMap';
  *   in it at 75% of its width.
  */
 export function ProductMap() {
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    setRouteVisualReady('/thesis#products', false);
+    return () => { mounted.current = false; setRouteVisualReady('/thesis#products', false); };
+  }, []);
+  const handleReady = useCallback(() => {
+    if (mounted.current) setRouteVisualReady('/thesis#products', true);
+  }, []);
   return (
     <figure className="m-0">
       <div className="relative h-[89vw] overflow-hidden md:mx-auto md:flex md:h-auto md:max-w-[1344px] md:items-center md:justify-center md:aspect-[16/9] md:bg-[var(--color-card)]">
@@ -29,7 +40,7 @@ export function ProductMap() {
           className="world-map-canvas absolute top-1/2 left-[calc(50%+14.9vw)] aspect-[3/2] w-[181vw] -translate-x-1/2 -translate-y-1/2 md:relative md:top-auto md:left-auto md:w-[75%] md:max-w-[1010px] md:translate-x-0 md:translate-y-0"
           aria-hidden="true"
         >
-          <AsciiMapCanvas />
+          <AsciiMapCanvas onReady={handleReady} />
         </div>
       </div>
       <figcaption

@@ -2,6 +2,7 @@
 
 import { useMemo, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
+import { ATLASES, HERO_VIDEO } from '@/lib/siteAssets';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 const AsciiCanvas = dynamic(
@@ -46,9 +47,7 @@ const readServerIsClient = () => false;
 /** Hero background — Figma: Light F_1-1, Dark F_1-2 */
 export function AsciiHero({ onReady }: { onReady?: () => void }) {
   const { theme } = useTheme();
-  const cellUrl = theme === 'dark'
-    ? '/resource/Monotone Cell F_1-2.png'
-    : '/resource/Monotone Cell F_1-1.png';
+  const cellUrl = ATLASES[theme].hero;
 
   // Compute scale once on the client so the plane covers any viewport aspect
   // ratio. The server and the hydration pass render nothing (no window to
@@ -62,7 +61,7 @@ export function AsciiHero({ onReady }: { onReady?: () => void }) {
 
   return (
     <AsciiCanvas
-      textureUrl="/resource/Source_Desert.mp4"
+      textureUrl={HERO_VIDEO}
       textureType="video"
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"

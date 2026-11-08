@@ -1,7 +1,7 @@
 import { CrossingRoot } from './CrossingRoot';
 import { CrossingMark } from './CrossingMark';
 import { OnwardLink } from './OnwardLink';
-import { BACKERS, CONTACT_EMAIL, FIRMS, ORIGINS, PARTNERS } from './aboutData';
+import { BACKERS, CONTACT_EMAIL, FIRMS, ORIGINS } from './aboutData';
 
 interface NameListProps {
   names: string[];
@@ -42,10 +42,8 @@ export function AboutCrossing() {
     <CrossingRoot>
       {/* Mobile: the mark scrolls away, so the crossing rides under the
           header instead: the section being read, and the fill as a live
-          count. The label starts hidden: the statement's title is on
-          screen at the top, and CrossingRoot shows the label once a title
-          has gone up under the strip. */}
-      <div className="crossing-meter" data-title="shown" aria-hidden="true">
+          count. The stable label keeps the percentage in context. */}
+      <div className="crossing-meter" aria-hidden="true">
         <span className="crossing-meter__label" data-crossing-label-target>
           about
         </span>
@@ -89,13 +87,13 @@ export function AboutCrossing() {
             >
               <h2 id="products-title" className="crossing-heading">products.</h2>
               <div className="crossing-product">
-                <p className="crossing-tag">01 / esports</p>
+                <p className="crossing-tag crossing-product__tag">01 / esports</p>
                 <a className="crossing-product__name" href="https://predict.everywhere.trade">
                   <span>predict.</span><span>everywhere.trade</span>
                 </a>
                 <p className="crossing-body">An esports-focused prediction market.</p>
                 <a className="crossing-product__visit" href="https://predict.everywhere.trade">
-                  Visit website <span aria-hidden="true">↗</span>
+                  <span className="crossing-product__visit-label">Visit website</span> <span aria-hidden="true">↗</span>
                 </a>
               </div>
               <p className="crossing-product__coming">More Coming Soon</p>
@@ -107,7 +105,7 @@ export function AboutCrossing() {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="2"
-              data-crossing-label="where we come from"
+              data-crossing-label="origins"
               aria-labelledby="origins-title"
             >
               <h2 id="origins-title" className="crossing-heading">
@@ -131,7 +129,7 @@ export function AboutCrossing() {
               tabIndex={-1}
               className="crossing-band"
               data-crossing-band="3"
-              data-crossing-label="backed by"
+              data-crossing-label="backers"
               aria-labelledby="investors-title"
             >
               <h2 id="investors-title" className="crossing-heading">
@@ -149,23 +147,6 @@ export function AboutCrossing() {
                 <NameList names={FIRMS} className="crossing-firms__names" />
                 <p className="crossing-firms__more">and more</p>
               </div>
-              <OnwardLink href="#partnerships">who we work with</OnwardLink>
-            </section>
-
-            <section
-              id="partnerships"
-              tabIndex={-1}
-              className="crossing-band"
-              data-crossing-band="4"
-              data-crossing-label="partnerships"
-              aria-labelledby="partnerships-title"
-            >
-              <h2 id="partnerships-title" className="crossing-heading">
-                partnerships.
-              </h2>
-              <ul className="crossing-partners">
-                {PARTNERS.map((partner) => <li key={partner}>{partner}</li>)}
-              </ul>
               <OnwardLink href="#contact">work with us</OnwardLink>
             </section>
 
@@ -173,8 +154,8 @@ export function AboutCrossing() {
               id="contact"
               tabIndex={-1}
               className="crossing-band"
-              data-crossing-band="5"
-              data-crossing-label="work with us"
+              data-crossing-band="4"
+              data-crossing-label="contact"
               aria-labelledby="contact-title"
             >
               <h2 id="contact-title" className="crossing-heading">

@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { ATLASES, TEAM_VIDEO } from '@/lib/siteAssets';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 const AsciiCanvas = dynamic(
@@ -11,13 +12,11 @@ const AsciiCanvas = dynamic(
 /** Team symbol — Figma: Light F_5-2, Dark F_5-1 (reversed!) */
 export function AsciiTeamSymbol({ onReady }: { onReady?: () => void }) {
   const { theme } = useTheme();
-  const cellUrl = theme === 'dark'
-    ? '/resource/Monotone Cell F_5-1.png'
-    : '/resource/Monotone Cell F_5-2.png';
+  const cellUrl = ATLASES[theme].team;
 
   return (
     <AsciiCanvas
-      textureUrl="/resource/Source_Team symbol.mp4"
+      textureUrl={TEAM_VIDEO}
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"
       mosaicSize={9}

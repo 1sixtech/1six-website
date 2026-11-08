@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useLayoutEffect, useSyncExternalStore } from 'react';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { isIntroDone, subscribeIntroDone, setRouteVisualReady } from '@/lib/introState';
 import { AsciiHero } from '@/components/ascii/AsciiHero';
 
 /**
@@ -24,7 +26,7 @@ function randomChar() {
   );
 }
 
-function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
+function StaggeredScramble({ start, onComplete }: { start: boolean; onComplete: () => void }) {
   const [displayed, setDisplayed] = useState(['', '', '']);
   const [visible, setVisible] = useState([false, false, false]);
   const intervalsRef = useRef<ReturnType<typeof setInterval>[]>([]);
@@ -66,6 +68,7 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
   }, [onComplete]);
 
   useEffect(() => {
+    if (!start) return;
     // Capture the ref arrays at effect-setup time so the cleanup closure
     // does not read `.current` at teardown (which React flags as unsafe
     // because a ref can be reassigned mid-lifecycle). The arrays themselves
@@ -74,7 +77,7 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
     const timeouts = timeoutsRef.current;
     const intervals = intervalsRef.current;
 
-    // Thesis enters directly; the company-logo loader belongs to About.
+    // The text entrance starts when the site logo has finished.
     settledRef.current = 0;
     DELAYS.forEach((delay, i) => {
       timeouts.push(setTimeout(() => startScramble(i), delay));
@@ -84,7 +87,7 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
       timeouts.forEach(clearTimeout);
       intervals.forEach(clearInterval);
     };
-  }, [startScramble]);
+  }, [start, startScramble]);
 
   return (
     <span className="inline text-[var(--color-accent)]">
@@ -106,7 +109,7 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
 
 /** Remove the intro-lock class from <html>, re-enabling scroll & interaction */
 function unlockPage() {
-  document.documentElement.classList.remove('intro-lock');
+  document.documentElement.classList.remove('thesis-entry-lock');
 }
 
 /** Block keyboard-based scrolling while intro-lock is active */
@@ -117,24 +120,47 @@ const SCROLL_KEYS = new Set([
 ]);
 
 function blockScrollKeys(e: KeyboardEvent) {
-  if (document.documentElement.classList.contains('intro-lock') && SCROLL_KEYS.has(e.key)) {
+  if (document.documentElement.classList.contains('thesis-entry-lock') && SCROLL_KEYS.has(e.key)) {
     e.preventDefault();
   }
 }
 
 export function HeroSection() {
   const [bgReady, setBgReady] = useState(false);
+  const mountedRef = useRef(false);
+  const introDone = useSyncExternalStore(subscribeIntroDone, isIntroDone, () => false);
+  const reducedMotion = useReducedMotion();
 
-  // PageEntry locks Thesis before these effects. The scramble owns its
-  // unlock; keep the existing 2.5s safety net if completion never arrives.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    setRouteVisualReady('/thesis', false);
+    return () => {
+      mountedRef.current = false;
+      setRouteVisualReady('/thesis', false);
+    };
+  }, []);
+
+  const handleReady = useCallback(() => {
+    if (!mountedRef.current) return;
+    setBgReady(true);
+    setRouteVisualReady('/thesis', true);
+  }, []);
+
+  // This lock belongs only to the text entrance; it cannot release the
+  // site logo or the mobile slide capture. Start its safety timer with the text.
   useEffect(() => {
+    if (!introDone) return;
+    if (reducedMotion) {
+      unlockPage();
+      return;
+    }
     const fallback = setTimeout(unlockPage, 2500);
     window.addEventListener('keydown', blockScrollKeys, { passive: false });
     return () => {
       clearTimeout(fallback);
       window.removeEventListener('keydown', blockScrollKeys);
     };
-  }, []);
+  }, [introDone, reducedMotion]);
 
   return (
     <section
@@ -146,7 +172,7 @@ export function HeroSection() {
         className="absolute inset-0 transition-opacity duration-700 ease-out"
         style={{ opacity: bgReady ? 0.6 : 0 }}
       >
-        <AsciiHero onReady={() => setBgReady(true)} />
+        <AsciiHero onReady={handleReady} />
       </div>
 
       {/* Center text overlay */}
@@ -154,7 +180,9 @@ export function HeroSection() {
         className="relative z-10 max-w-[249px] md:max-w-none text-center text-[26px] md:text-[36px] font-normal leading-[1.25] tracking-[-0.52px] md:tracking-[-0.72px]"
         style={{ color: 'var(--color-text)' }}
       >
-        we haven&apos;t crossed the <StaggeredScramble onComplete={unlockPage} /> yet.
+        we haven&apos;t crossed the {reducedMotion ? (
+          <span className="text-[var(--color-accent)]">16%</span>
+        ) : <StaggeredScramble start={introDone} onComplete={unlockPage} />} yet.
       </h1>
     </section>
   );

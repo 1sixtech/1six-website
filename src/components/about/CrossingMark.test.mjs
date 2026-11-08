@@ -23,8 +23,7 @@ test('About mark: readiness follows the current mount and ignores a late callbac
     'react/jsx-runtime': { jsx, jsxs: jsx },
     '@/components/ascii/AsciiTeamSymbol': { AsciiTeamSymbol: symbol },
     '@/lib/introState': {
-      markAboutMarkReady: () => { ready = true; },
-      resetAboutMarkReady: () => { ready = false; },
+      setRouteVisualReady: (path, value) => { assert.equal(path, '/'); ready = value; },
     },
   };
   const exports = {};

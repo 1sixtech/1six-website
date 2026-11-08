@@ -781,3 +781,19 @@ The current entry ownership, bounded readiness wait, reduced-motion behavior, an
 regression checklist live in [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md). Earlier
 sections describe the loader where it lived at the time; they are not instructions
 to restore the old route coupling.
+
+---
+
+## 13. Shared first visual entry and background assets (2026-11-09)
+
+The owner approved a shared visual-entry logo and non-blocking shared preparation,
+with immediate Writing entry and no repeated logo on completed same-tab visits.
+Thesis's hero text now uses `thesis-entry-lock`, separate from the logo. Direct
+section links select their visible art as the readiness target and omit the
+hidden hero's lock. The mobile capture implementation and its cooldowns are unchanged.
+
+Background byte downloads feed the real media loaders through document-owned Blob
+URLs after a native iOS cache probe demonstrated a duplicate full transfer when a
+generic fetch was followed by media Range requests. Pending decoder warmup is reused
+and cancelled on route leave. Current ownership and verification requirements are in
+[docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md).

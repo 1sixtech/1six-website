@@ -23,15 +23,17 @@ web
 
 - The site supports fundraising conversations; it is not a sales funnel. Investors usually arrive through warm intros and decks, then use the site to check the story and the people.
 - The November 2026 website brief authorizes a product introduction for predict.everywhere.trade: "An esports-focused prediction market", the provided https://predict.everywhere.trade link, and "More Coming Soon". The final logo has not been supplied, so the name appears as text. The provided domain did not resolve during release verification; do not claim the product is live or substitute an unconfirmed URL.
-- "powered by Lighter" is withheld at the owner's request. Lighter remains in the separately authorized partnership list.
+- "powered by Lighter" is withheld at the owner's request. The entire Partnerships section is also withheld pending confirmation (2026-11-09).
 
 ## Capabilities and Constraints
 
 - Static marketing site on Next.js 16 / Vercel; copy lives in components; no CMS. Writing syncs at build time from the public `1sixtech/noctis-articles` repo through `scripts/sync-writing.mjs`; `WRITING_GIT_REF` optionally selects a reviewed commit or tag (default `main`).
 - The thesis scroll, intro sequence, and hero scramble logic carry a long bug history ([scroll history](THESIS_SCROLL_HISTORY.md), [grid plan](docs/PHASE5_GRID_PLAN.md)). The November 2026 feedback authorized the route move, fifth-slide wording, lint fixes, and intro lifecycle fixes. Keep changes to `ThesisSection.tsx`, `ThesisSectionMobile.tsx`, `thesisData.tsx`, `IntroOrchestrator.tsx`, `HeroSection.tsx`, and `hashScroll.ts` focused and verify desktop/mobile capture, direct/client entry, repeat visits, and route-leave cleanup.
 - Contact: investors and candidates reach 1SIX at contact@1six.tech (confirmed 2026-11-04).
-- About is the homepage at `/`: "we don't dream. we build.", products, origins, backers, partnerships, and "work with us", in that order. The ASCII "16" fills continuously from 16% to 100%, with a desktop percentage and a sticky mobile meter; reduced motion shows the complete state.
-- The company-logo fill loader belongs to About and runs once per tab while its rotating 16 prepares. Repeat visits and reduced motion skip it. The existing thesis experience lives at `/thesis`, including the world map tied to "the next 84%"; its text scramble and first-scroll header reveal remain, without the company-logo loader. Routes must never inherit another page's scroll lock or reveal mask. See [page entry](docs/PAGE_ENTRY.md).
+- About is the homepage at `/`: "we don't dream. we build.", products, origins, backers, and "work with us", in that order. The ASCII "16" fills continuously from 16% to 100%, with a desktop percentage and compact mobile header progress; reduced motion shows the complete state.
+- The first visual entry on About or Thesis uses the company-logo loader while the current screen prepares; Writing and other text-only entries open immediately. A completed same-tab visit or an already-warmed destination skips the logo. About also prepares Thesis assets in the background, without waiting for them before opening. The website keeps download hints separate from actual first-frame readiness. See [page entry](docs/PAGE_ENTRY.md).
+- The existing thesis experience lives at `/thesis`. Its text entrance has a separate lock from the logo and is omitted as a lock on direct section links; slide capture remains unchanged. Routes must never inherit another page's scroll lock or reveal mask.
+- About mobile prioritizes the first-screen message and product cue, keeps 17px body text, distinguishes products and backers from section labels, and preserves desktop composition. See [mobile design](docs/ABOUT_MOBILE_DESIGN.md).
 - Navigation is About (`/`), Thesis (`/thesis`), Writing (`/writing`). The old `/about`, `/research`, and `/team` routes are removed. The footer repeats the page links, contact@1six.tech, https://x.com/1sixtech, and the 2026–2027 copyright.
 - Writing has Research, Op-ed, and Announcements filters, shareable category URLs, independent author links, and useful empty states. Articles appear newest first. Missing category metadata defaults to Research; an unrecognized explicit category fails the build.
 
@@ -46,7 +48,7 @@ web
 
 - Backers: Naval Ravikant, Charlie Songhurst, Ken Ng (Uniswap Foundation co-founder), Loi Luu (WBTC creator), Lemniscap, Lambda, "and more".
 - Team origins: Harvard College and Schwarzman Scholars; IOI Medalists, ICPC World Finalists, and Codeforces Grandmasters. The older institution, protocol, finance, and special-forces claims are no longer part of the site.
-- Partnerships: USA Esports Association, KeSPA, AESF, IESF, and Lighter. These names are authorized; do not invent logo art or describe them as customers.
+- Pending partnerships: USA Esports Association, KeSPA, AESF, IESF, and Lighter. The owner says these are not yet confirmed (2026-11-09); the section and its links are hidden. Do not publish names, logos, or relationship claims until explicitly reconfirmed.
 - Research: "How Hyperliquid data feed latency is measured" (Dean N., 30 Oct 2026) at `/writing/001-hyperliquid-data-feed-latency`. The former "we measure" home section is removed; the article remains published.
 - Dean N.: First Prize, ICPC Asia Regional, 2021 and 2022, at `/writing/authors/dean-n`. His short bio describes his published work on financial infrastructure. Do not attribute the team's collective ICPC World Finalist credential to Dean.
 - Absent, never fabricate: additional names or bios, final product or partner logos, traction metrics, user counts, revenue, customer logos, testimonials, press, round size or terms, office locations.

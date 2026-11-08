@@ -59,14 +59,9 @@
 }
 
 /* ── Mobile meter ──
-   On a phone the mark scrolls away with the first band, so the crossing
-   rides in a slim strip of the header's own glass: the section being read
-   on the left, the fill as a live count on the right, and the accent line
-   along the bottom edge. It takes no layout space (negative margin), so
-   the page flows exactly as before beneath it.
-   The label names a section only once its title has gone up under the
-   strip (data-title, set by CrossingRoot): while a title is on screen the
-   title names the section, and the strip shows the count alone. */
+   On a phone the mark scrolls away with the first band. A compact strip
+   keeps a stable section name beside the count, so the adoption metaphor
+   also gives the reader orientation. It occupies no additional flow space. */
 
 .crossing-meter {
   position: sticky;
@@ -97,10 +92,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   transition: opacity 160ms var(--crossing-ease);
-}
-
-.crossing-meter[data-title='shown'] .crossing-meter__label {
-  opacity: 0;
 }
 
 .crossing-meter__count {
@@ -785,17 +776,47 @@
   }
 }
 
-/* ══════════════════════════════════════════════════════════
-   Phones (< 768px): rethought, not scaled down
-   ══════════════════════════════════════════════════════════
-   - The meter above carries the fill, so the mark prints at full ink,
-     larger, without its level line: on a phone it is the opening image,
-     and a mostly dimmed 16 at 170px read as a smudge.
-   - Scrolling is the next step on a phone, so the per-band "next" links
-     go; product links remain visible.
-   - The type roles and spacing roles above already carry phone values;
-     nothing here resizes type. */
+/* Phone composition: preserve the mark, but put the message and product cue
+   inside a real Safari content viewport. Desktop remains the paired-column story. */
 @media (max-width: 767px) {
+  .crossing {
+    --crossing-meter-h: 0px;
+    --crossing-rule-gap: 20px;
+    --crossing-head-gap: 20px;
+  }
+
+
+  .crossing-meter {
+    top: 0;
+    z-index: 51;
+    height: var(--site-header-h);
+    margin-bottom: calc(-1 * var(--site-header-h));
+    padding-left: 110px;
+    padding-right: 82px;
+    gap: 12px;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .crossing-band {
+    scroll-margin-top: calc(var(--crossing-header) + 20px);
+  }
+
+  [data-theme='dark'] .crossing:not([data-complete='true']) .crossing-mark__ink canvas {
+    filter: brightness(1.25);
+  }
+
+  .crossing-aside {
+    padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 20px);
+  }
+
+  .crossing-mark {
+    width: clamp(184px, 48vw, 208px);
+  }
+
   .crossing-mark__ink {
     -webkit-mask-image: none;
     mask-image: none;
@@ -805,7 +826,134 @@
     display: none;
   }
 
+  .crossing-band--statement {
+    padding-block: 16px 64px;
+  }
+
+  .crossing-display {
+    font-size: clamp(38px, 10.8vw, 44px);
+    line-height: 1.06;
+    letter-spacing: -0.03em;
+  }
+
+  .crossing-heading {
+    font-size: 28px;
+    line-height: 1.14;
+    letter-spacing: -0.02em;
+  }
+
+  .crossing-lead {
+    font-size: 19px;
+    line-height: 1.45;
+    letter-spacing: 0;
+  }
+
+  .crossing-body {
+    letter-spacing: 0;
+  }
+
+  .crossing-names,
+  .crossing-backer__name,
+  .crossing-firms__names {
+    font-size: 19px;
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+
+  .crossing-backer__name,
+  .crossing-firms__names {
+    font-size: 24px;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .crossing-product {
+    padding-block: 0 16px;
+  }
+
+  .crossing-product__tag {
+    display: none;
+  }
+
+  .crossing-product__name {
+    margin-top: 0;
+    font-size: 42px;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+  }
+
+  .crossing-product__name > span:last-child {
+    margin-top: 6px;
+    font-size: 17px;
+    line-height: 1.35;
+    letter-spacing: 0;
+  }
+
+  .crossing-product .crossing-body {
+    margin-top: 16px;
+    color: var(--color-text);
+  }
+
+  .crossing-product__visit {
+    margin-top: 12px;
+    font-size: 16px;
+    text-decoration: none;
+  }
+
+  .crossing-product__visit-label {
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 5px;
+  }
+
+  .crossing-product__coming {
+    border-top: 0;
+    padding-top: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
   .crossing-onward {
     display: none;
+  }
+
+  .crossing-band--statement > .crossing-onward {
+    display: inline-block;
+    margin-top: 20px;
+  }
+
+  /* The footer is shared; these rules affect About only. Keep one left axis
+     and a stable two-column layout rather than rewrapping at 394px. */
+  body:has(.crossing) .site-footer-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  body:has(.crossing) .site-footer-column {
+    min-width: 0;
+    text-align: left;
+  }
+
+  body:has(.crossing) .site-footer-column:nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  body:has(.crossing) .site-footer-column:nth-child(3) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  body:has(.crossing) .site-footer-column ul {
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  body:has(.crossing) .site-footer-column a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
   }
 }

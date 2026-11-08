@@ -34,7 +34,8 @@ export const BACKERS: Backer[] = [
 
 export const FIRMS = ['Lemniscap', 'Lambda'];
 
-export const PARTNERS = [
+// Pending confirmation; intentionally not rendered. See PRODUCT.md.
+export const PENDING_PARTNERS = [
   'USA Esports Association',
   'KeSPA',
   'AESF',

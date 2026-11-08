@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
+import { ATLASES, MAP_IMAGE } from '@/lib/siteAssets';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import {
@@ -37,11 +38,9 @@ function getServerIsMobile(): boolean {
 }
 
 /** World Map — Figma: Light F_2-1, Dark F_2-2 */
-export function AsciiMapCanvas() {
+export function AsciiMapCanvas({ onReady }: { onReady?: () => void }) {
   const { theme } = useTheme();
-  const cellUrl = theme === 'dark'
-    ? '/resource/Monotone Cell F_2-2.png'
-    : '/resource/Monotone Cell F_2-1.png';
+  const cellUrl = ATLASES[theme].graph;
 
   const isMobile = useSyncExternalStore(
     subscribeToMobileQuery,
@@ -53,7 +52,7 @@ export function AsciiMapCanvas() {
 
   return (
     <AsciiCanvas
-      textureUrl="/resource/Source_World map.webp"
+      textureUrl={MAP_IMAGE}
       textureType="image"
       mosaicCellUrl={cellUrl}
       className="absolute inset-0 h-full w-full"
@@ -81,6 +80,7 @@ export function AsciiMapCanvas() {
       // A still image: redraw on the noise ticks (9 a second), not on every
       // frame of a 120-240 Hz display.
       renderOnDemand
+      onReady={onReady}
       eager
     />
   );

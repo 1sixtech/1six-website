@@ -1,3 +1,5 @@
+import { warmedAssetSource } from './assetWarmup';
+
 /**
  * videoPool — Global HTMLVideoElement cache with reference counting.
  *
@@ -35,12 +37,13 @@ const warmupPromises = new Map<string, Promise<HTMLVideoElement>>();
 const pooledVideos = new WeakSet<HTMLVideoElement>();
 const refCount = new WeakMap<HTMLVideoElement, number>();
 
+const pendingCancels = new Map<string, () => void>();
 const WARMUP_TIMEOUT_MS = 8000;
 
 /**
  * Warm up a single video URL. Returns a cached promise on repeat calls.
- * Resolves with the `HTMLVideoElement` once `canplay` fires AND `play()`
- * succeeds. Rejects on error or after `WARMUP_TIMEOUT_MS`.
+ * Resolves with a decoded first frame at `canplay`, even when autoplay is
+ * blocked. Rejects on error, timeout, or route teardown.
  *
  * On rejection, the cached warmupPromise entry is cleared so a later
  * retry gets a fresh attempt instead of being permanently poisoned by a
@@ -53,7 +56,7 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
   const promise = new Promise<HTMLVideoElement>((resolve, reject) => {
     const video = document.createElement('video');
     // #t=0.001 forces iOS Safari to decode the first frame even when hidden
-    video.src = url + '#t=0.001';
+    video.src = warmedAssetSource(url) + '#t=0.001';
     video.muted = true;
     video.playsInline = true;
     video.setAttribute('playsinline', '');
@@ -64,13 +67,23 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
+      clearPending();
+      warmupPromises.delete(url);
+      video.removeAttribute('src');
+      video.load();
       reject(new Error(`videoPool: warmup timeout for ${url}`));
     }, WARMUP_TIMEOUT_MS);
 
+    const clearPending = () => {
+      clearTimeout(timeout);
+      pendingCancels.delete(url);
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('error', onError);
+    };
     const onCanPlay = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      clearPending();
       // `canplay` means a frame is decoded, so the element is usable NOW.
       // Pool it regardless of whether play() will be allowed: under iOS Low
       // Power Mode / autoplay policy, play() is rejected, but the pooled video
@@ -83,7 +96,7 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       pooledVideos.add(video);
       refCount.set(video, 0);
       video.play().then(() => {
-        try { video.pause(); } catch {
+        try { if ((refCount.get(video) ?? 0) === 0) video.pause(); } catch {
           // Some mobile browsers reject pause() right after play(); ignore —
           // acquire() calls play() unconditionally when a canvas takes over.
         }
@@ -97,12 +110,20 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
     const onError = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      clearPending();
       warmupPromises.delete(url);
       const mediaErr = video.error;
       reject(new Error(`videoPool: load error for ${url}${mediaErr ? ` (code ${mediaErr.code})` : ''}`));
     };
 
+    pendingCancels.set(url, () => {
+      if (settled) return;
+      settled = true;
+      clearPending();
+      video.removeAttribute('src');
+      video.load();
+      reject(new Error(`videoPool: cancelled warmup for ${url}`));
+    });
     video.addEventListener('canplay', onCanPlay, { once: true });
     video.addEventListener('error', onError, { once: true });
     video.load();
@@ -121,9 +142,12 @@ export function warmupAll(urls: readonly string[]): Promise<PromiseSettledResult
   return Promise.allSettled(urls.map(warmup));
 }
 
-/**
- * Look up a pooled video by URL. Returns `undefined` if not yet warmed.
- */
+/** Reuse an existing request; a miss must not create another decoder. */
+export function getWarmup(url: string): Promise<HTMLVideoElement> | undefined {
+  return warmupPromises.get(url);
+}
+
+/** Look up a decoded pooled video without starting a request. */
 export function get(url: string): HTMLVideoElement | undefined {
   return pool.get(url);
 }
@@ -178,6 +202,8 @@ export function release(video: HTMLVideoElement): void {
  * multiple times.
  */
 export function teardownVideoPool(): void {
+  for (const cancel of pendingCancels.values()) cancel();
+  pendingCancels.clear();
   for (const video of pool.values()) {
     try {
       video.pause();

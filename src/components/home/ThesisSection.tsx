@@ -40,9 +40,9 @@ if (typeof window !== 'undefined') {
   // trigger positions after intro-lock's overflow:hidden is removed.
   if (ScrollTrigger.isTouch === 1) {
     const html = document.documentElement;
-    if (html.classList.contains('intro-lock')) {
+    if (html.classList.contains('intro-lock') || html.classList.contains('thesis-entry-lock')) {
       const mo = new MutationObserver(() => {
-        if (!html.classList.contains('intro-lock')) {
+        if (!html.classList.contains('intro-lock') && !html.classList.contains('thesis-entry-lock')) {
           mo.disconnect();
           requestAnimationFrame(() => ScrollTrigger.refresh(true));
         }

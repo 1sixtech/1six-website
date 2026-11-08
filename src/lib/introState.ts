@@ -1,22 +1,44 @@
-/** Readiness belongs to the current About mark, not a previous route visit. */
-let ready = false;
+/** The logo's session frequency is independent of media/cache readiness. */
+let seen = false;
+const visualReady = new Map<string, boolean>([['/', false], ['/thesis', false], ['/thesis#thesis', false], ['/thesis#products', false]]);
 
-export function isAboutMarkReady(): boolean {
-  return ready;
+export function hasSeenIntro(): boolean {
+  if (seen || document.documentElement.dataset.introExpired === 'true') return true;
+  try { return sessionStorage.getItem('siteIntroSeen') === '1'; } catch { return false; }
 }
 
-export function markAboutMarkReady(): void {
-  if (ready) return;
-  ready = true;
-  window.dispatchEvent(new CustomEvent('about-mark:ready'));
+export function markIntroSeen(): void {
+  seen = true;
+  try { sessionStorage.setItem('siteIntroSeen', '1'); } catch { /* This document still remembers. */ }
 }
 
-export function resetAboutMarkReady(): void {
-  ready = false;
+export function isRouteVisualReady(pathname: string): boolean {
+  // Writing, authors, and error pages have server-rendered text above the fold.
+  return visualReady.get(pathname) ?? true;
+}
+
+export function setRouteVisualReady(pathname: string, ready: boolean): void {
+  if (visualReady.get(pathname) === ready) return;
+  visualReady.set(pathname, ready);
+  window.dispatchEvent(new CustomEvent('entry:ready'));
+}
+
+export function subscribeIntroDone(listener: () => void): () => void {
+  window.addEventListener('entry:intro-done', listener);
+  return () => window.removeEventListener('entry:intro-done', listener);
+}
+
+export function isIntroDone(): boolean {
+  return document.documentElement.dataset.introActive !== 'true';
 }
 
 declare global {
   interface WindowEventMap {
-    'about-mark:ready': CustomEvent;
+    'entry:ready': CustomEvent;
+    'entry:intro-done': CustomEvent;
   }
+}
+
+export function needsVisualReadiness(target: string): boolean {
+  return visualReady.has(target);
 }

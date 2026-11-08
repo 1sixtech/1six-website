@@ -589,6 +589,20 @@ export class AscMosaic {
     return state;
   }
 
+  /** A texture handle is not image readiness. Disposal releases a waiting init. */
+  waitForSceneTextures(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const check = () => {
+        if (this.disposed) reject(new Error('Mosaic disposed before source was ready'));
+        else if (this.sceneTextureState() !== 'loading') resolve();
+        else if (Date.now() >= deadline) reject(new Error('Mosaic source readiness timed out'));
+        else setTimeout(check, 16);
+      };
+      check();
+    });
+  }
+
   stopAnimate(): void {
     this.isAnimating = false;
     if (this.animationFrameId !== null) {

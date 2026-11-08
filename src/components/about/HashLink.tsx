@@ -35,7 +35,7 @@ export function HashLink({ href, onClick, children, ...rest }: HashLinkProps) {
 
     event.preventDefault();
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    target.scrollIntoView({ behavior: reduceMotion || event.detail === 0 ? 'auto' : 'smooth', block: 'start' });
     if (window.location.hash !== href) {
       window.history.pushState(null, '', href);
     }

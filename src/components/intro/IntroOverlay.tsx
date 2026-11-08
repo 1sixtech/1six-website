@@ -4,7 +4,7 @@ import { forwardRef, type RefObject } from 'react';
 import { LogoFillSvg } from './LogoFillSvg';
 
 /**
- * IntroOverlay — Full-screen fixed container shown on the homepage during
+ * IntroOverlay — Full-screen fixed container shown on an eligible first visual entry during
  * the intro. Pure presentation: the actual animation is driven by
  * IntroOrchestrator which receives the fillRectRef via props.
  *

@@ -25,12 +25,13 @@ function canvasHarness({ reduced = false, image = false } = {}) {
         const i = cursor++; hooks[i] ??= { value: initial };
         return [hooks[i].value, (value) => { hooks[i].value = value; }];
       },
-      useCallback: (fn) => fn, useEffect: (setup) => effects.push(setup),
+      useMemo: (fn) => fn(), useCallback: (fn) => fn, useEffect: (setup) => effects.push(setup),
     },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     '@/hooks/useReducedMotion': { useReducedMotion: () => reduced },
     '@/hooks/useDevicePixelRatio': { useDevicePixelRatio: () => 1 },
-    '@/lib/videoPool': { get: () => undefined },
+    '@/lib/videoPool': { get: () => undefined, getWarmup: () => undefined },
+    '@/lib/assetWarmup': { warmedAssetSource: (url) => url },
     './pixelScale': { outputPixelRatio: () => 1, toDevicePixels: (options) => options },
     '@/lib/ascmosaic': { AscMosaic: class { constructor() { throw new Error('WebGL unavailable'); } } },
   };

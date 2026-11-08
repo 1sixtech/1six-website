@@ -3,6 +3,22 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.3.0] - 2026-11-09
+
+### Changed
+
+- About and Thesis share a first visual-entry logo, while Writing opens immediately. Repeat visits and warmed destinations skip the logo; only the current screen's media and fonts hold entry.
+- About prepares Thesis assets in the background. Bounded byte downloads are reused by the actual media consumers, including iOS video Range handling, without constructing other pages' scenes.
+- Direct section entries wait for their own art. Thesis text locking is separate from the logo and slide capture, and pending video warmup is reused and cancelled on route leave.
+- Partnership names and links are hidden pending confirmation.
+- About mobile now has a compact first screen with a visible product cue, integrated header progress, clearer product/backer typography, and a stable About-only footer grid. Body readability and ordinary section spacing are preserved.
+
+### Fixed
+
+- Text-only pages remain readable without JavaScript; a pre-hydration watchdog releases stalled visual entrances.
+- Image-source readiness waits for actual image data, including direct world-map entry; cancellation and timeouts release obsolete work.
+- Background preparation resumes after returning to a visible tab, while foreground navigation retains priority.
+
 ## [0.3.2.0] - 2026-11-08
 
 ### Fixed

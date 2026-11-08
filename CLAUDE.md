@@ -57,7 +57,7 @@ src/
       ThesisGraph.tsx, ProductMap.tsx (the world map), ProductsHeading.tsx, ...
     about/                    # AboutCrossing (home bands), CrossingMark (ASCII 16 + percentage),
                               # CrossingRoot/crossingProgress (continuous fill), about.css,
-                              # aboutData.ts (confirmed origins, backers, partnerships)
+                              # aboutData.ts (origins, backers, pending partnerships)
     intro/                    # PageEntry, IntroOrchestrator, IntroOverlay
     writing/                  # WritingIndex filters, ArticleList, full-size FigureViewer
     team/                     # CareersSection.tsx (parked, not rendered)
@@ -72,7 +72,7 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
-    themeInit.ts              # Theme + About loader / Thesis scramble bootstrap, inlined in <head>
+    themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
       asciiMosaicFilter.ts    # ASCII rendering algorithm
@@ -128,20 +128,26 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 | **GSAP** + ScrollTrigger + Observer | Scroll-driven animations, pinned sections |
 | **Three.js** via `AscMosaic` | WebGL ASCII mosaic rendering from video/images |
 | **use-scramble** | Character scramble text reveal effects |
-| **Passive scroll + requestAnimationFrame** | Home crossing: continuous 16% → 100% fill, desktop percentage, and sticky mobile meter |
+| **Passive scroll + requestAnimationFrame** | Home crossing: continuous 16% → 100% fill, desktop percentage, and compact mobile header progress |
 | **View Transitions** | Whole-page cross-fade on theme switch (ThemeProvider) |
 
 GSAP animations must be cleaned up with `useGSAP()` context or manual `gsap.context()` + `revert()`. Always check `useReducedMotion()` and skip or simplify animations accordingly.
 
-The company-logo loader belongs to About (`/`) and runs once per tab (`aboutIntroSeen`). It waits
-for the current rotating 16 canvas or decoded fallback frame; the mark initializes eagerly behind
-the mask. Repeat visits and reduced motion skip both the logo and its lock. `IntroOrchestrator`
-removes the mask and lock after reveal, with a five-second readiness deadline for failed assets.
-The head bootstrap prepares direct loads; `PageEntry` prepares client navigation before passive
-effects and clears masks/locks on route leave. An obsolete effect must never reveal another route.
-Thesis keeps its own text-scramble lock, video warmup, and first-scroll header reveal, without the
-company logo. Home and Writing show the header immediately. The crossing listens for reduced-motion
-changes and writes 100% directly. See [page entry](docs/PAGE_ENTRY.md) for ownership and checks.
+The first visual entry on About or Thesis may show the company-logo loader. Writing and other
+text-only entries stay immediate. `siteIntroSeen` controls same-tab brand frequency, independently
+of actual media readiness; an already-warmed visual destination also skips the logo. Entry waits
+only for the requested screen and fonts, with a five-second deadline. The head script independently
+unlocks after eight seconds if application chunks never hydrate. `PageEntry` owns the site mask;
+HeroSection owns a separate `thesis-entry-lock`, so it cannot release the logo. Direct Thesis
+section links wait for their target scene and do not acquire the offscreen hero's text lock.
+
+Shared visual downloads use two low-priority workers and a bounded, document-owned Blob cache
+(~1.14 MB for the current allowlist). Native iOS testing showed generic fetch followed by media
+Range requests downloaded the video twice; renderers and videoPool consume the retained Blob URL
+instead. No foreign-route decoder or WebGL canvas is created by this cache. Navigation interrupts
+background work; visibility resumes it after foreground readiness or its deadline. Reduced motion and
+Save-Data suppress optional warming. Renderer readiness still requires actual atlas/frame data.
+See [page entry](docs/PAGE_ENTRY.md) for ownership, repeat visits, and regression checks.
 
 ### Three.js / AscMosaic
 
@@ -170,7 +176,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 
 ### Performance
 
-- `PageEntry` warms the eight Thesis videos only on `/thesis`; About initializes just its rotating mark behind the logo loader
+- `PageEntry` prioritizes the entry screen, then warms shared bytes and Next routes; the open Thesis route can prime remaining videos after its entry scene is ready or the five-second deadline expires
 - `CrossingRoot` writes fill values only to `.crossing-mark` and `.crossing-meter__fill`, keeping per-frame style changes off the full story root
 - `/resource/*` and `/fonts/*` cached with `Cache-Control: immutable, 1 year`
 - Image optimization: webp + avif formats via Next.js
@@ -223,7 +229,7 @@ import './globals.css';
 
 | Path | Description |
 |------|-------------|
-| `/` | About: statement, products, origins, backers, partnerships, contact |
+| `/` | About: statement, products, origins, backers, contact |
 | `/thesis` | Existing hero, thesis scroll, graph, and world map |
 | `/writing` | Published writing with All, Research, Op-ed, and Announcements filters |
 | `/writing/[slug]` | Article with contents, author link, and full-size figures |
@@ -232,7 +238,7 @@ import './globals.css';
 Navigation order is About, Thesis, Writing. `/about`, `/research`, and `/team` are removed without
 redirects. Unknown article and author slugs return 404.
 
-Home anchors: `/#products`, `/#origins`, `/#investors`, `/#partnerships`, `/#contact`.
+Home anchors: `/#products`, `/#origins`, `/#investors`, `/#contact`.
 Thesis anchors: `/thesis#thesis`, `/thesis#products`.
 
 SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
@@ -270,6 +276,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - Three.js is transpiled via `next.config.ts` (`transpilePackages: ['three']`)
 - Only Three.js uses experimental `optimizePackageImports`; GSAP is excluded because its plugin registration and ticker must stay intact
 - Some sections are hidden/incomplete: `CareersSection` content not ready
+- Partnerships are hidden pending confirmation; do not re-enable the section or links without explicit authorization.
 - Confirmed product, author, partner, and pedigree claims are recorded in [PRODUCT.md](PRODUCT.md); do not invent facts or logos
 - Assets in `/public/resource/` include large video files — not included in git history tracking for new clones
 
@@ -278,6 +285,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
 - [TODOS.md](TODOS.md): remaining work and completed release items.
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
+- [docs/ABOUT_MOBILE_DESIGN.md](docs/ABOUT_MOBILE_DESIGN.md): mobile About composition, type roles, spacing, and review evidence.
 - [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.

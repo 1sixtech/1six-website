@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback, type SyntheticEvent } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo, type SyntheticEvent } from 'react';
 import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import * as videoPool from '@/lib/videoPool';
+import { warmedAssetSource } from '@/lib/assetWarmup';
 import { outputPixelRatio, toDevicePixels } from './pixelScale';
 // Type only: the class itself is imported dynamically (Three.js stays out of SSR).
 import type { AscMosaic } from '@/lib/ascmosaic';
@@ -174,6 +175,8 @@ export function AsciiCanvas({
   eager = false,
   onReady,
 }: AsciiCanvasProps) {
+  const fallbackSource = useMemo(() => warmedAssetSource(textureUrl), [textureUrl]);
+
   // Default: no auto-rotation for planes
   const resolvedAutoRotate = autoRotate ?? (shape !== 'plane');
   // Auto-detect texture type from file extension
@@ -275,11 +278,16 @@ export function AsciiCanvas({
     let mosaic: AscMosaic | null = null;
 
     try {
+      const pendingVideo = resolvedTextureType === 'video' ? videoPool.getWarmup(textureUrl) : undefined;
+      const existingVideo = pendingVideo ? await pendingVideo.catch(() => undefined) : undefined;
+      if (!mountedRef.current || token !== initTokenRef.current) return;
+
       // Remove any leftover canvases from previous instances
       container.querySelectorAll('canvas').forEach(c => c.remove());
 
       // Dynamic import to avoid SSR issues with Three.js
       const { AscMosaic } = await import('@/lib/ascmosaic');
+      if (!mountedRef.current || token !== initTokenRef.current) return;
 
       mosaic = new AscMosaic(container, {
         orthographic,
@@ -321,12 +329,9 @@ export function AsciiCanvas({
       // Add model with texture (supports both image and video).
       // For video textures, try the videoPool first — if a warmed element
       // exists, AscMosaic reuses it and skips the network fetch path.
-      const existingVideo = resolvedTextureType === 'video'
-        ? videoPool.get(textureUrl)
-        : undefined;
       await mosaic.addModel({
         shape,
-        textureUrl,
+        textureUrl: warmedAssetSource(textureUrl),
         textureType: resolvedTextureType,
         width: planeWidth,
         height: planeHeight,
@@ -355,7 +360,7 @@ export function AsciiCanvas({
       // Enable ASCII mosaic filter with all options at once
       await mosaic.enableAsciiMosaicFilter({
         mosaicSize: device.mosaicSize,
-        mosaicCellTextureUrl: mosaicCellUrl,
+        mosaicCellTextureUrl: warmedAssetSource(mosaicCellUrl),
         cellCount,
         setSelectionMode,
         setCount,
@@ -373,6 +378,8 @@ export function AsciiCanvas({
         // The scene is read once per cell: keep its target at CSS pixels.
         targetScale: device.targetScale,
       });
+
+      await mosaic.waitForSceneTextures();
 
       // Second race check: enableAsciiMosaicFilter internally polls for up
       // to 5 seconds, and destroyMosaic can run at any point during that
@@ -512,7 +519,7 @@ export function AsciiCanvas({
       >
         {isVideo ? (
           <video
-            src={`${textureUrl}#t=${fallbackFrameTime}`}
+            src={`${fallbackSource}#t=${fallbackFrameTime}`}
             muted
             playsInline
             preload="metadata"
@@ -524,7 +531,7 @@ export function AsciiCanvas({
           />
         ) : (
           <img
-            src={textureUrl}
+            src={fallbackSource}
             alt=""
             onLoad={onReady}
             className="h-full w-full object-cover opacity-30 grayscale"

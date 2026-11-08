@@ -30,7 +30,7 @@ function eventSource() {
   };
 }
 
-function crossingHarness({ reducedMotion = false } = {}) {
+function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
   let effect;
   const observers = [];
   let frameId = 0;
@@ -51,14 +51,22 @@ function crossingHarness({ reducedMotion = false } = {}) {
   // Contact's document position makes the scrolling span exactly 1000px:
   // 1736 - 800 (viewport) + 64 (contact inset).
   const end = { getBoundingClientRect: () => ({ bottom: 1736 - window.scrollY }) };
+  const meter = { dataset: {}, getBoundingClientRect: () => ({ height: 54, bottom: 54 }) };
+  const label = { textContent: 'about' };
+  const bands = [
+    { dataset: { crossingLabel: 'about' }, getBoundingClientRect: () => ({ top: -window.scrollY }) },
+    { dataset: { crossingLabel: 'products' }, getBoundingClientRect: () => ({ top: 600 - window.scrollY }) },
+  ];
   const root = {
     dataset: {},
     getBoundingClientRect: () => ({ top: -window.scrollY }),
-    querySelector: (selector) => selector === '[data-crossing-end]' ? end : null,
+    querySelector: (selector) => selector === '[data-crossing-end]' ? end
+      : withMeter && selector === '.crossing-meter' ? meter
+      : withMeter && selector === '[data-crossing-label-target]' ? label : null,
     querySelectorAll: (selector) => ({
       '[data-crossing-count]': counts,
       '.crossing-mark, .crossing-meter__fill': fillTargets,
-      '[data-crossing-band]': [],
+      '[data-crossing-band]': withMeter ? bands : [],
     })[selector] ?? [],
   };
   const dependencies = {
@@ -77,7 +85,7 @@ function crossingHarness({ reducedMotion = false } = {}) {
       return dependencies[specifier];
     },
     window,
-    getComputedStyle: () => ({ getPropertyValue: () => '0px' }),
+    getComputedStyle: () => ({ getPropertyValue: (name) => !withMeter ? '0px' : name === '--crossing-meter-h' ? '24px' : '54px' }),
     ResizeObserver: class {
       constructor(callback) {
         this.callback = callback;
@@ -102,7 +110,7 @@ function crossingHarness({ reducedMotion = false } = {}) {
   const cleanup = effect();
 
   return {
-    root, counts, fills, motion, window, frames, cancelled, observer: observers[0], cleanup,
+    root, label, counts, fills, motion, window, frames, cancelled, observer: observers[0], cleanup,
     paint() {
       for (const [id, callback] of [...frames]) {
         frames.delete(id);
@@ -159,4 +167,17 @@ test('crossing: cleanup cancels pending paint and removes scroll, resize and pre
   crossing.paint();
   assert.equal(crossing.frames.size, 0);
   assert.deepEqual(crossing.counts.map((element) => element.textContent), ['58%', '58%']);
+});
+
+
+test('crossing: the compact mobile meter keeps a section cue at the reading edge', () => {
+  const crossing = crossingHarness({ withMeter: true });
+  try {
+    crossing.window.scrollY = 0; crossing.paint();
+    assert.equal(crossing.label.textContent, 'about');
+    crossing.window.scrollY = 530; crossing.window.emit('scroll'); crossing.paint();
+    assert.equal(crossing.label.textContent, 'products');
+    crossing.window.scrollY = 200; crossing.window.emit('scroll'); crossing.paint();
+    assert.equal(crossing.label.textContent, 'about');
+  } finally { crossing.cleanup(); }
 });
