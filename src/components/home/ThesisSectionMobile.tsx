@@ -105,6 +105,16 @@ export function ThesisSectionMobile() {
   // Android-late-IO failure modes in one shot.
   const sectionTopAbsRef = useRef<number | null>(null);
 
+  const reportCapture = useCallback((event: string) => {
+    if (!window.location.search.includes('capture-debug')) return;
+    window.dispatchEvent(new CustomEvent('1six:capture-diagnostic', { detail: {
+      event, y: window.scrollY, cached: sectionTopAbsRef.current,
+      state: stateRef.current, previousY: prevScrollYRef.current,
+      suspendedFor: Math.max(0, captureSuspendedUntilRef.current - Date.now()),
+      blocked: blockedSentinel.current, pendingHash: pendingHashCaptureRef.current,
+    } }));
+  }, []);
+
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     setActiveIndex(swiper.activeIndex);
   }, []);
@@ -116,7 +126,8 @@ export function ThesisSectionMobile() {
   const preventPageScroll = useCallback((e: TouchEvent) => {
     if (stateRef.current !== 'captured') return;
     e.preventDefault();
-  }, []);
+    reportCapture(e.defaultPrevented ? 'touchmove-prevented' : 'touchmove-not-prevented');
+  }, [reportCapture]);
 
   // ── Capture: snap to thesis and block page scroll ──
   //
@@ -145,6 +156,7 @@ export function ThesisSectionMobile() {
   //      suspenders fallback against any future iOS version that
   //      starts ignoring html overflow:hidden.
   const capture = useCallback((fromDirection: 'top' | 'bottom', sectionTopAbs: number) => {
+    reportCapture(`attempt-${fromDirection}`);
     if (stateRef.current !== 'idle') return;
     stateRef.current = 'captured';
     pendingHashCaptureRef.current = false;
@@ -227,7 +239,8 @@ export function ThesisSectionMobile() {
 
     // Step 4: document-level touchmove block (iPhone belt-and-suspenders).
     document.addEventListener('touchmove', preventPageScroll, { passive: false });
-  }, [preventPageScroll]);
+    reportCapture(`capture-${fromDirection}`);
+  }, [preventPageScroll, reportCapture]);
 
   const flushPendingCapture = useCallback(() => {
     const section = sectionRef.current;
@@ -283,6 +296,7 @@ export function ThesisSectionMobile() {
       swiperRef.current.allowTouchMove = false;
     }
     setIsCaptured(false);
+    reportCapture('stop-capture');
 
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     blockedSentinel.current = blockedBoundary;
@@ -292,7 +306,7 @@ export function ThesisSectionMobile() {
     cooldownTimer.current = setTimeout(() => {
       blockedSentinel.current = null;
     }, CAPTURE_SUSPEND_MS);
-  }, [preventPageScroll]);
+  }, [preventPageScroll, reportCapture]);
 
   // ── Release: restore page scroll ──
   //
@@ -410,6 +424,7 @@ export function ThesisSectionMobile() {
 
     const computeTopAbs = () => {
       sectionTopAbsRef.current = getAbsoluteOffsetTop(section);
+      reportCapture('measure');
     };
 
     computeTopAbs();
@@ -442,7 +457,7 @@ export function ThesisSectionMobile() {
       if (vv) vv.removeEventListener('resize', computeTopAbs);
       mo.disconnect();
     };
-  }, []);
+  }, [reportCapture]);
 
   // ── Top sentinel: detect scroll down into thesis ──
   // Sentinel sits directly above the thesis section, so when it leaves the
@@ -546,6 +561,7 @@ export function ThesisSectionMobile() {
 
       const currentScrollY = window.scrollY;
       const prevScrollY = prevScrollYRef.current;
+      reportCapture('scroll');
       prevScrollYRef.current = currentScrollY;
 
       // Pending-hash fallback: uses a fresh rect intentionally — hash nav
@@ -599,7 +615,7 @@ export function ThesisSectionMobile() {
 
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [capture]);
+  }, [capture, reportCapture]);
 
   useEffect(() => {
     if (window.location.hash !== '#thesis') return;
@@ -719,6 +735,7 @@ export function ThesisSectionMobile() {
   }, [releaseForProgrammaticNavigation, suspendCapture]);
 
   useEffect(() => {
+    reportCapture('capture-effects-setup');
     return () => {
       document.removeEventListener('touchmove', preventPageScroll);
       // Defensive: if the component unmounts mid-capture (e.g. route change
@@ -727,10 +744,11 @@ export function ThesisSectionMobile() {
       // nor the captured-state marker that the CSS rules check against.
       document.documentElement.classList.remove('thesis-scroll-lock');
       delete document.documentElement.dataset.thesisCaptured;
+      reportCapture('capture-effects-cleanup');
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       if (suspendTimerRef.current) clearTimeout(suspendTimerRef.current);
     };
-  }, [preventPageScroll]);
+  }, [preventPageScroll, reportCapture]);
 
   return (
     <>
@@ -769,6 +787,7 @@ export function ThesisSectionMobile() {
             // first touch that lands on the not-yet-captured slide is
             // guaranteed to be ignored by Swiper.
             swiper.allowTouchMove = false;
+            reportCapture('swiper-created');
           }}
           onSlideChange={handleSlideChange}
           className="h-full w-full"

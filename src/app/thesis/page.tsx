@@ -6,6 +6,7 @@ import { ProductsHeading } from '@/components/home/ProductsHeading';
 import { ProductMap } from '@/components/home/ProductMap';
 import { ScrollRevealWrapper } from '@/components/ui/ScrollRevealWrapper';
 import { ScrollToTop } from '@/components/ui/ScrollToTop';
+import { ThesisDiagnostics } from '@/components/home/ThesisDiagnostics';
 
 export const metadata: Metadata = {
   title: 'Thesis',
@@ -22,6 +23,7 @@ export default function ThesisPage() {
   return (
     <>
       <ScrollToTop />
+      <ThesisDiagnostics />
       <HeroSection />
       <ThesisSection />
       <ThesisGraph />
