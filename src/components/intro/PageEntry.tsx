@@ -1,75 +1,93 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import { usePathname } from 'next/navigation';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { cancelAssetWarmup, hasWarmedEntry, warmSharedAssets } from '@/lib/assetWarmup';
+import { hasSeenIntro, needsVisualReadiness, isRouteVisualReady } from '@/lib/introState';
+import { entryVisualTarget, HERO_VIDEO, THESIS_VIDEOS, THESIS_SLIDE_VIDEOS } from '@/lib/siteAssets';
+import { teardownVideoPool, warmupAll } from '@/lib/videoPool';
 import { IntroOverlay } from './IntroOverlay';
 import { IntroOrchestrator } from './IntroOrchestrator';
-import { teardownVideoPool, warmupAll } from '@/lib/videoPool';
 
-// Keep the Thesis decoder warmup independent of the About logo loader.
-const THESIS_VIDEOS = [
-  '/resource/Source_Desert.mp4',
-  '/resource/Source_About 01.mp4',
-  '/resource/Source_About 02.mp4',
-  '/resource/Source_About 03.mp4',
-  '/resource/Source_About 04.mp4',
-  '/resource/Source_About 05.mp4',
-  '/resource/Source_About 06.mp4',
-  '/resource/Source_Graph.mp4',
-];
-
-/** Prepare route entry before child passive effects, matching the head bootstrap. */
+/** Coordinate the brand entrance, route-local text lock, and non-blocking downloads. */
 export function PageEntry() {
   const pathname = usePathname();
+  const router = useRouter();
+  const sequence = useRef(0);
+  const warmupEligible = useRef(false);
   const fillRectRef = useRef<SVGRectElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
-    if (pathname !== '/' && pathname !== '/thesis') return;
     const html = document.documentElement;
     const main = document.getElementById('main-content');
     mainContentRef.current = main;
-    if (pathname === '/thesis') {
-      // HeroSection owns this lock until its text scramble completes.
-      html.classList.add('intro-lock');
-    } else if (!html.dataset.introActive && !html.dataset.introSkip) {
-      let skip = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      try {
-        skip ||= sessionStorage.getItem('aboutIntroSeen') === '1';
-      } catch {
-        // Storage is optional; the motion preference still applies.
-      }
-      if (skip) {
+    html.dataset.entryHydrated = 'true';
+    html.dataset.entryId = String(++sequence.current);
+    const target = entryVisualTarget(pathname, window.location.hash);
+    html.dataset.entryTarget = target;
+    warmupEligible.current = false;
+    cancelAssetWarmup(); // Foreground navigation always gets priority.
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const theme = html.dataset.theme === 'dark' ? 'dark' : 'light';
+    const visualRoute = needsVisualReadiness(target);
+    if (target === '/thesis' && !reduced && html.dataset.introExpired !== 'true') html.classList.add('thesis-entry-lock');
+    if (!html.dataset.introActive && !html.dataset.introSkip) {
+      if (!visualRoute || reduced || hasSeenIntro() || hasWarmedEntry(target, theme)) {
         html.dataset.introSkip = 'true';
       } else {
         html.classList.add('intro-lock');
         html.dataset.introActive = 'true';
       }
     }
-
     return () => {
-      // The layout persists. Never leave the next route masked or locked.
-      html.classList.remove('intro-lock');
+      cancelAssetWarmup();
+      html.classList.remove('intro-lock', 'thesis-entry-lock');
       delete html.dataset.introActive;
       delete html.dataset.introSkip;
+      delete html.dataset.entryId;
+      delete html.dataset.entryTarget;
       main?.style.removeProperty('clip-path');
       main?.style.removeProperty('-webkit-clip-path');
       if (pathname === '/thesis') teardownVideoPool();
     };
   }, [pathname]);
 
-  useEffect(() => {
-    if (pathname !== '/thesis') return;
-    void warmupAll(THESIS_VIDEOS);
-  }, [pathname]);
+  const startWarmup = useCallback(() => {
+    warmupEligible.current = true;
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    if (document.hidden || connection?.saveData
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // Prime only this route, after its entry scene is drawable. Shared warmup is byte-only.
+    if (pathname === '/thesis') {
+      const firstSlideLive = isRouteVisualReady('/thesis#thesis');
+      void warmupAll(THESIS_VIDEOS.filter((url) => url !== HERO_VIDEO
+        && !(firstSlideLive && url === THESIS_SLIDE_VIDEOS[0])));
+    }
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    void warmSharedAssets(pathname, theme);
+    for (const route of ['/', '/thesis', '/writing']) {
+      if (route !== pathname) router.prefetch(route);
+    }
+  }, [pathname, router]);
 
-  if (pathname !== '/') return null;
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) cancelAssetWarmup();
+      else if (warmupEligible.current) startWarmup();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [pathname, startWarmup]);
 
   return (
     <>
-      <IntroOverlay ref={overlayRef} fillRectRef={fillRectRef} />
+      <IntroOverlay key={pathname} ref={overlayRef} fillRectRef={fillRectRef} />
       <IntroOrchestrator
+        key={pathname}
+        pathname={pathname}
+        onWarmup={startWarmup}
         fillRectRef={fillRectRef}
         overlayRef={overlayRef}
         mainContentRef={mainContentRef}

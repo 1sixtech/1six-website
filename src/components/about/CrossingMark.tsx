@@ -2,12 +2,12 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { AsciiTeamSymbol } from '@/components/ascii/AsciiTeamSymbol';
-import { markAboutMarkReady, resetAboutMarkReady } from '@/lib/introState';
+import { setRouteVisualReady } from '@/lib/introState';
 
 /**
  * The ASCII "16" mark and its fill. Purely decorative: the whole column is
- * hidden from assistive tech. Its first rendered frame readies the About
- * loader; repeat visits and reduced motion show the page immediately.
+ * hidden from assistive tech. Its first rendered frame readies the site
+ * loader on About; repeat visits and reduced motion show the page immediately.
  *
  * The fill is a mask on the mark's own ink, not a second canvas: below the
  * level the glyphs print at full strength, above it they sit at a dim
@@ -23,17 +23,17 @@ export function CrossingMark() {
 
   useLayoutEffect(() => {
     mountedRef.current = true;
-    resetAboutMarkReady();
+    setRouteVisualReady('/', false);
     return () => {
       mountedRef.current = false;
-      resetAboutMarkReady();
+      setRouteVisualReady('/', false);
     };
   }, []);
 
   const handleReady = useCallback(() => {
     if (!mountedRef.current) return;
     setReady(true);
-    markAboutMarkReady();
+    setRouteVisualReady('/', true);
   }, []);
 
   return (

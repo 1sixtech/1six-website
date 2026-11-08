@@ -304,3 +304,30 @@ test('dispose: a model still loading at dispose is freed when it arrives, never 
     delete globalThis.document;
   }
 });
+
+
+test('source readiness: an image handle waits for decoded image data', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { mosaic } = mosaicHarness({ model: imageModel(null) });
+  let ready = false;
+  const pending = mosaic.waitForSceneTextures().then(() => { ready = true; });
+  await Promise.resolve(); assert.equal(ready, false);
+  t.mock.timers.tick(1000); await Promise.resolve(); assert.equal(ready, false);
+  mosaic.model.material.map.image = { width: 16, height: 16 };
+  t.mock.timers.tick(16); await pending; assert.equal(ready, true);
+  mosaic.dispose();
+});
+
+test('source readiness: disposal releases a pending image so navigation is not held', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { mosaic } = mosaicHarness({ model: imageModel(null) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /disposed/);
+  mosaic.dispose(); t.mock.timers.tick(16); await pending;
+});
+
+test('source readiness: a missing image has a bounded deadline', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { mosaic } = mosaicHarness({ model: imageModel(null) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
+  t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});

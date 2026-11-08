@@ -7,8 +7,8 @@
  *   the page ground at first paint and, under a fixed header (the glass one
  *   on Home and About), keeps that tint for the life of the page: a light
  *   first frame left a light strip above the dark page.
- * - About's logo loader and content mask apply before paint. Thesis keeps
- *   only its text-scramble lock, without the company logo or content mask.
+ * - The first site entry carries the logo mask before paint on About or Thesis; text-only entry stays immediate.
+ *   Thesis's text scramble has a separate lock that cannot release the logo.
  *
  * next/script's `beforeInteractive` does not block in the App Router: it is
  * queued for the Next runtime, which runs once the async chunks load, after
@@ -38,27 +38,34 @@ document.documentElement.setAttribute('data-theme', theme);
 
 if (history.scrollRestoration) history.scrollRestoration = 'manual';
 
-if (window.location.pathname === '/') {
-  var shouldIntro = true;
-
-  try {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      shouldIntro = false;
-    }
-    if (sessionStorage.getItem('aboutIntroSeen') === '1') {
-      shouldIntro = false;
-    }
-  } catch (e) {}
-
-  if (shouldIntro) {
-    document.documentElement.classList.add('intro-lock');
-    document.documentElement.dataset.introActive = 'true';
-  } else {
-    document.documentElement.dataset.introSkip = 'true';
-  }
-} else if (window.location.pathname === '/thesis') {
+var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var path = window.location.pathname;
+var hash = window.location.hash;
+var textAnchor = path === '/' && ['#products', '#origins', '#investors', '#contact'].indexOf(hash) !== -1;
+var thesisAnchor = path === '/thesis' && (hash === '#thesis' || hash === '#products');
+var shouldIntro = !reduced && !textAnchor && (path === '/' || path === '/thesis');
+try {
+  if (sessionStorage.getItem('siteIntroSeen') === '1') shouldIntro = false;
+} catch (e) {}
+if (shouldIntro) {
   document.documentElement.classList.add('intro-lock');
+  document.documentElement.dataset.introActive = 'true';
+} else {
+  document.documentElement.dataset.introSkip = 'true';
 }
+if (path === '/thesis' && !thesisAnchor && !reduced) {
+  document.documentElement.classList.add('thesis-entry-lock');
+}
+
+// This watchdog does not depend on the Next.js chunks arriving or hydrating.
+setTimeout(function () {
+  var root = document.documentElement;
+  if (root.dataset.entryHydrated === 'true') return;
+  root.classList.remove('intro-lock', 'thesis-entry-lock');
+  delete root.dataset.introActive;
+  root.dataset.introSkip = 'true';
+  root.dataset.introExpired = 'true';
+}, 8000);
 
 window.addEventListener('pageshow', function (e) {
   if (e.persisted) window.location.reload();

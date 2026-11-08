@@ -1,6 +1,9 @@
 'use client';
 
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { setRouteVisualReady } from '@/lib/introState';
+import { ATLASES, THESIS_SLIDE_VIDEOS } from '@/lib/siteAssets';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 const AsciiCanvas = dynamic(
@@ -10,12 +13,12 @@ const AsciiCanvas = dynamic(
 
 
 const THESIS_ASCII_CONFIG: Record<number, { textureUrl: string; minBrightness: number; maxBrightness: number; scale: number }> = {
-  1: { textureUrl: '/resource/Source_About 01.mp4', minBrightness: 0, maxBrightness: 33, scale: 4.8 },
-  2: { textureUrl: '/resource/Source_About 02.mp4', minBrightness: 0, maxBrightness: 28, scale: 4.8 },
-  3: { textureUrl: '/resource/Source_About 03.mp4', minBrightness: 10, maxBrightness: 100, scale: 4.8 },
-  4: { textureUrl: '/resource/Source_About 04.mp4', minBrightness: 0, maxBrightness: 30, scale: 4.8 },
-  5: { textureUrl: '/resource/Source_About 05.mp4', minBrightness: 38, maxBrightness: 0, scale: 8.8 },
-  6: { textureUrl: '/resource/Source_About 06.mp4', minBrightness: 29, maxBrightness: 0, scale: 4.8 },
+  1: { textureUrl: THESIS_SLIDE_VIDEOS[0], minBrightness: 0, maxBrightness: 33, scale: 4.8 },
+  2: { textureUrl: THESIS_SLIDE_VIDEOS[1], minBrightness: 0, maxBrightness: 28, scale: 4.8 },
+  3: { textureUrl: THESIS_SLIDE_VIDEOS[2], minBrightness: 10, maxBrightness: 100, scale: 4.8 },
+  4: { textureUrl: THESIS_SLIDE_VIDEOS[3], minBrightness: 0, maxBrightness: 30, scale: 4.8 },
+  5: { textureUrl: THESIS_SLIDE_VIDEOS[4], minBrightness: 38, maxBrightness: 0, scale: 8.8 },
+  6: { textureUrl: THESIS_SLIDE_VIDEOS[5], minBrightness: 29, maxBrightness: 0, scale: 4.8 },
 };
 
 interface AsciiThesisProps {
@@ -25,15 +28,25 @@ interface AsciiThesisProps {
 /** Thesis inline ASCII art — flat plane, mouse avoid */
 export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
   const { theme } = useTheme();
+  const liveState = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    liveState.current = stateNumber;
+    if (stateNumber === 1) setRouteVisualReady('/thesis#thesis', false);
+    return () => {
+      liveState.current = null;
+      if (stateNumber === 1) setRouteVisualReady('/thesis#thesis', false);
+    };
+  }, [stateNumber]);
+  const handleReady = useCallback(() => {
+    if (liveState.current === 1 && stateNumber === 1) setRouteVisualReady('/thesis#thesis', true);
+  }, [stateNumber]);
   const config = THESIS_ASCII_CONFIG[stateNumber];
   if (!config) return null;
 
   // Light: the filled-cell sheet prints each tile as a halftone square on the
   // card. Dark: those light fills read as white stickers on the charcoal card,
   // so dark uses the transparent dark sheet (same 12x3 layout as F_4-1).
-  const cellUrl = theme === 'dark'
-    ? '/resource/Monotone Cell F_5-1.png'
-    : '/resource/Monotone Cell F_4-1.png';
+  const cellUrl = ATLASES[theme].thesis;
 
   return (
     <AsciiCanvas
@@ -55,6 +68,7 @@ export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
       planeWidth={4}
       planeHeight={4}
       renderScale={4.5}
+      onReady={handleReady}
       eager
     />
   );
