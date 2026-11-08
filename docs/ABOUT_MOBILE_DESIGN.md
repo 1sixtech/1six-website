@@ -20,7 +20,7 @@ and the footer rewrapped between nearby phone widths.
 | Element | Before | Current mobile |
 |---|---|---|
 | Header and progress | 84px, two rows | 54px, one row with a stable section label |
-| Mark | 58vw, up to260px | 48vw, bounded184–208px |
+| Mark | 58vw, up to 260px | 48vw, bounded 184–208px |
 | H1 at 390px | 44.07px, y362 | 42.12px, y277 |
 | First product cue | Hidden on mobile | 44px touch target, y614–658 |
 | Section heading | 32px | 28px/1.14, medium weight |
@@ -61,7 +61,7 @@ After implementation, independent confirmation found no material design defect.
 The applicable Nielsen heuristic score moved from 18/24 to 20/24; this is a design
 judgment, not a usability-study metric. Automated detector findings: 0.
 
-Checks cover light/dark,375–430px and 320px width, actual 714px Safari content-height
+Checks cover light/dark, 375–430px and 320px width, actual 714px Safari content-height
 composition, desktop reference, real menu/theme/anchor behavior, and scoped footer
 styles. Native iOS confirms header translucency; headless screenshots can render
 that effect differently. The detector overlay was blocked by the production CSP;

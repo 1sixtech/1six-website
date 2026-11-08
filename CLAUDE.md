@@ -145,7 +145,7 @@ Shared visual downloads use two low-priority workers and a bounded, document-own
 (~1.14 MB for the current allowlist). Native iOS testing showed generic fetch followed by media
 Range requests downloaded the video twice; renderers and videoPool consume the retained Blob URL
 instead. No foreign-route decoder or WebGL canvas is created by this cache. Navigation interrupts
-background work; visibility resumes it only after foreground readiness. Reduced motion and
+background work; visibility resumes it after foreground readiness or its deadline. Reduced motion and
 Save-Data suppress optional warming. Renderer readiness still requires actual atlas/frame data.
 See [page entry](docs/PAGE_ENTRY.md) for ownership, repeat visits, and regression checks.
 
@@ -176,7 +176,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 
 ### Performance
 
-- `PageEntry` prioritizes the entry screen, then warms shared bytes and Next routes; the open Thesis route can prime remaining videos after its entry scene is ready
+- `PageEntry` prioritizes the entry screen, then warms shared bytes and Next routes; the open Thesis route can prime remaining videos after its entry scene is ready or the five-second deadline expires
 - `CrossingRoot` writes fill values only to `.crossing-mark` and `.crossing-meter__fill`, keeping per-frame style changes off the full story root
 - `/resource/*` and `/fonts/*` cached with `Cache-Control: immutable, 1 year`
 - Image optimization: webp + avif formats via Next.js

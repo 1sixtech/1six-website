@@ -36,7 +36,8 @@ The selected route/section reports real readiness through `introState`: About's
 current mark, Thesis's hero, its first slide, or its map. Atlas handles and fallback
 markup are insufficient: glyph data, decoded media, and the first mosaic render
 must be ready. Text-only pages wait for neither a foreign canvas nor background
-transfers. Fonts settle before optional preparation starts.
+transfers. Optional preparation starts when fonts and the current scene are ready,
+or when the five-second readiness deadline expires.
 
 Thesis's text starts after the site logo has gone. Its `thesis-entry-lock` is
 separate and has the existing 2.5-second safety timer. Recognized section entries
@@ -50,10 +51,10 @@ shared by real renderers and the warmup queue. It excludes retired media, all-fo
 bulk downloads, article archives, and built chunk filenames. Next router prefetch
 prepares route code/payloads through the framework's own API.
 
-After current-screen readiness, two low-priority workers download remaining
-visuals. About is not blocked by Thesis's downloads. Bytes are kept as Blob URLs
-for this document and used by AsciiCanvas and videoPool. A native iOS 27 probe
-showed a full fetch followed by another full media Range transfer; handing the
+After current-screen readiness or its deadline, two low-priority workers download
+remaining visuals. About is not blocked by Thesis's downloads. Bytes are kept as
+Blob URLs for this document and used by AsciiCanvas and videoPool. A native iOS 27
+probe showed a full fetch followed by another full media Range transfer; handing the
 same bytes to the media consumer avoided that second transfer. This is byte
 reuse, not a promise that GPU initialization or video decoding is already done.
 
@@ -63,9 +64,10 @@ only after its foreground gate has passed. Reduced motion and Save-Data suppress
 optional work. Errors/timeouts do not block entry or become permanent ready flags.
 
 Only the open Thesis route primes its remaining video decoders, after its entry
-scene is ready. A canvas reuses a pending pool promise rather than creating a
-second decoder. Leaving the route cancels pending promises, removes sources, and
-tears down the pool. A priming play completion cannot pause an acquired video.
+scene is ready or its deadline expires. A canvas reuses a pending pool promise
+rather than creating a second decoder. Leaving the route cancels pending promises,
+removes sources, and tears down the pool. A priming play completion cannot pause an
+acquired video.
 
 ## Regression checks
 
