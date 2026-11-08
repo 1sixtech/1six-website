@@ -1,10 +1,9 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, type SyntheticEvent } from 'react';
 import { useDevicePixelRatio } from '@/hooks/useDevicePixelRatio';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import * as videoPool from '@/lib/videoPool';
-import { markAsciiReady } from '@/lib/introState';
 import { outputPixelRatio, toDevicePixels } from './pixelScale';
 // Type only: the class itself is imported dynamically (Three.js stays out of SSR).
 import type { AscMosaic } from '@/lib/ascmosaic';
@@ -106,15 +105,8 @@ interface AsciiCanvasProps {
   fallbackFrameTime?: number;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
   eager?: boolean;
-  /** Called once when the mosaic finishes initializing and starts animating */
+  /** Called when a drawable mosaic or fallback media frame is ready. */
   onReady?: () => void;
-  /**
-   * Stable key used by the intro orchestration to identify this canvas.
-   * When provided, videoPool is checked for a pre-warmed video element,
-   * and on ready the 'ascii:ready' event fires with this key in the detail.
-   * Required for homepage canvases; unused on /about.
-   */
-  preloadKey?: string;
 }
 
 // Global WebGL context counter to enforce budget.
@@ -181,7 +173,6 @@ export function AsciiCanvas({
   cameraOffsetX = 0,
   eager = false,
   onReady,
-  preloadKey,
 }: AsciiCanvasProps) {
   // Default: no auto-rotation for planes
   const resolvedAutoRotate = autoRotate ?? (shape !== 'plane');
@@ -412,9 +403,6 @@ export function AsciiCanvas({
       mosaic.animate();
       setIsInitialized(true);
       onReady?.();
-      if (preloadKey) {
-        markAsciiReady(preloadKey);
-      }
     } catch (err) {
       // A newer request or a teardown that overtook this init (its filter
       // was replaced or disposed while it got ready) is not a failure.
@@ -433,11 +421,6 @@ export function AsciiCanvas({
       //     exhaust MAX_ACTIVE_CONTEXTS across failures. Dispose the
       //     instance, clear the ref, and decrement the counter.
       //
-      // C4: also fire markAsciiReady so the IntroOrchestrator does not
-      //     wait the full 2.5s hardcap for a canvas that has no chance
-      //     of ever marking ready. A silent fast-forward to reveal with
-      //     the fallback visual (loading skeleton / blue material) is
-      //     strictly better UX than an extra ~1.3s of stuck intro.
       if (mosaic) {
         try {
           mosaic.stopAnimate();
@@ -452,17 +435,13 @@ export function AsciiCanvas({
         }
       }
       if (!superseded) {
-        // WebGL could not start here: show the source itself, and let the
-        // caller reveal it as it would have revealed the mosaic.
+        // WebGL could not start here. Mount the source still; its load/seek
+        // event reports readiness only once a frame can actually be shown.
         failedRef.current = true;
         setFailed(true);
-        onReady?.();
-      }
-      if (preloadKey) {
-        markAsciiReady(preloadKey);
       }
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, pixelRatio, smoothCells, cellGain, renderOnDemand, cameraOffsetX, preloadKey]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, pixelRatio, smoothCells, cellGain, renderOnDemand, cameraOffsetX]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;
@@ -511,6 +490,11 @@ export function AsciiCanvas({
     }
   }, [width, height]);
 
+  const handleStillVideoReady = (event: SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget;
+    if (video.readyState >= 2 && !video.seeking) onReady?.();
+  };
+
   // Reduced motion (or WebGL unavailable): show the source media directly,
   // still. Video sources render a single frame (the #t media fragment makes
   // Safari paint it without playback) instead of an autoplaying loop, which
@@ -532,6 +516,8 @@ export function AsciiCanvas({
             muted
             playsInline
             preload="metadata"
+            onLoadedData={handleStillVideoReady}
+            onSeeked={handleStillVideoReady}
             aria-hidden="true"
             tabIndex={-1}
             className="h-full w-full object-cover opacity-30 grayscale"
@@ -540,6 +526,7 @@ export function AsciiCanvas({
           <img
             src={textureUrl}
             alt=""
+            onLoad={onReady}
             className="h-full w-full object-cover opacity-30 grayscale"
           />
         )}

@@ -62,6 +62,14 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 The original problem statements below describe the earlier release; each resolution records the current behavior.
 
+### Prepare the About mark during the company-logo loader
+
+**What:** Cover the first About visit while its rotating 16 loads, instead of waiting on Thesis assets after entering the site.
+
+**Resolution:** The logo loader belongs to About; its eager mark reports readiness from a rendered mosaic with loaded glyph data or a decoded fallback. The loader removes its own mask and lock. Thesis retains its independent text scramble and video warmup. Route cleanup and repeat/reduced-motion behavior have effect regression tests.
+
+**Completed:** v0.3.2.0 (2026-11-08)
+
 ### Fix the two lint errors in ThesisSection.tsx
 
 **What:** Clear the React Compiler lint errors in `src/components/home/ThesisSection.tsx`: a synchronous `setState` in an effect (line 67, `setIsMobile`) and a variable read before its declaration (line 195).

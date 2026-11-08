@@ -74,37 +74,15 @@ function StaggeredScramble({ onComplete }: { onComplete?: () => void }) {
     const timeouts = timeoutsRef.current;
     const intervals = intervalsRef.current;
 
-    const scheduleAllChars = () => {
-      DELAYS.forEach((delay, i) => {
-        const t = setTimeout(() => startScramble(i), delay);
-        timeouts.push(t);
-      });
-    };
-
-    // If the intro did not run (reduced-motion or session repeat), start
-    // the scramble immediately — there is no data-intro-active attribute.
-    const introActive = document.documentElement.dataset.introActive === 'true';
-    let revealListener: (() => void) | null = null;
-
-    if (!introActive) {
-      scheduleAllChars();
-    } else {
-      revealListener = () => {
-        scheduleAllChars();
-        if (revealListener) {
-          window.removeEventListener('intro:revealed', revealListener);
-          revealListener = null;
-        }
-      };
-      window.addEventListener('intro:revealed', revealListener);
-    }
+    // Thesis enters directly; the company-logo loader belongs to About.
+    settledRef.current = 0;
+    DELAYS.forEach((delay, i) => {
+      timeouts.push(setTimeout(() => startScramble(i), delay));
+    });
 
     return () => {
       timeouts.forEach(clearTimeout);
       intervals.forEach(clearInterval);
-      if (revealListener) {
-        window.removeEventListener('intro:revealed', revealListener);
-      }
     };
   }, [startScramble]);
 
@@ -147,51 +125,13 @@ function blockScrollKeys(e: KeyboardEvent) {
 export function HeroSection() {
   const [bgReady, setBgReady] = useState(false);
 
-  // Safety fallback — unlock intro-lock if the scramble never completes.
-  //
-  // Timing in the new intro-loader flow:
-  //   - HeroSection mounts immediately on first paint
-  //   - Intro overlay runs for 0.7–2.5s (hardcap)
-  //   - intro:revealed fires → scramble scheduled with 300ms delay
-  //   - Scramble runs 1.8s → onComplete → unlockPage()
-  //
-  // If we started a 2.5s fallback at mount (old behavior) it would fire
-  // mid-reveal on slow devices. Instead we start the fallback once we
-  // know scramble will actually start — either on intro:revealed in
-  // normal mode, or immediately on mount in skip mode. The 2.5s budget
-  // then covers only the scramble's expected ~1.8s duration with
-  // comfortable headroom.
-  //
-  // blockScrollKeys is registered unconditionally and only fires when
-  // intro-lock is still on, so it self-disables after unlock.
+  // PageEntry locks Thesis before these effects. The scramble owns its
+  // unlock; keep the existing 2.5s safety net if completion never arrives.
   useEffect(() => {
-    let fallback: ReturnType<typeof setTimeout> | null = null;
-    const startFallback = () => {
-      if (fallback !== null) return;
-      fallback = setTimeout(unlockPage, 2500);
-    };
-
-    const introActive = document.documentElement.dataset.introActive === 'true';
-    let revealListener: (() => void) | null = null;
-
-    if (!introActive) {
-      // Skip mode (or reveal already fired before mount) — start now.
-      startFallback();
-    } else {
-      revealListener = () => {
-        startFallback();
-        if (revealListener) {
-          window.removeEventListener('intro:revealed', revealListener);
-          revealListener = null;
-        }
-      };
-      window.addEventListener('intro:revealed', revealListener);
-    }
-
+    const fallback = setTimeout(unlockPage, 2500);
     window.addEventListener('keydown', blockScrollKeys, { passive: false });
     return () => {
-      if (fallback !== null) clearTimeout(fallback);
-      if (revealListener) window.removeEventListener('intro:revealed', revealListener);
+      clearTimeout(fallback);
       window.removeEventListener('keydown', blockScrollKeys);
     };
   }, []);

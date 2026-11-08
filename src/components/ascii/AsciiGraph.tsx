@@ -32,7 +32,6 @@ export function AsciiGraphCanvas({ cameraOffsetX = 0 }: { cameraOffsetX?: number
       maxBrightness={20}
       planeWidth={5.9}
       planeHeight={4}
-      preloadKey="graph"
       eager
     />
   );

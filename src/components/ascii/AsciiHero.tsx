@@ -78,7 +78,6 @@ export function AsciiHero({ onReady }: { onReady?: () => void }) {
       planeHeight={PLANE_H}
       scale={scale}
       onReady={onReady}
-      preloadKey="hero"
       eager
     />
   );

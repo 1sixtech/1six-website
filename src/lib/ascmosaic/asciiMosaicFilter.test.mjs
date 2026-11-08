@@ -251,7 +251,7 @@ test('coverage atlas: a new cell size re-renders it and disposes the old one; th
   filter.dispose();
 });
 
-test('coverage atlas: the filter is ready at once, on an empty atlas, and swaps the coverage atlas in when it arrives', async () => {
+test('coverage atlas: the empty placeholder does not report readiness before its glyphs arrive', async () => {
   const renderer = fakeRenderer();
   const filter = new AsciiMosaicFilter(renderer, 40, 20, {
     smoothCells: true,
@@ -259,8 +259,8 @@ test('coverage atlas: the filter is ready at once, on an empty atlas, and swaps 
     mosaicSize: 2,
     cellCount: 2,
   });
-  // No wait on the download: the mesh exists, and draws nothing yet.
-  assert.equal(filter.isReady(), true);
+  // The mesh exists and can draw a placeholder, but cannot ready a loader.
+  assert.equal(filter.isReady(), false);
   filter.render();
   const placeholder = drawnTexture(renderer);
   assert.equal(placeholder.image.width, 1);
@@ -273,6 +273,7 @@ test('coverage atlas: the filter is ready at once, on an empty atlas, and swaps 
   });
 
   await settled();
+  assert.equal(filter.isReady(), true);
   // The coverage atlas is in place and owes a frame (render on demand).
   assert.equal(filter.wantsFrame(performance.now()), true);
   filter.render();
@@ -281,6 +282,15 @@ test('coverage atlas: the filter is ready at once, on an empty atlas, and swaps 
   assert.equal(atlas.image.width, 4);
   assert.equal(placeholderDisposed, true);
   filter.dispose();
+});
+
+test('plain atlas: readiness waits for image data instead of the TextureLoader handle', async () => {
+  const filter = new AsciiMosaicFilter(fakeRenderer(), 40, 20, { mosaicCellTextureUrl: PLAIN });
+  assert.equal(filter.isReady(), false);
+  await settled();
+  assert.equal(filter.isReady(), true);
+  filter.dispose();
+  assert.equal(filter.isReady(), false);
 });
 
 test('coverage atlas: a filter disposed while its atlas loads builds, keeps and fetches nothing more', async () => {
@@ -326,8 +336,12 @@ test('coverage atlas: a failed load or a missing 2D context falls back to the pl
   const warnings = [];
   console.warn = (...args) => warnings.push(args.join(' '));
   try {
-    const missing = await readyFilter({ smoothCells: true, mosaicCellTextureUrl: '/atlas-missing.png' });
-    await tick(); // the plain loader's own failure for the same URL
+    const missing = { renderer: fakeRenderer() };
+    missing.filter = new AsciiMosaicFilter(missing.renderer, 40, 20, {
+      smoothCells: true, mosaicCellTextureUrl: '/atlas-missing.png',
+    });
+    await settled(); // the plain loader also fails for the same URL
+    assert.equal(missing.filter.isReady(), false, 'failed media must not report drawable glyphs');
     missing.filter.render();
     const atlas = drawnTexture(missing.renderer);
     assert.notEqual(atlas.isDataTexture, true);
@@ -394,8 +408,9 @@ test('wantsFrame: a still scene asks only after a change or when its noise or se
   const clock = fakeClock(1000);
   try {
     const filter = new AsciiMosaicFilter(fakeRenderer(), 40, 20, { mosaicCellTextureUrl: PLAIN });
-    // The mesh is built with the filter, so the first frame is owed at once.
-    assert.equal(filter.isReady(), true);
+    // A first frame is owed as soon as the mesh exists, even though a loader
+    // must still wait for the atlas image before treating the content as ready.
+    assert.equal(filter.isReady(), false);
     assert.equal(filter.wantsFrame(clock.now), true);
     filter.render();
     assert.equal(filter.wantsFrame(clock.now), false);

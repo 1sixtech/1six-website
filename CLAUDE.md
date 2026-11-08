@@ -58,7 +58,7 @@ src/
     about/                    # AboutCrossing (home bands), CrossingMark (ASCII 16 + percentage),
                               # CrossingRoot/crossingProgress (continuous fill), about.css,
                               # aboutData.ts (confirmed origins, backers, partnerships)
-    intro/                    # ThesisIntroMount, IntroOrchestrator, IntroOverlay
+    intro/                    # PageEntry, IntroOrchestrator, IntroOverlay
     writing/                  # WritingIndex filters, ArticleList, full-size FigureViewer
     team/                     # CareersSection.tsx (parked, not rendered)
     layout/                   # Header.tsx, Footer.tsx
@@ -72,7 +72,7 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
-    themeInit.ts              # Theme + Thesis intro bootstrap, inlined in <head>
+    themeInit.ts              # Theme + About loader / Thesis scramble bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
       asciiMosaicFilter.ts    # ASCII rendering algorithm
@@ -133,11 +133,15 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 
 GSAP animations must be cleaned up with `useGSAP()` context or manual `gsap.context()` + `revert()`. Always check `useReducedMotion()` and skip or simplify animations accordingly.
 
-The logo intro and first-scroll header reveal belong only to `/thesis`. The head bootstrap prepares
-initial loads; `ThesisIntroMount` prepares client navigation before child passive effects. Leaving
-Thesis clears intro flags, the scroll lock, the circular reveal mask, and pooled videos. Keep effect
-replay safe: an obsolete `IntroOrchestrator` effect must never start another reveal. Home and Writing
-show the header immediately. The crossing listens for reduced-motion changes and writes 100% directly.
+The company-logo loader belongs to About (`/`) and runs once per tab (`aboutIntroSeen`). It waits
+for the current rotating 16 canvas or decoded fallback frame; the mark initializes eagerly behind
+the mask. Repeat visits and reduced motion skip both the logo and its lock. `IntroOrchestrator`
+removes the mask and lock after reveal, with a five-second readiness deadline for failed assets.
+The head bootstrap prepares direct loads; `PageEntry` prepares client navigation before passive
+effects and clears masks/locks on route leave. An obsolete effect must never reveal another route.
+Thesis keeps its own text-scramble lock, video warmup, and first-scroll header reveal, without the
+company logo. Home and Writing show the header immediately. The crossing listens for reduced-motion
+changes and writes 100% directly. See [page entry](docs/PAGE_ENTRY.md) for ownership and checks.
 
 ### Three.js / AscMosaic
 
@@ -166,7 +170,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 
 ### Performance
 
-- `IntroOrchestrator` warms the Thesis videos (`videoPool.warmupAll`) while the intro runs
+- `PageEntry` warms the eight Thesis videos only on `/thesis`; About initializes just its rotating mark behind the logo loader
 - `CrossingRoot` writes fill values only to `.crossing-mark` and `.crossing-meter__fill`, keeping per-frame style changes off the full story root
 - `/resource/*` and `/fonts/*` cached with `Cache-Control: immutable, 1 year`
 - Image optimization: webp + avif formats via Next.js
@@ -274,6 +278,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
 - [TODOS.md](TODOS.md): remaining work and completed release items.
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
+- [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
 - [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.

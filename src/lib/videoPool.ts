@@ -15,7 +15,7 @@
  *      replace or AscMosaic.dispose), the library calls `release(video)`
  *      which decrements the refcount and pauses the video if the count
  *      reaches zero. The video element is kept for potential reuse.
- *   4. When the user navigates away from the homepage, ThesisIntroMount's
+ *   4. When the user navigates away from Thesis, PageEntry's
  *      route-leave effect calls `teardownVideoPool()` which pauses all
  *      pooled videos, clears their src, and empties the Map.
  *
@@ -173,8 +173,8 @@ export function release(video: HTMLVideoElement): void {
 
 /**
  * Tear down the entire pool — pauses and fully kills every pooled
- * element. Called by ThesisIntroMount when the user navigates away from
- * `/`, so the pool does not leak across SPA routes. Safe to call
+ * element. Called by PageEntry when the user navigates away from
+ * `/thesis`, so the pool does not leak across SPA routes. Safe to call
  * multiple times.
  */
 export function teardownVideoPool(): void {
