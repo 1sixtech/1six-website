@@ -13,6 +13,7 @@ All notable changes to the 1SIX website are recorded here. Versions follow
 
 ### Fixed
 
+- After a reload on iOS, the Thesis video no longer plays for a second, freezes, and jumps back to the start.
 - Thesis on a phone no longer shows one character repeated across the canvas. The mosaic waits for a real video frame. A video that will not load is retried and then replaced by its still source, and returning to the tab tries again.
 - Leaving a page before its video arrives no longer starts that video or holds its decoder.
 - A draft article, marked `(draft)` on its date line, stays off the site with its figures instead of failing the build. A missing or impossible date fails the build and names the article.

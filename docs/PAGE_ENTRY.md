@@ -62,7 +62,9 @@ Video is different. It never takes a Blob source: v0.3.3.0 did, and iPhones then
 back to "dots everywhere" on client navigation into Thesis (see WebKit 270772 and
 232076 for the platform behavior). A native iOS 27 probe showed the media stack
 downloads a fetched file again as Range requests, so phones skip warming video and
-desktop keeps it for the HTTP cache.
+desktop keeps it for the HTTP cache. A pooled video stays in the document, at 2px and
+nearly transparent: asked to play before it has loaded, a video outside the document
+stops presenting frames about a second in on iOS WebKit while its clock keeps running.
 
 Foreground navigation cancels unfinished background work. Completed bytes remain
 available across SPA routes. Returning to a visible tab resumes unfinished work

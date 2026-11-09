@@ -352,6 +352,7 @@ test('dispose: a repeat call frees nothing twice, and a context already taken ba
 /** A <video> that reports canplay only when the test says so. */
 function fakeVideo() {
   return Object.assign(new EventTarget(), {
+    remove() {},
     src: '',
     paused: true,
     setAttribute() {},
@@ -372,6 +373,7 @@ function fakeVideo() {
 test('dispose: a model still loading at dispose is freed when it arrives, never attached', { skip }, async () => {
   const videos = [];
   globalThis.document = {
+    body: { appendChild() {} },
     createElement: () => {
       const video = fakeVideo();
       videos.push(video);
@@ -400,6 +402,7 @@ test('dispose: a model still loading at dispose is freed when it arrives, never 
 test('source failure: a video that cannot load rejects the model; nothing stands in for the mosaic to tile', { skip }, async () => {
   const videos = [];
   globalThis.document = {
+    body: { appendChild() {} },
     createElement: () => {
       const video = fakeVideo();
       videos.push(video);
@@ -454,6 +457,7 @@ test('source failure: a missing image keeps its empty map, so readiness times ou
 test('source reuse: a loaded video is wrapped as is, with no second decoder, and lives until its last model goes', { skip }, async () => {
   const videos = [];
   globalThis.document = {
+    body: { appendChild() {} },
     createElement: () => {
       const video = fakeVideo();
       videos.push(video);

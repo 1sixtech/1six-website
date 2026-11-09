@@ -16,6 +16,12 @@
  *
  * The #t=0.001 fragment makes iOS Safari decode the first frame of a video that
  * cannot play (Low Power Mode): a static frame still draws a correct mosaic.
+ *
+ * Every video stays in the document while it is pooled. Asked to play before it
+ * has loaded, as step 1 does, a video outside the document stops presenting
+ * frames about a second in on iOS WebKit while currentTime keeps running, so the
+ * mosaic froze until the loop's seek restarted it. Playing earlier is not optional:
+ * iOS may not buffer a video that has not been asked to play.
  */
 
 const pool = new Map<string, HTMLVideoElement>();
@@ -25,6 +31,13 @@ const refCount = new WeakMap<HTMLVideoElement, number>();
 
 const pendingCancels = new Map<string, () => void>();
 const LOAD_TIMEOUT_MS = 8000;
+const IN_DOCUMENT_STYLE = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none';
+
+function keepInDocument(video: HTMLVideoElement): void {
+  video.setAttribute('style', IN_DOCUMENT_STYLE);
+  video.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(video);
+}
 
 function destroy(video: HTMLVideoElement): void {
   try {
@@ -34,6 +47,7 @@ function destroy(video: HTMLVideoElement): void {
   } catch {
     // Best-effort cleanup.
   }
+  video.remove();
 }
 
 /**
@@ -48,6 +62,7 @@ export function load(url: string): Promise<HTMLVideoElement> {
 
   const promise = new Promise<HTMLVideoElement>((resolve, reject) => {
     const video = document.createElement('video');
+    keepInDocument(video);
     video.src = url + '#t=0.001';
     video.muted = true;
     video.playsInline = true;

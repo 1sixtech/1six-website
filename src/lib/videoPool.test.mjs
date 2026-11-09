@@ -68,11 +68,13 @@ function poolHarness({ frameCallbacks = false } = {}) {
             return attempt.promise;
           },
           pause() { this.pauseCalls++; this.paused = true; },
+          remove() { this.inDocument = false; },
         };
         if (frameCallbacks) video.requestVideoFrameCallback = (callback) => { video.frameCallback = callback; };
         videos.push(video);
         return video;
       },
+      body: { appendChild(node) { node.inDocument = true; } },
     },
   });
   new vm.Script(code, { filename: file.pathname }).runInContext(context);
@@ -387,4 +389,25 @@ test('a canvas that leaves before taking its video stops the load or frees the e
   pool.abandon(VIDEO_URL);
   assert.notEqual(taken.src, '', 'a video in use stays');
   assert.equal(pool.load(VIDEO_URL), takenLoad);
+});
+
+test('a video stays in the document while it is in use and leaves with it', async () => {
+  const pool = poolHarness();
+  const ready = pool.load(VIDEO_URL);
+  const video = pool.videos[0];
+  assert.equal(video.inDocument, true, 'iOS stops presenting frames from a video outside the document');
+  assert.match(video.attributes.get('style'), /position:fixed.*opacity:0\.01/);
+  assert.equal(video.attributes.get('aria-hidden'), 'true');
+  video.fire('canplay');
+  await ready;
+  pool.acquire(video);
+  pool.release(video);
+  assert.equal(video.inDocument, false, 'the last release takes it out');
+
+  const failed = pool.load(VIDEO_URL);
+  const failing = pool.videos.at(-1);
+  const rejected = assert.rejects(failed, /load error/);
+  failing.fire('error');
+  await rejected;
+  assert.equal(failing.inDocument, false, 'a failed load leaves too');
 });

@@ -166,8 +166,11 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
   The world map uses all three.
 - A video that cannot load rejects and is retried; the mosaic never draws without a real frame. A stand-in
   color or an empty texture tiles one glyph across the whole canvas.
-- Only mounted canvases decode video, one load at a time, and a hidden Thesis slide holds still. iOS decoders
-  are limited and shared with the rest of the phone.
+- Only mounted canvases decode video, and a hidden Thesis slide holds still. iOS decoders are limited and shared
+  with the rest of the phone. A pooled video stays in the document (2px, nearly transparent): asked to play before it has
+  loaded, a video outside the document stops presenting frames about a second in on iOS WebKit, while its clock keeps running.
+- A canvas reports ready only after a real first frame. No init-queue turn outlasts 1.5 seconds, so a slow source or a
+  stalled first frame cannot hold the canvases behind it.
 - Cell-sized glyph sheets come from `scripts/bake-mosaic-atlases.mjs`: uploading the 16-megapixel exports
   stalled the main thread and cost tens of megabytes of GPU memory per canvas.
 - Without WebGL (or under reduced motion) a canvas shows its source media, still
