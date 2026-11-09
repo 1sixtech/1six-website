@@ -7,8 +7,8 @@ import gsap from 'gsap';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { LogoHeader } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute } from '@/lib/site';
-import { emitHashScrollRequest, scrollToHashTarget } from '@/lib/hashScroll';
+import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute, isPlainLeftClick } from '@/lib/site';
+import { scrollToPageTop } from '@/lib/hashScroll';
 
 export function Header() {
   const headerRef = useRef<HTMLElement>(null);
@@ -59,6 +59,18 @@ export function Header() {
   // the mobile scroll handler can ignore the phantom event, and clear it
   // AFTER the restore scroll event fires so the unlock path is filtered too.
   const MENU_OPEN_ATTR = 'menuOpen';
+  // From a menu link until the route commits; about.css keeps About's root
+  // snap off while it is set. See handleNavClick. A navigation can be replaced
+  // by another press on the same page and never change the route, so the flag
+  // also expires: About must not lose its snap for the rest of the visit.
+  const NAV_LEAVING_ATTR = 'navLeaving';
+  const NAV_LEAVING_MAX_MS = 5000;
+  const navLeavingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const clearNavLeaving = useCallback(() => {
+    clearTimeout(navLeavingTimerRef.current);
+    delete document.documentElement.dataset[NAV_LEAVING_ATTR];
+  }, []);
 
   const unlockScroll = useCallback((restoreScroll: boolean) => {
     document.body.style.position = '';
@@ -77,10 +89,9 @@ export function Header() {
         });
       });
     } else {
-      // Manual unlock path (handleNavClick) does NOT restore scroll — the
-      // caller scrolls programmatically to a hash target instead. Clear the
-      // flag immediately so the hash-scroll event is NOT filtered and can
-      // reach the pending-hash-capture branch in ThesisSectionMobile.
+      // Manual unlock path (handleNavClick) does NOT restore scroll: the
+      // caller, scrollToPageTop or Next, owns the destination. Clear the flag
+      // immediately so that scroll is NOT filtered as a menu-lock event.
       delete document.documentElement.dataset[MENU_OPEN_ATTR];
     }
   }, []);
@@ -88,25 +99,38 @@ export function Header() {
   // Release a mobile menu lock before Next.js scrolls the destination to
   // the top. Restoring the old position here would undo that navigation.
   const handleNavClick = useCallback((event: React.MouseEvent, href: string) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!isPlainLeftClick(event)) return;
     if (pathname === '/thesis' && href === '/thesis') {
-      // A same-route Link would scroll to Hero without unmounting the
-      // captured mobile slider. Keep the original coordinated Thesis
-      // navigation: unlock the menu, notify capture, then align the section.
+      // A same-route Link cannot release the captured mobile slider. Unlock
+      // the menu, then send the visitor to Hero as from any other page.
       event.preventDefault();
       manualUnlockRef.current = menuOpen;
       unlockScroll(false);
       setMenuOpen(false);
-      emitHashScrollRequest('thesis');
-      history.pushState(null, '', '#thesis');
-      scrollToHashTarget('thesis');
+      scrollToPageTop();
       return;
     }
     if (!menuOpen) return;
+    // Lifting the lock regrows About under its root snap, and iOS re-applies
+    // the section the visitor left. That scroll lands after the next route has
+    // committed and after ScrollToTop's one reset, so the new page starts far
+    // down. Snap has to be off from before the unlock until the route changes:
+    // turning it off only while the menu is open still reproduced this. A link
+    // to the current page is not leaving, so it keeps its snap and its section.
+    if (href !== pathname) {
+      document.documentElement.dataset[NAV_LEAVING_ATTR] = '1';
+      clearTimeout(navLeavingTimerRef.current);
+      navLeavingTimerRef.current = setTimeout(clearNavLeaving, NAV_LEAVING_MAX_MS);
+    }
     manualUnlockRef.current = true;
     unlockScroll(false);
     setMenuOpen(false);
-  }, [pathname, menuOpen, unlockScroll]);
+  }, [pathname, menuOpen, unlockScroll, clearNavLeaving]);
+
+  // The route committed, so the snapped page this guarded against is gone.
+  useEffect(() => {
+    clearNavLeaving();
+  }, [pathname, clearNavLeaving]);
 
   useEffect(() => {
     if (!headerRef.current) return;
@@ -199,6 +223,10 @@ export function Header() {
   // browser's own scroll to a URL fragment, so a shared /#investors or
   // /writing/...#results link always landed at the top. Thesis uses
   // ScrollToTop to coordinate fragment navigation with its scroll pin.
+  //
+  // pathname is a dependency for a route change under the open menu, such as
+  // browser Back: the lock is taken again on the new page, so closing the menu
+  // cannot restore the previous page's offset there.
   useEffect(() => {
     if (menuOpen) {
       wasMenuOpenRef.current = true;
@@ -227,7 +255,7 @@ export function Header() {
       document.body.style.left = '';
       document.body.style.right = '';
     };
-  }, [menuOpen, unlockScroll]);
+  }, [menuOpen, pathname, unlockScroll]);
 
   // Close menu on Escape key
   useEffect(() => {

@@ -76,7 +76,7 @@ test('About: one screen per section, with the contact last, every onward link la
   assert.equal(css.match(/scroll-snap-type/g).length, 1);
   assert.match(
     css,
-    /@media \(min-height: 760px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(max-width: 767px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(min-width: 1024px\) and \(prefers-reduced-motion: no-preference\) \{\s*html:has\(\.crossing\) \{\s*scroll-snap-type: y mandatory;/,
+    /@media \(min-height: 760px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(max-width: 767px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(min-width: 1024px\) and \(prefers-reduced-motion: no-preference\) \{\s*html:has\(\.crossing\):not\(\[data-nav-leaving\]\) \{\s*scroll-snap-type: y mandatory;/,
   );
 
   // The phone's first screen is two boxes, the mark and the statement. Without a
