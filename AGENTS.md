@@ -82,7 +82,7 @@ content/writing/              # Downloaded article Markdown (gitignored)
 public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
   writing-assets/             # Downloaded article assets (gitignored)
-scripts/sync-writing.mjs       # Sync from 1sixtech/noctis-articles
+scripts/sync-writing.mjs       # Sync from 1sixtech/1six-researchs
 scripts/bake-mosaic-atlases.mjs # Cell-sized glyph sheets from the 16 MP exports
 vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
@@ -98,8 +98,12 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 
 ### Writing
 
-- `scripts/sync-writing.mjs` downloads numbered article folders from `1sixtech/noctis-articles` into
-  `content/writing/` and their assets into `public/writing-assets/`. `WRITING_GIT_REF` defaults to `main`.
+- `scripts/sync-writing.mjs` downloads numbered article folders from `1sixtech/1six-researchs` into
+  `content/writing/` and their assets into `public/writing-assets/`. Every file is read at the one commit
+  `WRITING_GIT_REF` (default `main`) resolves to, because raw GitHub caches a branch URL for five minutes.
+- A push to that repository's `main` that changes a numbered folder deploys the site: its
+  `.github/workflows/publish.yml` calls a Vercel Deploy Hook (the `VERCEL_DEPLOY_HOOK_URL` Actions secret).
+  Pinning `WRITING_GIT_REF` to a commit or tag stops new articles from appearing.
 - Frontmatter accepts `title`, `author`, `date`, `summary`, and `category`. Category IDs are `research`,
   `op-ed`, and `announcements` (case-insensitive); omitted categories default to Research, and invalid
   explicit categories fail the build. Articles sort newest first, with article number as the tie-breaker.
