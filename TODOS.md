@@ -22,6 +22,18 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 The article repository's publishing gate is recorded under Completed.
 
+### Apply the article repository proposal
+
+**What:** Add the required `Validate articles` check and the build-result wait to `1sixtech/1six-researchs`, and set `WRITING_GITHUB_TOKEN` in Vercel.
+
+**Why:** A malformed article is still found only by the production build after it merges, and a failed hook-triggered build tells no one.
+
+**Context:** The workflows, rollout order, evidence, and what is still unverified are in [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md). It changes another repository and needs the owner's approval.
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** The sync hardening merged to the website's `main`
+
 ## Site-wide
 
 ### Leave the CJK font declarations out of the critical CSS

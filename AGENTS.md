@@ -29,6 +29,7 @@ On a fresh checkout, run `pnpm install`, then `node scripts/sync-writing.mjs` be
 `pnpm dev`. Writing content and assets are downloaded from GitHub and ignored by git;
 `pnpm build` runs that sync automatically. No environment variables are required.
 `WRITING_GIT_REF` optionally selects a reviewed article commit or tag instead of `main`.
+`WRITING_GITHUB_TOKEN` optionally gives the sync a read-only GitHub token (see Writing).
 
 ## Project Structure
 
@@ -111,6 +112,13 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   sync skips it. A missing or impossible date fails the build and names the article.
 - `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
   filters show all articles. Empty categories show an explanation and a link back to all writing.
+- The sync fails and leaves the last good sync in place on a truncated GitHub listing, or on a numbered folder that has no
+  README, holds a symbolic link, or has a name the site would not load (one rule: `writingSlug.mjs`); every such folder is named
+  at once. After drafts are known, a published article may carry only AVIF, GIF, JPEG, PNG, SVG, and WebP files of at most
+  5 MB, again naming every problem. A draft's other files are not checked.
+- GitHub 403, 429, and 5xx answers are retried three times, honoring `Retry-After` and the rate-limit reset. A wait longer
+  than a minute is not attempted: the sync fails at once. With `WRITING_GITHUB_TOKEN` every request uses the REST API;
+  without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails the build.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
   omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
   Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
@@ -308,6 +316,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
 - [docs/ABOUT_MOBILE_DESIGN.md](docs/ABOUT_MOBILE_DESIGN.md): mobile About composition, type roles, spacing, and review evidence.
 - [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
+- [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md): proposed required check and build-result alert for the article repository, awaiting the owner's approval.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
 - [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.
