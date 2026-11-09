@@ -27,6 +27,6 @@ vite.config.ts.timestamp-*
 .context/
 *.tsbuildinfo
 
-# Fetched from noctis-articles during the build
+# Fetched from 1six-researchs during the build
 /content/writing/
 /public/writing-assets/
