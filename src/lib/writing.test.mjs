@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -297,6 +297,23 @@ test('a draft date keeps an article off the site in every header form', async ()
   }
 });
 
+test('a checkout with no published article fails the build rather than shipping an empty Writing', async () => {
+  const { getArticles } = await import('./writing.ts');
+  const published = path.join(root, 'content/writing', SLUG);
+  const parked = path.join(root, 'parked-fixture');
+  renameSync(published, parked);
+  try {
+    write('content/writing/002-only-draft/README.md', '# Only draft\n\nDate: 2026-11-08 (draft)\n\nNot yet.\n');
+    assert.throws(() => getArticles(), /content\/writing has no published articles\./);
+    assert.throws(() => getArticle('002-only-draft'), /no published articles/);
+    removeArticle('002-only-draft');
+    assert.throws(() => getArticles(), /no published articles/, 'an empty folder fails the same way');
+  } finally {
+    removeArticle('002-only-draft');
+    renameSync(parked, published);
+  }
+});
+
 test('a plain date line is read as the date and left out of the article', () => {
   try {
     write('content/writing/002-dated/README.md', '# Dated\n\nAuthor: Dean N.\nDate: 2026-11-08\n\nThe body.\n');
@@ -310,9 +327,30 @@ test('a plain date line is read as the date and left out of the article', () => 
   }
 });
 
+test('with a date in frontmatter, a leading Date line stays in the article unless it is a date', () => {
+  const opening = (line) => `---\ntitle: Front\ndate: 2026-11-01\n---\n\n${line}\n\nThe body.\n`;
+  try {
+    write('content/writing/002-prose/README.md', opening('Date: of record is next Tuesday.'));
+    const prose = getArticle('002-prose');
+    assert.equal(prose.date, '2026-11-01');
+    assert.match(prose.html, /Date: of record is next Tuesday\./);
+    assert.match(prose.html, /The body/);
+
+    write('content/writing/002-both/README.md', opening('Date: 2026-11-01'));
+    const both = getArticle('002-both');
+    assert.equal(both.date, '2026-11-01');
+    assert.equal(both.html.includes('Date:'), false);
+    assert.match(both.html, /The body/);
+  } finally {
+    removeArticle('002-prose');
+    removeArticle('002-both');
+  }
+});
+
 test('a missing or impossible date fails the build and names the article', () => {
   const invalid = [
     ['002-no-date', '# No date\n\nAuthor: Dean N.\n\nText.\n', 'none'],
+    ['002-empty-date', '# Empty\n\nDate:\n\nText.\n', 'none'],
     ['002-words', '# Words\n\nDate: soon\n\nText.\n', '"soon"'],
     ['002-month', '---\ntitle: Month\ndate: 2026-13-45\n---\n\nText.\n', '"2026-13-45"'],
     ['002-rollover', '# Rollover\n\nDate: 2026-02-31\n\nText.\n', '"2026-02-31"'],
@@ -338,11 +376,19 @@ test('only the date line of an article can mark it as a draft', () => {
     'date: 2026-11-08 (DRAFT)',
     "date: '2026-11-08 (draft)'",
     '# Title\r\n\r\nDate: 2026-11-08  (draft)\r\n\r\nBody',
+    '# Title\n\nAuthor: Dean N.\nDate: 2026-11-08 (draft)\n\nBody',
+    '﻿# Title\n\nDate: 2026-11-08 (draft)\n\nBody',
+    '---\ntitle: T\ndate: 2026-11-08 (draft)\n---\n\nBody',
+    '---\ntitle: T\n---\n\n# T\n\nAuthor: Dean N.\nDate: 2026-11-08 (draft)\n\nBody',
   ]) assert.equal(isDraftArticle(markdown), true, markdown);
   for (const markdown of [
     'Date: 2026-11-08',
     'The Date: 2026-11-08 (draft) was moved.',
     'Date: 2026-11-08 (draft) of the note',
     'Updated: 2026-11-08 (draft)',
+    '# Title\n\nAuthor: Dean N.\nDate: 2026-11-01\n\nThe body.\n\nDate: 2026-12-01 (draft)\n',
+    '# Title\n\nDate: 2026-11-01\n\n```\nDate: 2026-12-01 (draft)\n```\n',
+    '---\ntitle: T\ndate: 2026-11-01\n---\n\nThe body.\n\ndate: 2026-12-01 (draft)\n',
+    '---\nThe body never closes its fence.\n\nDate: 2026-12-01 (draft)\n',
   ]) assert.equal(isDraftArticle(markdown), false, markdown);
 });

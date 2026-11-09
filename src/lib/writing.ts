@@ -73,7 +73,10 @@ function extractArticle(markdown: string): {
   const authorLine = body.match(/^Author:\s*(.+)\n/);
   if (authorLine) body = body.slice(authorLine[0].length);
 
-  const dateLine = body.match(/^Date:\s*(.*?)\s*\n+/);
+  // Frontmatter already dates the article, so only a plain date here is a byline:
+  // any other "Date:" opening is the article's own text. Without frontmatter the whole
+  // line counts, so a bad value fails the build by name instead of reading as no date.
+  const dateLine = body.match(data.date ? /^Date:\s*(\d{4}-\d{2}-\d{2})\s*\n+/ : /^Date:[ \t]*(.*?)[ \t]*\n+/);
   if (dateLine) body = body.slice(dateLine[0].length);
 
   body = body.replace(/^\n+/, '');
