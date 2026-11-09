@@ -16,7 +16,7 @@ const HEADER_LINE = /^(?:#\s|author:|date:|\s*$)/i;
  * @returns {boolean}
  */
 export function isDraftArticle(markdown) {
-  const lines = markdown.replace(/^﻿/, '').split(/\r?\n/);
+  const lines = markdown.replace(/^\uFEFF/, '').split(/\r?\n/);
   const closing = lines[0] === '---' ? lines.indexOf('---', 1) : -1;
   const frontmatter = closing > 0 ? lines.slice(1, closing) : [];
   if (frontmatter.some((line) => DRAFT_DATE.test(line))) return true;

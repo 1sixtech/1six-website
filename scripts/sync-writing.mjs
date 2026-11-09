@@ -65,23 +65,27 @@ async function main() {
     throw new Error(`No published articles found in ${REPO}@${REF}`);
   }
 
-  await rm(contentRoot, { recursive: true, force: true });
-  await rm(publicRoot, { recursive: true, force: true });
-
-  await Promise.all(
+  // Everything arrives before anything is removed, so a failed download leaves
+  // the last good sync in place.
+  const downloads = await Promise.all(
     published.flatMap(({ readme, bytes }) => {
       const slug = readme.split('/')[0];
       const assets = files.filter(
         (file) => file.startsWith(`${slug}/`) && file !== readme,
       );
       return [
-        save(bytes, path.join(contentRoot, slug, 'README.md')),
-        ...assets.map(async (file) =>
-          save(await fetchFile(file), path.join(publicRoot, slug, file.slice(slug.length + 1))),
-        ),
+        { destination: path.join(contentRoot, slug, 'README.md'), bytes },
+        ...assets.map(async (file) => ({
+          destination: path.join(publicRoot, slug, file.slice(slug.length + 1)),
+          bytes: await fetchFile(file),
+        })),
       ];
     }),
   );
+
+  await rm(contentRoot, { recursive: true, force: true });
+  await rm(publicRoot, { recursive: true, force: true });
+  await Promise.all(downloads.map(({ destination, bytes }) => save(bytes, destination)));
 
   const drafts = articles.length - published.length;
   console.log(

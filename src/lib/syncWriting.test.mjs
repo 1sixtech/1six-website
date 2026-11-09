@@ -110,3 +110,13 @@ test('nothing to publish, or a README it cannot read, fails the sync and leaves 
   assert.match(unreadable.errors[0].message, /Failed to download 002-wip\/README\.md: 500/);
   assert.deepEqual(unreadable.operations, [], 'an unknown article might be a draft: stop before touching anything');
 });
+
+test('an asset that cannot be downloaded fails the sync without touching the last good content', async () => {
+  const run = await runSync(
+    { '001-live/README.md': PUBLISHED, '001-live/assets/chart.svg': '<svg/>' },
+    { failing: ['001-live/assets/chart.svg'] },
+  );
+  assert.equal(run.exit, 1);
+  assert.match(run.errors[0].message, /Failed to download 001-live\/assets\/chart\.svg: 500/);
+  assert.deepEqual(run.operations, [], 'nothing is deleted until every file has arrived');
+});

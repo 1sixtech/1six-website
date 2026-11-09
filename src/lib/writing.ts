@@ -76,13 +76,13 @@ function extractArticle(markdown: string): {
   // Frontmatter already dates the article, so only a plain date here is a byline:
   // any other "Date:" opening is the article's own text. Without frontmatter the whole
   // line counts, so a bad value fails the build by name instead of reading as no date.
-  const dateLine = body.match(data.date ? /^Date:\s*(\d{4}-\d{2}-\d{2})\s*\n+/ : /^Date:[ \t]*(.*?)[ \t]*\n+/);
+  const dateLine = body.match(data.date ? /^Date:\s*(\d{4}-\d{2}-\d{2})\s*\n+/ : /^Date:([^\n]*)\n+/);
   if (dateLine) body = body.slice(dateLine[0].length);
 
   body = body.replace(/^\n+/, '');
   const title = data.title || titleLine?.[1]?.trim() || 'Untitled';
   const author = data.author || authorLine?.[1]?.trim() || '1SIX';
-  const date = data.date || dateLine?.[1] || '';
+  const date = data.date || dateLine?.[1]?.trim() || '';
   // Research is the default publication type. Explicit categories are
   // validated so a typo cannot silently place an op-ed in the wrong section.
   const category = data.category?.toLowerCase() || 'research';
