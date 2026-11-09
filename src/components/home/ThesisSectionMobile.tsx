@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { EffectFade } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
-import { HASH_SCROLL_REQUEST_EVENT } from '@/lib/hashScroll';
+import { HASH_SCROLL_REQUEST_EVENT, PAGE_TOP_REQUEST } from '@/lib/hashScroll';
 import { THESIS_STATES, TOTAL } from './thesisData';
 import { ThesisSlideActive } from './thesisSlideActive';
 import { movedAwayFrom } from './captureSettle';
@@ -120,6 +120,14 @@ export function ThesisSectionMobile() {
     e.preventDefault();
   }, []);
 
+  const clearCaptureSuspend = useCallback(() => {
+    captureSuspendedUntilRef.current = 0;
+    if (suspendTimerRef.current) {
+      clearTimeout(suspendTimerRef.current);
+      suspendTimerRef.current = null;
+    }
+  }, []);
+
   // ── Capture: snap to thesis and block page scroll ──
   //
   // sectionTopAbs is a pre-computed absolute Y of thesis top. The caller
@@ -153,7 +161,7 @@ export function ThesisSectionMobile() {
     //
     // Why this matters (Codex review):
     //
-    //   The hamburger-menu Thesis-nav path calls suspendCapture() BEFORE
+    //   A direct /thesis#thesis link calls suspendCapture() BEFORE
     //   the hashScroll runs, which sets captureSuspendedUntilRef to
     //   now+CAPTURE_SUSPEND_MS. Then the scroll event handler's pending-
     //   hash branch calls capture() as soon as the scroll lands, typically
@@ -172,11 +180,7 @@ export function ThesisSectionMobile() {
     //   between the programmatic scroll and the capture itself), and
     //   future captures should be governed by future release() calls, not
     //   by a stale absolute-timestamp value from a different operation.
-    captureSuspendedUntilRef.current = 0;
-    if (suspendTimerRef.current) {
-      clearTimeout(suspendTimerRef.current);
-      suspendTimerRef.current = null;
-    }
+    clearCaptureSuspend();
 
     // Step 1: cancel Android compositor momentum via layout change.
     // Also set the data-thesis-captured attribute that the globals.css
@@ -227,7 +231,7 @@ export function ThesisSectionMobile() {
 
     // Step 4: document-level touchmove block (iPhone belt-and-suspenders).
     document.addEventListener('touchmove', preventPageScroll, { passive: false });
-  }, [preventPageScroll]);
+  }, [clearCaptureSuspend, preventPageScroll]);
 
   const flushPendingCapture = useCallback(() => {
     const section = sectionRef.current;
@@ -704,6 +708,25 @@ export function ThesisSectionMobile() {
       }
 
       pendingHashCaptureRef.current = false;
+      if (nextHash === PAGE_TOP_REQUEST) {
+        // An instant jump has no frames in between to guard, so no suspend
+        // window, and one left by an earlier exit or section link ends here:
+        // crossings are one-shot, and a visitor who scrolls straight back down
+        // must still be captured.
+        stopCapture(null);
+        clearCaptureSuspend();
+        // The baseline has to move with the jump. Under the menu lock the page
+        // is already at 0 and that scroll event was filtered, so nothing else
+        // would refresh it; from the footer, the jump's own scroll event would
+        // otherwise be a reverse crossing. Either way, left below Thesis it
+        // would capture the last slide.
+        prevScrollYRef.current = 0;
+        // Upward exits otherwise only leave from slide one. The section rises
+        // into view before the next capture, so it must already show that slide.
+        swiperRef.current?.slideTo(0, 0);
+        setActiveIndex(0);
+        return;
+      }
       releaseForProgrammaticNavigation();
     };
 
@@ -712,7 +735,7 @@ export function ThesisSectionMobile() {
     return () => {
       window.removeEventListener(HASH_SCROLL_REQUEST_EVENT, onHashScrollRequest as EventListener);
     };
-  }, [releaseForProgrammaticNavigation, suspendCapture]);
+  }, [clearCaptureSuspend, releaseForProgrammaticNavigation, stopCapture, suspendCapture]);
 
   useEffect(() => {
     return () => {

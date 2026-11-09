@@ -6,6 +6,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Observer } from 'gsap/Observer';
 import { useGSAP } from '@gsap/react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { HASH_SCROLL_REQUEST_EVENT, PAGE_TOP_REQUEST } from '@/lib/hashScroll';
 import { THESIS_STATES, TOTAL } from './thesisData';
 import { ThesisSlideActive } from './thesisSlideActive';
 import { ThesisSectionMobile } from './ThesisSectionMobile';
@@ -117,6 +118,8 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
   const exitingRef = useRef(false);
   // Timestamp of last completed page transition — time-based momentum debounce
   const lastTransitionTimeRef = useRef(0);
+  // The page crossfade in flight, so a jump to Hero can stop it
+  const transitionRef = useRef<gsap.core.Timeline | null>(null);
 
   const setContentRef = useCallback(
     (index: number) => (el: HTMLDivElement | null) => {
@@ -236,6 +239,7 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
         // Time debounce (COOLDOWN_MS) absorbs residual momentum.
       },
     });
+    transitionRef.current = tl;
 
     // Fade out current
     tl.to(fromEl, {
@@ -283,6 +287,7 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
         }
       },
     });
+    transitionRef.current = tl;
 
     tl.to(fromEl, {
       autoAlpha: 0,
@@ -360,6 +365,9 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
         animatingRef.current = false;
         observerRef.current?.disable();
         document.documentElement.classList.remove('thesis-touch-lock');
+        // A jump from below the pin to Hero passes through onEnterBack first,
+        // which shows the last page. Above the pin it always rests on page one.
+        showPage(0);
       },
     });
     stRef.current = st;
@@ -437,6 +445,8 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
     section.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
+      // A dot jump's completion scrolls the window, which by now is another page.
+      transitionRef.current?.kill();
       observer.disable();
       section.removeEventListener('touchstart', onTouchStart);
       section.removeEventListener('touchmove', onTouchMove);
@@ -445,6 +455,20 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
       st.kill(true);
     };
   }, { scope: sectionRef, dependencies: [prefersReducedMotion, gotoPage, showPage] });
+
+  // Pressing Thesis jumps to Hero from any page, mid-crossfade and not only from
+  // inside the pin. A dot jump's completion would scroll back into Thesis, and
+  // the next entry would rise into view on the old page.
+  useEffect(() => {
+    const onHashScrollRequest = (event: Event) => {
+      if ((event as CustomEvent<{ hash?: string }>).detail?.hash !== PAGE_TOP_REQUEST) return;
+      transitionRef.current?.kill();
+      animatingRef.current = false;
+      showPage(0);
+    };
+    window.addEventListener(HASH_SCROLL_REQUEST_EVENT, onHashScrollRequest as EventListener);
+    return () => window.removeEventListener(HASH_SCROLL_REQUEST_EVENT, onHashScrollRequest as EventListener);
+  }, [showPage]);
 
   // Keyboard navigation (desktop only)
   useEffect(() => {
