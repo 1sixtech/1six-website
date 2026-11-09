@@ -434,8 +434,8 @@ test('source reuse: a loaded video is wrapped as is, with no second decoder, and
     },
   };
   try {
-    const { warmup, isPooled } = await import('../videoPool.ts');
-    const ready = warmup('/loaded.mp4');
+    const { load, isPooled } = await import('../videoPool.ts');
+    const ready = load('/loaded.mp4');
     videos[0].dispatchEvent(new Event('canplay'));
     const loaded = await ready;
     assert.equal(isPooled(loaded), true);

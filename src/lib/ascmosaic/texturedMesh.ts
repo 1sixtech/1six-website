@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // See the cross-layer coupling note in ascmosaic/index.ts — same
 // justification applies here. Every video comes from the pool, which has to
 // know "a new consumer is using this video" so refcounted release works.
-import { acquire as acquirePooledVideo, warmup as warmupPooledVideo } from '@/lib/videoPool';
+import { acquire as acquirePooledVideo, load as loadPooledVideo } from '@/lib/videoPool';
 
 export type TexturedMeshShape = 'sphere' | 'cube' | 'plane' | 'glb';
 
@@ -50,7 +50,7 @@ async function createVideoTexture(
   videoUrl: string,
   existingVideo?: HTMLVideoElement,
 ): Promise<THREE.VideoTexture> {
-  const video = existingVideo ?? await warmupPooledVideo(videoUrl);
+  const video = existingVideo ?? await loadPooledVideo(videoUrl);
   const texture = new THREE.VideoTexture(video);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;

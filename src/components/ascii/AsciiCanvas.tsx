@@ -101,7 +101,7 @@ interface AsciiCanvasProps {
   renderOnDemand?: boolean;
   /**
    * The moment (seconds) a video source holds when the mosaic is replaced by
-   * the source itself (reduced motion, or WebGL unavailable). Default: 0.1
+   * the source itself (reduced motion, no WebGL, or a source that would not load). Default: 0.1
    */
   fallbackFrameTime?: number;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
@@ -145,8 +145,9 @@ function nextIdleSlot(): Promise<void> {
   });
 }
 
-async function enqueueInit(fn: () => Promise<void>) {
-  initQueue.push(fn);
+async function enqueueInit(fn: () => Promise<void>, front = false) {
+  if (front) initQueue.unshift(fn);
+  else initQueue.push(fn);
   if (isProcessingQueue) return;
   isProcessingQueue = true;
   while (initQueue.length > 0) {
@@ -214,8 +215,9 @@ export function AsciiCanvas({
   // AscMosaic.setVideoPlaying for why leaving every homepage video decoding
   // at once breaks ASCII rendering on memory-constrained iOS devices.
   const [isOnScreen, setIsOnScreen] = useState(true);
-  // WebGL could not start (no context, a failed init): show the source still,
-  // for the rest of this mount. The ref keeps later inits (a theme or pixel
+  // Show the source still instead of a mosaic. WebGL could not start, which
+  // lasts for this mount, or a source ran out of retries, which is revived when
+  // the visitor returns to the tab. The ref keeps later inits (a theme or pixel
   // ratio change) from building a canvas inside the fallback.
   const [failed, setFailed] = useState(false);
   const failedRef = useRef(false);
@@ -298,6 +300,7 @@ export function AsciiCanvas({
       return;
     }
     retriesUsedRef.current += 1;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     retryTimerRef.current = setTimeout(() => setSourceAttempt((attempt) => attempt + 1), delay);
   }, []);
 
@@ -514,12 +517,12 @@ export function AsciiCanvas({
   // load one at a time so decoders do not all start at once, but a slow or
   // failing source gives up its turn rather than holding the canvases behind it.
   const runInit = useCallback(async (token: number) => {
-    if (token !== initTokenRef.current || failedRef.current || prefersReducedMotion) return;
+    if (token !== initTokenRef.current || failedRef.current || prefersReducedMotion || !mountedRef.current) return;
     if (resolvedTextureType !== 'video') {
       await initMosaic(token);
       return;
     }
-    const source = videoPool.warmup(textureUrl);
+    const source = videoPool.load(textureUrl);
     const outcome = await Promise.race([
       source.then(() => 'ready' as const, () => 'failed' as const),
       new Promise<'slow'>((resolve) => setTimeout(() => resolve('slow'), SOURCE_QUEUE_WAIT_MS)),
@@ -530,8 +533,10 @@ export function AsciiCanvas({
     } else if (outcome === 'failed') {
       retrySource();
     } else {
+      // Once it arrives only the cheap build is left, so it goes ahead of
+      // canvases that have not started loading.
       source.then(
-        (video) => { if (token === initTokenRef.current) void enqueueInit(() => initMosaic(token, video)); },
+        (video) => { if (token === initTokenRef.current) void enqueueInit(() => initMosaic(token, video), true); },
         () => { if (token === initTokenRef.current) retrySource(); },
       );
     }
@@ -556,8 +561,10 @@ export function AsciiCanvas({
   // Also reinit when initMosaic changes (e.g. theme-driven cell atlas swap)
   // Uses global queue to stagger WebGL initialization and prevent jank.
   useEffect(() => {
-    // Every request supersedes the ones before it, queued or in flight.
+    // Every request supersedes the ones before it, queued or in flight, and
+    // any retry they scheduled.
     const token = ++initTokenRef.current;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     if (isVisible) {
       if (mosaicRef.current) {
         destroyMosaic();
@@ -578,6 +585,13 @@ export function AsciiCanvas({
     };
   }, [destroyMosaic]);
 
+  // Leaving before the mosaic took its video would strand it in the pool, paused
+  // but still holding a decoder.
+  useEffect(() => {
+    if (resolvedTextureType !== 'video') return;
+    return () => videoPool.abandon(textureUrl);
+  }, [resolvedTextureType, textureUrl]);
+
   // Set canvas size when dimensions change
   useEffect(() => {
     if (mosaicRef.current && width && height) {
@@ -590,7 +604,7 @@ export function AsciiCanvas({
     if (video.readyState >= 2 && !video.seeking) onReady?.();
   };
 
-  // Reduced motion (or WebGL unavailable): show the source media directly,
+  // Reduced motion, no WebGL, or a source out of retries: show the source media directly,
   // still. Video sources render a single frame (the #t media fragment makes
   // Safari paint it without playback) instead of an autoplaying loop, which
   // is motion.

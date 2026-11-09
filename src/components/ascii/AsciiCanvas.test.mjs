@@ -11,7 +11,7 @@ const code = ts.transpileModule(readFileSync(file, 'utf8'), {
 }).outputText;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-function canvasHarness({ reduced = false, image = false, warmup = () => Promise.resolve({}) } = {}) {
+function canvasHarness({ reduced = false, image = false, load = () => Promise.resolve({}) } = {}) {
   const hooks = [];
   let cursor = 0;
   let effects = [];
@@ -32,7 +32,7 @@ function canvasHarness({ reduced = false, image = false, warmup = () => Promise.
     'react/jsx-runtime': { jsx, jsxs: jsx },
     '@/hooks/useReducedMotion': { useReducedMotion: () => reduced },
     '@/hooks/useDevicePixelRatio': { useDevicePixelRatio: () => 1 },
-    '@/lib/videoPool': { warmup },
+    '@/lib/videoPool': { load, abandon() {} },
     '@/lib/assetWarmup': { warmedAssetSource: (url) => url },
     './pixelScale': { outputPixelRatio: () => 1, toDevicePixels: (options) => options },
     '@/lib/ascmosaic': { AscMosaic: class { constructor() { builds++; throw new Error('WebGL unavailable'); } } },
@@ -61,7 +61,6 @@ function canvasHarness({ reduced = false, image = false, warmup = () => Promise.
     get ready() { return ready; },
     get builds() { return builds; },
     timers,
-    rerun() { cursor = 0; effects = []; exports.AsciiCanvas(props); effects.forEach((setup) => setup()); },
     rerender: () => { tree = render(); return tree; },
     cleanup: () => cleanups.forEach((cleanup) => cleanup?.()),
     get media() { return tree.props.children; },
@@ -82,12 +81,12 @@ test('ASCII fallback: WebGL failure waits for a decoded, settled video frame bef
   assert.equal(canvas.ready, 1);
 });
 
-test('video source failure: retries, never builds a mosaic without a video, then falls back', async (t) => {
-  let warmups = 0;
-  const canvas = canvasHarness({ warmup: () => { warmups++; return Promise.reject(new Error('load error')); } });
+test('video source failure: the first failure schedules a retry and builds nothing without a video', async (t) => {
+  let loads = 0;
+  const canvas = canvasHarness({ load: () => { loads++; return Promise.reject(new Error('load error')); } });
   t.after(() => canvas.cleanup());
   await flush(); await flush();
-  assert.equal(warmups, 1);
+  assert.equal(loads, 1);
   assert.equal(canvas.builds, 0, 'no source, no mosaic: an empty texture would tile one glyph');
   const retries = canvas.timers.filter((timer) => timer.delay === 1000 || timer.delay === 3000);
   assert.deepEqual(retries.map((timer) => timer.delay), [1000]);
@@ -122,13 +121,14 @@ function deferred() {
  * state update renders again. One page holds any number of canvases because
  * they share the init queue. Timers and frames only move when a test says so.
  */
-function canvasPage({ warmup = (url) => Promise.resolve({ url }), webgl = true, idle = false, reduced = false } = {}) {
+function canvasPage({ load = (url) => Promise.resolve({ url }), webgl = true, idle = false, reduced = false } = {}) {
   const timers = new Map();
   const frames = [];
   const idleCallbacks = [];
   const idleOptions = [];
   const observers = [];
   const mosaics = [];
+  const abandoned = [];
   const dirty = new Set();
   const visibility = new Set();
   const controls = { failAt: null };
@@ -137,7 +137,7 @@ function canvasPage({ warmup = (url) => Promise.resolve({ url }), webgl = true, 
   let queuePauses = 0;
   let rendering = null;
 
-  const step = (name) => { if (controls.failAt === name) throw new Error(`${name} failed`); };
+  const step = (name) => { controls.before?.(name); if (controls.failAt === name) throw new Error(`${name} failed`); };
   class AscMosaic {
     running = false;
     videoPlaying = null;
@@ -197,7 +197,7 @@ function canvasPage({ warmup = (url) => Promise.resolve({ url }), webgl = true, 
     'react/jsx-runtime': { jsx, jsxs: jsx },
     '@/hooks/useReducedMotion': { useReducedMotion: () => reduced },
     '@/hooks/useDevicePixelRatio': { useDevicePixelRatio: () => 1 },
-    '@/lib/videoPool': { warmup },
+    '@/lib/videoPool': { load, abandon: (url) => abandoned.push(url) },
     '@/lib/assetWarmup': { warmedAssetSource: (url) => url },
     './pixelScale': { outputPixelRatio: () => 1, toDevicePixels: (options) => options },
     '@/lib/ascmosaic': { AscMosaic },
@@ -262,7 +262,7 @@ function canvasPage({ warmup = (url) => Promise.resolve({ url }), webgl = true, 
   }
 
   return {
-    controls, mosaics, idleOptions, settle,
+    controls, mosaics, abandoned, idleOptions, settle,
     get constructed() { return constructed; },
     get queuePauses() { return queuePauses; },
     get visibilityListeners() { return visibility.size; },
@@ -289,7 +289,7 @@ const showsStill = (canvas) => canvas.element.props['data-ascii-still'] === '';
 
 test('video source: the mosaic wraps the element the pool loaded; an image and reduced motion never ask for one', async () => {
   const video = { url: '/mark.mp4' };
-  const page = canvasPage({ warmup: () => Promise.resolve(video) });
+  const page = canvasPage({ load: () => Promise.resolve(video) });
   const canvas = page.mount();
   await page.settle();
   assert.equal(page.mosaics.length, 1);
@@ -299,13 +299,13 @@ test('video source: the mosaic wraps the element the pool loaded; an image and r
   assert.deepEqual(page.retries, []);
   assert.equal(showsStill(canvas), false);
 
-  const pictures = canvasPage({ warmup: () => assert.fail('an image has no video to load') });
+  const pictures = canvasPage({ load: () => assert.fail('an image has no video to load') });
   const picture = pictures.mount({ textureUrl: '/mark.png' });
   await pictures.settle();
   assert.equal(pictures.mosaics[0].model.existingVideo, undefined);
   assert.equal(picture.ready, 1);
 
-  const calm = canvasPage({ reduced: true, warmup: () => assert.fail('a still source starts no decoder') });
+  const calm = canvasPage({ reduced: true, load: () => assert.fail('a still source starts no decoder') });
   calm.mount();
   await calm.settle();
   assert.equal(calm.constructed, 0);
@@ -313,7 +313,7 @@ test('video source: the mosaic wraps the element the pool loaded; an image and r
 
 test('video source failure: waits 1s, then 3s, then shows the still source, and never builds without a frame', async () => {
   let attempts = 0;
-  const page = canvasPage({ warmup: () => { attempts++; return Promise.reject(new Error('load error')); } });
+  const page = canvasPage({ load: () => { attempts++; return Promise.reject(new Error('load error')); } });
   const canvas = page.mount();
   await page.settle();
   assert.equal(attempts, 1);
@@ -366,7 +366,7 @@ test('video source failure: returning to the tab revives a canvas that gave up, 
   let failing = true;
   let attempts = 0;
   const page = canvasPage({
-    warmup: (url) => { attempts++; return failing ? Promise.reject(new Error('phone busy')) : Promise.resolve({ url }); },
+    load: (url) => { attempts++; return failing ? Promise.reject(new Error('phone busy')) : Promise.resolve({ url }); },
   });
   const canvas = page.mount();
   await page.settle();
@@ -406,7 +406,7 @@ test('init queue: a slow video gives up its turn, builds when it arrives, and re
   const built = (page) => page.mosaics.map(({ model }) => model.textureUrl);
   for (const idle of [false, true]) {
     const slow = deferred();
-    const page = canvasPage({ idle, warmup: (url) => url === '/slow.mp4' ? slow.promise : Promise.resolve({ url }) });
+    const page = canvasPage({ idle, load: (url) => url === '/slow.mp4' ? slow.promise : Promise.resolve({ url }) });
     const first = page.mount({ textureUrl: '/slow.mp4' });
     const second = page.mount({ textureUrl: '/next.mp4' });
     await page.settle();
@@ -433,7 +433,7 @@ test('init queue: a slow video gives up its turn, builds when it arrives, and re
   }
 
   const late = deferred();
-  const page = canvasPage({ warmup: () => late.promise });
+  const page = canvasPage({ load: () => late.promise });
   page.mount();
   await page.settle();
   await page.elapse(1500);
@@ -474,7 +474,7 @@ test('paused: a canvas in a hidden slide stays built but holds its loop and vide
 
 test('teardown: leaving cancels a pending retry, and a load that lost its turn builds nothing', async () => {
   let attempts = 0;
-  const failing = canvasPage({ warmup: () => { attempts++; return Promise.reject(new Error('load error')); } });
+  const failing = canvasPage({ load: () => { attempts++; return Promise.reject(new Error('load error')); } });
   const gone = failing.mount();
   await failing.settle();
   assert.deepEqual(failing.retries, [1000]);
@@ -484,7 +484,7 @@ test('teardown: leaving cancels a pending retry, and a load that lost its turn b
   assert.equal(attempts, 1);
 
   const arriving = deferred();
-  const leaving = canvasPage({ warmup: () => arriving.promise });
+  const leaving = canvasPage({ load: () => arriving.promise });
   const left = leaving.mount();
   await leaving.settle();
   leaving.unmount(left);
@@ -493,17 +493,17 @@ test('teardown: leaving cancels a pending retry, and a load that lost its turn b
   assert.equal(leaving.constructed, 0, 'a video that lands after the page left builds nothing');
 
   const cancelled = deferred();
-  const abandoned = canvasPage({ warmup: () => cancelled.promise });
+  const abandoned = canvasPage({ load: () => cancelled.promise });
   const closed = abandoned.mount();
   await abandoned.settle();
   abandoned.unmount(closed);
-  cancelled.reject(new Error('videoPool: cancelled warmup'));
+  cancelled.reject(new Error('videoPool: cancelled load'));
   await abandoned.settle();
   assert.deepEqual(abandoned.retries, [], 'a load the route change cancelled is not retried');
 
   // A theme swap while a doomed load is pending: one retry, for the newest request.
   const doomed = deferred();
-  const swapped = canvasPage({ warmup: () => doomed.promise });
+  const swapped = canvasPage({ load: () => doomed.promise });
   const swappedCanvas = swapped.mount({ mosaicCellUrl: '/old.png' });
   await swapped.settle();
   swapped.update(swappedCanvas, { mosaicCellUrl: '/new.png' });
@@ -513,7 +513,7 @@ test('teardown: leaving cancels a pending retry, and a load that lost its turn b
 
   // A theme swap while the video loads: only the newest request builds.
   const load = deferred();
-  const page = canvasPage({ warmup: () => load.promise });
+  const page = canvasPage({ load: () => load.promise });
   const canvas = page.mount({ mosaicCellUrl: '/old.png' });
   await page.settle();
   page.update(canvas, { mosaicCellUrl: '/new.png' });
@@ -521,4 +521,121 @@ test('teardown: leaving cancels a pending retry, and a load that lost its turn b
   await page.settle();
   assert.deepEqual(page.mosaics.map(({ filter }) => filter.mosaicCellTextureUrl), ['/new.png']);
   assert.equal(canvas.ready, 1);
+});
+
+test('init queue: a canvas that left before its turn starts no video and cannot hold up the next route', async () => {
+  const asked = [];
+  const first = deferred();
+  const page = canvasPage({
+    load: (url) => { asked.push(url); return url === '/first.mp4' ? first.promise : url === '/stale.mp4' ? new Promise(() => {}) : Promise.resolve({ url }); },
+  });
+  const left = page.mount({ textureUrl: '/first.mp4' });
+  const stale = page.mount({ textureUrl: '/stale.mp4' });
+  await page.settle();
+  page.unmount(left);
+  page.unmount(stale);
+  first.resolve({ url: '/first.mp4' });
+  const next = page.mount({ textureUrl: '/next-route.mp4' });
+  await page.settle();
+  assert.equal(asked.includes('/stale.mp4'), false, 'it left before its turn: no decoder');
+  assert.equal(next.ready, 1, 'the next route builds at once');
+});
+
+test('init queue: a request superseded before its turn starts no video', async () => {
+  const asked = [];
+  const first = deferred();
+  const page = canvasPage({ load: (url) => { asked.push(url); return url === '/first.mp4' ? first.promise : Promise.resolve({ url }); } });
+  page.mount({ textureUrl: '/first.mp4' });
+  const canvas = page.mount({ textureUrl: '/old.mp4' });
+  await page.settle();
+  page.update(canvas, { textureUrl: '/new.mp4' });
+  first.resolve({ url: '/first.mp4' });
+  await page.settle();
+  assert.deepEqual(asked, ['/first.mp4', '/new.mp4']);
+});
+
+test('init queue: a canvas already showing its still starts no video on a theme swap', async () => {
+  const asked = [];
+  const page = canvasPage({ webgl: false, load: (url) => { asked.push(url); return Promise.resolve({ url }); } });
+  const canvas = page.mount({ mosaicCellUrl: '/old.png' });
+  await page.settle();
+  assert.equal(asked.length, 1);
+  page.update(canvas, { mosaicCellUrl: '/new.png' });
+  await page.settle();
+  assert.equal(asked.length, 1);
+});
+
+test('init queue: a superseded slow load that fails spends no rung', async () => {
+  const doomed = deferred();
+  const page = canvasPage({ load: () => doomed.promise });
+  const canvas = page.mount({ mosaicCellUrl: '/old.png' });
+  await page.settle();
+  await page.elapse(1500);
+  page.update(canvas, { mosaicCellUrl: '/new.png' });
+  await page.settle();
+  doomed.reject(new Error('load error'));
+  await page.settle();
+  assert.deepEqual(page.retries, [1000], 'only the newest request spends a rung');
+});
+
+test('mosaic failure: an init a theme swap overtook is not a failure', async () => {
+  const page = canvasPage();
+  let canvas;
+  let swapped = false;
+  page.controls.before = (name) => {
+    if (name !== 'waitForSceneTextures' || swapped) return;
+    swapped = true;
+    page.update(canvas, { mosaicCellUrl: '/new.png' });
+    throw new Error('Mosaic disposed before source was ready');
+  };
+  canvas = page.mount({ mosaicCellUrl: '/old.png' });
+  await page.settle();
+  assert.deepEqual(page.retries, [], 'no rung spent on the overtaken init');
+  assert.equal(page.mosaics.length, 2);
+  assert.equal(page.mosaics[1].running, true);
+  assert.equal(canvas.ready, 1);
+});
+
+test('init queue: a video that lands after losing its turn builds before canvases that have not started', async () => {
+  const sources = new Map();
+  const source = (url) => { if (!sources.has(url)) sources.set(url, deferred()); return sources.get(url); };
+  const page = canvasPage({ load: (url) => source(url).promise });
+  for (const textureUrl of ['/hero.mp4', '/one.mp4', '/two.mp4']) page.mount({ textureUrl });
+  await page.settle();
+  await page.elapse(1500);
+  source('/hero.mp4').resolve({ url: '/hero.mp4' });
+  await page.settle();
+  await page.elapse(1500);
+  assert.deepEqual(page.mosaics.map(({ model }) => model.textureUrl), ['/hero.mp4']);
+});
+
+test('video source failure: a newer request cancels the pending retry', async () => {
+  let failing = true;
+  const page = canvasPage({ load: (url) => failing ? Promise.reject(new Error('load error')) : Promise.resolve({ url }) });
+  const canvas = page.mount({ mosaicCellUrl: '/old.png' });
+  await page.settle();
+  assert.deepEqual(page.retries, [1000]);
+  failing = false;
+  page.update(canvas, { mosaicCellUrl: '/new.png' });
+  await page.settle();
+  assert.deepEqual(page.retries, []);
+  await page.elapse(1000);
+  assert.equal(page.mosaics.length, 1, 'the working mosaic is not rebuilt');
+  assert.equal(page.mosaics[0].disposed, false);
+});
+
+test('a canvas gives up its video when it leaves or changes source; an image has none to give up', async () => {
+  const page = canvasPage();
+  const canvas = page.mount({ textureUrl: '/first.mp4' });
+  await page.settle();
+  assert.deepEqual(page.abandoned, []);
+  page.update(canvas, { textureUrl: '/second.mp4' });
+  assert.deepEqual(page.abandoned, ['/first.mp4']);
+  page.unmount(canvas);
+  assert.deepEqual(page.abandoned, ['/first.mp4', '/second.mp4']);
+
+  const picture = page.mount({ textureUrl: '/mark.png' });
+  await page.settle();
+  page.unmount(picture);
+  assert.deepEqual(page.abandoned, ['/first.mp4', '/second.mp4'], 'an image has no video');
 });

@@ -95,8 +95,8 @@ function assertNoPendingListeners(video) {
 
 test('video pool loads the network URL once and asks to play before a frame exists', async () => {
   const pool = poolHarness();
-  const first = pool.warmup(VIDEO_URL);
-  assert.equal(pool.warmup(VIDEO_URL), first);
+  const first = pool.load(VIDEO_URL);
+  assert.equal(pool.load(VIDEO_URL), first);
   assert.equal(pool.videos.length, 1);
   const video = pool.videos[0];
   assert.equal(video.src, `${VIDEO_URL}#t=0.001`, 'iOS is unreliable with blob-backed video; only the real URL is used');
@@ -111,7 +111,7 @@ test('video pool loads the network URL once and asks to play before a frame exis
   video.fire('canplay');
   assert.equal(await first, video, 'a decoded first frame does not wait for autoplay permission');
   assert.equal(pool.isPooled(video), true);
-  assert.equal(pool.warmup(VIDEO_URL), first);
+  assert.equal(pool.load(VIDEO_URL), first);
   assert.equal(video.plays.length, 1);
   assertNoPendingListeners(video);
   assert.equal(pool.timers.size, 0);
@@ -123,7 +123,7 @@ test('video pool loads the network URL once and asks to play before a frame exis
 for (const signal of ['loadeddata', 'a frame callback']) {
   test(`a frame reported by ${signal} is enough when canplay never fires`, async () => {
     const pool = poolHarness({ frameCallbacks: true });
-    const ready = pool.warmup(VIDEO_URL);
+    const ready = pool.load(VIDEO_URL);
     const video = pool.videos[0];
     if (signal === 'loadeddata') video.fire('loadeddata');
     else video.frameCallback();
@@ -136,7 +136,7 @@ for (const signal of ['loadeddata', 'a frame callback']) {
 
 test('the last release destroys the element so a paused video cannot keep its decoder', async () => {
   const pool = poolHarness();
-  const ready = pool.warmup(VIDEO_URL);
+  const ready = pool.load(VIDEO_URL);
   const video = pool.videos[0];
   video.fire('canplay');
   await ready;
@@ -144,16 +144,16 @@ test('the last release destroys the element so a paused video cannot keep its de
   pool.release(video);
   assert.equal(video.src, '');
   assert.equal(video.loadCalls, 2);
-  const next = pool.warmup(VIDEO_URL);
+  const next = pool.load(VIDEO_URL);
   assert.notEqual(next, ready, 'a later canvas gets a fresh element');
   assert.equal(pool.videos.length, 2);
 });
 
-test('route teardown rejects every pending warmup, clears sources, and ignores late canplay and error callbacks', async () => {
+test('route teardown rejects every pending load, clears sources, and ignores late canplay and error callbacks', async () => {
   const pool = poolHarness();
   const urls = [VIDEO_URL, '/resource/Source_Graph.mp4'];
-  const pending = urls.map((url) => pool.warmup(url));
-  const rejected = pending.map((promise) => assert.rejects(promise, /cancelled warmup/));
+  const pending = urls.map((url) => pool.load(url));
+  const rejected = pending.map((promise) => assert.rejects(promise, /cancelled load/));
   const obsolete = pool.videos.slice();
   pool.teardownVideoPool();
   await Promise.all(rejected);
@@ -168,12 +168,12 @@ test('route teardown rejects every pending warmup, clears sources, and ignores l
     assert.equal(pool.isPooled(video), false);
   });
 
-  const retry = pool.warmup(VIDEO_URL);
+  const retry = pool.load(VIDEO_URL);
   assert.notEqual(retry, pending[0]);
   const current = pool.videos.at(-1);
   obsolete[0].callbacks.get('canplay')[0]();
   obsolete[0].callbacks.get('error')[0]();
-  assert.equal(pool.warmup(VIDEO_URL), retry, 'old callbacks cannot remove the current promise');
+  assert.equal(pool.load(VIDEO_URL), retry, 'old callbacks cannot remove the current promise');
   assert.equal(pool.isPooled(current), false);
   current.fire('canplay');
   assert.equal(await retry, current);
@@ -181,11 +181,11 @@ test('route teardown rejects every pending warmup, clears sources, and ignores l
   assert.notEqual(current, obsolete[0]);
 });
 
-test('a timed-out decoder is evicted and a later warmup gets a fresh request', async () => {
+test('a timed-out decoder is evicted and a later load gets a fresh request', async () => {
   const pool = poolHarness();
-  const first = pool.warmup(VIDEO_URL);
+  const first = pool.load(VIDEO_URL);
   const expired = pool.videos[0];
-  const rejected = assert.rejects(first, /warmup timeout/);
+  const rejected = assert.rejects(first, /load timeout/);
   pool.expire(expired);
   await rejected;
   assert.equal(expired.src, '');
@@ -194,11 +194,11 @@ test('a timed-out decoder is evicted and a later warmup gets a fresh request', a
   assertNoPendingListeners(expired);
   assert.equal(pool.timers.size, 0);
 
-  const retry = pool.warmup(VIDEO_URL);
+  const retry = pool.load(VIDEO_URL);
   assert.notEqual(retry, first);
   expired.callbacks.get('canplay')[0]();
   expired.callbacks.get('error')[0]();
-  assert.equal(pool.warmup(VIDEO_URL), retry);
+  assert.equal(pool.load(VIDEO_URL), retry);
   assert.equal(pool.isPooled(expired), false);
   assert.equal(expired.plays.length, 1);
   const current = pool.videos.at(-1);
@@ -209,7 +209,7 @@ test('a timed-out decoder is evicted and a later warmup gets a fresh request', a
 
 test('a media load error evicts its cached rejection so retry can decode successfully', async () => {
   const pool = poolHarness();
-  const first = pool.warmup(VIDEO_URL);
+  const first = pool.load(VIDEO_URL);
   const failed = pool.videos[0];
   failed.error = { code: 3 };
   const rejected = assert.rejects(first, /load error.*\(code 3\)/);
@@ -219,11 +219,11 @@ test('a media load error evicts its cached rejection so retry can decode success
   assert.equal(pool.timers.size, 0);
   assertNoPendingListeners(failed);
 
-  const retry = pool.warmup(VIDEO_URL);
+  const retry = pool.load(VIDEO_URL);
   assert.notEqual(retry, first);
   failed.callbacks.get('error')[0]();
   failed.callbacks.get('canplay')[0]();
-  assert.equal(pool.warmup(VIDEO_URL), retry);
+  assert.equal(pool.load(VIDEO_URL), retry);
   assert.equal(pool.isPooled(failed), false);
   const current = pool.videos.at(-1);
   current.fire('canplay');
@@ -233,7 +233,7 @@ test('a media load error evicts its cached rejection so retry can decode success
 
 test('late priming play completion never pauses a video already acquired by a renderer', async () => {
   const pool = poolHarness();
-  const ready = pool.warmup(VIDEO_URL);
+  const ready = pool.load(VIDEO_URL);
   const video = pool.videos[0];
   video.fire('canplay');
   await ready;
@@ -257,7 +257,7 @@ test('late priming play completion never pauses a video already acquired by a re
 
 test('autoplay rejection preserves a decoded first frame and does not poison later acquisition', async () => {
   const pool = poolHarness();
-  const ready = pool.warmup(VIDEO_URL);
+  const ready = pool.load(VIDEO_URL);
   const video = pool.videos[0];
   video.fire('canplay');
   video.plays[0].reject(new Error('NotAllowedError: Low Power Mode'));
@@ -267,7 +267,7 @@ test('autoplay rejection preserves a decoded first frame and does not poison lat
   pool.acquire(video);
   video.plays[1].reject(new Error('NotAllowedError: autoplay blocked'));
   await flush();
-  assert.equal(pool.warmup(VIDEO_URL), ready);
+  assert.equal(pool.load(VIDEO_URL), ready);
   pool.release(video);
   assert.equal(video.pauseCalls, 1);
 });
@@ -278,7 +278,7 @@ test('a priming play that settles before any frame does not decide the load (Low
     [(attempt) => attempt.resolve(), 1],
   ]) {
     const pool = poolHarness();
-    const ready = pool.warmup(VIDEO_URL);
+    const ready = pool.load(VIDEO_URL);
     const video = pool.videos[0];
     settle(video.plays[0]);
     await flush();
@@ -307,14 +307,14 @@ test('release is safe on anything: a foreign element, a repeat, a throwing pause
   assert.deepEqual(touched, [], 'an element the pool did not create is not its to play or destroy');
   assert.equal(pool.isPooled(foreign), false);
 
-  const firstReady = pool.warmup(VIDEO_URL);
+  const firstReady = pool.load(VIDEO_URL);
   const first = pool.videos[0];
   first.fire('canplay');
   await firstReady;
   pool.acquire(first);
   pool.release(first);
 
-  const secondReady = pool.warmup(VIDEO_URL);
+  const secondReady = pool.load(VIDEO_URL);
   const second = pool.videos[1];
   second.fire('canplay');
   await secondReady;
@@ -322,16 +322,16 @@ test('release is safe on anything: a foreign element, a repeat, a throwing pause
   pool.release(first); // a stale release: the canvas that held `first` disposing late
   assert.equal(second.src, `${VIDEO_URL}#t=0.001`, 'the element that replaced it keeps its source');
   assert.equal(second.pauseCalls, 0);
-  assert.equal(pool.warmup(VIDEO_URL), secondReady, 'and stays in the pool');
+  assert.equal(pool.load(VIDEO_URL), secondReady, 'and stays in the pool');
 
   second.pause = () => { throw new Error('InvalidStateError'); };
   assert.doesNotThrow(() => pool.release(second));
-  assert.notEqual(pool.warmup(VIDEO_URL), secondReady, 'a failed cleanup still leaves the pool');
+  assert.notEqual(pool.load(VIDEO_URL), secondReady, 'a failed cleanup still leaves the pool');
 });
 
 test('teardown clears acquired videos and is idempotent even when priming play settles later', async () => {
   const pool = poolHarness();
-  const ready = pool.warmup(VIDEO_URL);
+  const ready = pool.load(VIDEO_URL);
   const video = pool.videos[0];
   video.fire('canplay');
   await ready;
@@ -347,4 +347,44 @@ test('teardown clears acquired videos and is idempotent even when priming play s
   assert.equal(video.pauseCalls, 1);
   assert.equal(video.loadCalls, 2);
   assert.equal(pool.timers.size, 0);
+});
+
+test('a media load error frees the element, as a timeout does', async () => {
+  const pool = poolHarness();
+  const first = pool.load(VIDEO_URL);
+  const failed = pool.videos[0];
+  failed.error = { code: 3 };
+  const rejected = assert.rejects(first, /code 3/);
+  failed.fire('error');
+  await rejected;
+  assert.equal(failed.src, '');
+  assert.equal(failed.loadCalls, 2);
+});
+
+test('a canvas that leaves before taking its video stops the load or frees the element', async () => {
+  const pool = poolHarness();
+  const pending = pool.load(VIDEO_URL);
+  const loading = pool.videos[0];
+  const cancelled = assert.rejects(pending, /cancelled load/);
+  pool.abandon(VIDEO_URL);
+  await cancelled;
+  assert.equal(loading.src, '', 'a load nobody wants stops downloading');
+
+  const landedLoad = pool.load(VIDEO_URL);
+  assert.notEqual(landedLoad, pending, 'coming back starts afresh');
+  const landed = pool.videos.at(-1);
+  landed.fire('canplay');
+  await landedLoad;
+  pool.abandon(VIDEO_URL);
+  assert.equal(landed.src, '', 'a landed video nobody took does not keep its decoder');
+
+  const takenLoad = pool.load(VIDEO_URL);
+  assert.notEqual(takenLoad, landedLoad);
+  const taken = pool.videos.at(-1);
+  taken.fire('canplay');
+  await takenLoad;
+  pool.acquire(taken);
+  pool.abandon(VIDEO_URL);
+  assert.notEqual(taken.src, '', 'a video in use stays');
+  assert.equal(pool.load(VIDEO_URL), takenLoad);
 });

@@ -774,16 +774,15 @@ export function ThesisSectionMobile() {
             //
             // Previously all 6 slides mounted MobileAscii → AsciiCanvas
             // concurrently, consuming 6 WebGL contexts on mobile even though
-            // only one was visible at a time. With the intro preload in
-            // place, all 6 videos are pre-warmed in videoPool regardless.
+            // only one was visible at a time.
             //
             // Now only the active slide and its immediate neighbors render
             // MobileAscii. Non-nearby slides render an aria-hidden empty
             // placeholder that preserves the Swiper slide footprint without
             // spinning up a canvas.
             //
-            // Swiper crossfade is 400ms; new canvas init with a warmed
-            // video is ~50-150ms, comfortably under the fade window.
+            // A neighbor mounts before it is shown so its video has loaded
+            // by the time the 400ms Swiper crossfade reveals it.
             const isActive = index === activeIndex;
             const isNearby = Math.abs(index - activeIndex) <= 1;
             // Layout strategy: anchor slide content to a fixed top offset

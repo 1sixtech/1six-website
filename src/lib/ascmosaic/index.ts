@@ -6,15 +6,13 @@ import { createTexturedMesh, TexturedMeshOptions } from './texturedMesh';
 import { OrbitControls, OrbitControlsOptions } from './orbitControls';
 import * as THREE from 'three';
 // Cross-layer coupling: ascmosaic is a self-contained WebGL library, but
-// this project shares HTMLVideoElement instances via a global pool so
-// multiple sections can reuse pre-warmed videos. The dispose paths below
-// route pooled videos through videoPool.release() (refcounted pause)
-// instead of the normal kill path (pause + src reset + load), so shared
-// videos survive section unmounts AND stop decoding when no live consumer
-// remains. Non-pooled videos still get the full teardown. If ascmosaic is
-// ever extracted as a standalone library, convert to injected predicates
-// on AscMosaicOptions (`isShared: (v) => boolean`, `onRelease: (v) => void`)
-// instead of importing the pool directly.
+// this project shares HTMLVideoElement instances through a global pool, so
+// a video has one element and one decoder however many canvases use it. The
+// texture loader takes its video from the pool and acquires it, and the
+// dispose path below releases it: the last release destroys the element and
+// frees its decoder. If ascmosaic is ever extracted as a standalone library,
+// convert these to injected callbacks on AscMosaicOptions (`loadVideo`,
+// `acquireVideo`, `releaseVideo`) instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
 /** AscMosaic 생성 옵션 */
@@ -227,34 +225,7 @@ export class AscMosaic {
 
     if (this.model) {
       this.scene.remove(this.model);
-      this.model.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry?.dispose();
-          if (obj.material instanceof THREE.Material) {
-            if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
-              const videoTexture = obj.material.map as THREE.VideoTexture;
-              const video = videoTexture.image as HTMLVideoElement;
-              if (video) {
-                if (videoPool.isPooled(video)) {
-                  // Pooled videos are shared — decrement refcount so
-                  // the pool can pause the element when no live
-                  // VideoTexture references it anymore.
-                  videoPool.release(video);
-                } else {
-                  // One-off: fully tear down.
-                  video.pause();
-                  video.src = '';
-                  video.load();
-                }
-              }
-              videoTexture.dispose();
-            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
-              obj.material.map.dispose();
-            }
-            obj.material.dispose();
-          }
-        }
-      });
+      this.disposeModel(this.model);
       this.model = null;
     }
 
@@ -924,9 +895,9 @@ export class AscMosaic {
   }
 
   /**
-   * Frees a model's geometry, material and texture, and stops its video if
-   * it is a one-off (a pooled one stays with the pool). dispose()'s model
-   * teardown, also used for a model that arrives after dispose().
+   * Frees a model's geometry, material and texture, and hands its video back
+   * to the pool. dispose()'s model teardown, also used for a model that
+   * arrives after dispose().
    */
   private disposeModel(model: THREE.Object3D): void {
     model.traverse((obj) => {
@@ -936,13 +907,7 @@ export class AscMosaic {
           if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
             const videoTexture = obj.material.map as THREE.VideoTexture;
             const video = videoTexture.image as HTMLVideoElement;
-            if (video && videoPool.isPooled(video)) {
-              videoPool.release(video);
-            } else if (video) {
-              video.pause();
-              video.src = '';
-              video.load();
-            }
+            if (video) videoPool.release(video);
             videoTexture.dispose();
           } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
             obj.material.map.dispose();

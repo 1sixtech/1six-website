@@ -2,15 +2,15 @@
  * videoPool — one HTMLVideoElement per URL, refcounted by the canvases using it.
  *
  * Lifecycle contract:
- *   1. `warmup(url)` creates a <video> and resolves once it has a decoded
- *      frame. Only a mounted canvas asks for one, so the page never decodes
- *      more videos than it shows: iOS has a limited number of hardware
+ *   1. `load(url)` creates a <video> and resolves once it has a decoded
+ *      frame. Only a mounted canvas asks for one, so the page decodes what is
+ *      mounted and nothing else: iOS has a limited number of hardware
  *      decoders, shared with whatever else the phone is doing.
  *   2. An AsciiCanvas receives the video (createVideoTexture) and calls
  *      `acquire(video)`, which bumps the refcount and resumes playback.
  *   3. When its mosaic is disposed, AscMosaic calls `release(video)`. The last
  *      release destroys the element, because a merely paused video still holds
- *      its decoder.
+ *      its decoder. A canvas that leaves before acquiring calls `abandon(url)`.
  *   4. On a route change PageEntry calls `teardownVideoPool()`, which cancels
  *      loads nobody will consume and destroys the rest.
  *
@@ -19,12 +19,12 @@
  */
 
 const pool = new Map<string, HTMLVideoElement>();
-const warmupPromises = new Map<string, Promise<HTMLVideoElement>>();
+const loads = new Map<string, Promise<HTMLVideoElement>>();
 const pooledVideos = new WeakSet<HTMLVideoElement>();
 const refCount = new WeakMap<HTMLVideoElement, number>();
 
 const pendingCancels = new Map<string, () => void>();
-const WARMUP_TIMEOUT_MS = 8000;
+const LOAD_TIMEOUT_MS = 8000;
 
 function destroy(video: HTMLVideoElement): void {
   try {
@@ -42,8 +42,8 @@ function destroy(video: HTMLVideoElement): void {
  * timeout, or route teardown, and clears the cached entry so a later retry gets
  * a fresh attempt.
  */
-export function warmup(url: string): Promise<HTMLVideoElement> {
-  const existing = warmupPromises.get(url);
+export function load(url: string): Promise<HTMLVideoElement> {
+  const existing = loads.get(url);
   if (existing) return existing;
 
   const promise = new Promise<HTMLVideoElement>((resolve, reject) => {
@@ -60,10 +60,10 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
-      warmupPromises.delete(url);
+      loads.delete(url);
       destroy(video);
-      reject(new Error(`videoPool: warmup timeout for ${url}`));
-    }, WARMUP_TIMEOUT_MS);
+      reject(new Error(`videoPool: load timeout for ${url}`));
+    }, LOAD_TIMEOUT_MS);
 
     const clearPending = () => {
       clearTimeout(timeout);
@@ -88,8 +88,9 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
-      warmupPromises.delete(url);
+      loads.delete(url);
       const mediaErr = video.error;
+      destroy(video);
       reject(new Error(`videoPool: load error for ${url}${mediaErr ? ` (code ${mediaErr.code})` : ''}`));
     };
 
@@ -97,8 +98,9 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
+      loads.delete(url);
       destroy(video);
-      reject(new Error(`videoPool: cancelled warmup for ${url}`));
+      reject(new Error(`videoPool: cancelled load for ${url}`));
     });
     video.addEventListener('canplay', onFrame, { once: true });
     video.addEventListener('loadeddata', onFrame, { once: true });
@@ -116,15 +118,11 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
     }).catch(() => {});
   });
 
-  warmupPromises.set(url, promise);
+  loads.set(url, promise);
   return promise;
 }
 
-/**
- * True if `video` was created by `warmup()`. Used by AscMosaic's dispose paths
- * to decide whether to route through `release()` (pooled) or to fully kill the
- * element (not pooled).
- */
+/** True once `load()` has a decoded frame for `video`. */
 export function isPooled(video: HTMLVideoElement): boolean {
   return pooledVideos.has(video);
 }
@@ -157,10 +155,20 @@ export function release(video: HTMLVideoElement): void {
   for (const [url, pooled] of pool) {
     if (pooled === video) {
       pool.delete(url);
-      warmupPromises.delete(url);
+      loads.delete(url);
     }
   }
   destroy(video);
+}
+
+/**
+ * A canvas left before taking its video: stop the load, or free the element if
+ * no consumer acquired it. Nothing else would, and a paused video holds a decoder.
+ */
+export function abandon(url: string): void {
+  pendingCancels.get(url)?.();
+  const video = pool.get(url);
+  if (video && !refCount.get(video)) release(video);
 }
 
 /**
@@ -172,5 +180,5 @@ export function teardownVideoPool(): void {
   pendingCancels.clear();
   for (const video of pool.values()) destroy(video);
   pool.clear();
-  warmupPromises.clear();
+  loads.clear();
 }
