@@ -597,8 +597,11 @@ export class AscMosaic {
    */
   waitForSceneTextures(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 5000;
+      const patience = 5000;
+      let deadline = Date.now() + patience;
       const check = () => {
+        // A hidden tab presents no frames, so its time does not count.
+        if (typeof document !== 'undefined' && document.hidden) deadline = Date.now() + patience;
         if (this.disposed) reject(new Error('Mosaic disposed before source was ready'));
         else if (this.sceneTextureState() !== 'loading' && !this.awaitsVideoFrame()) resolve();
         else if (Date.now() >= deadline) reject(new Error('Mosaic source readiness timed out'));

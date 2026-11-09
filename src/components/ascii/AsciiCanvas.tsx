@@ -125,7 +125,7 @@ const MAX_ACTIVE_CONTEXTS = 14;
 const initQueue: Array<() => Promise<void>> = [];
 let isProcessingQueue = false;
 
-/** How long a canvas's video may hold the queue before the canvases behind it go first. */
+/** How long one canvas may hold the queue before the canvases behind it go first. */
 const SOURCE_QUEUE_WAIT_MS = 1500;
 /** Pauses before retrying a source that failed. After the last, the canvas falls back. */
 const SOURCE_RETRY_DELAYS_MS = [1000, 3000];
@@ -145,6 +145,18 @@ function nextIdleSlot(): Promise<void> {
   });
 }
 
+/** Ends a queue turn at its allowance. Whatever the canvas is waiting for carries on without the queue. */
+function withinTurn(turn: Promise<void>): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(resolve, SOURCE_QUEUE_WAIT_MS);
+    turn.then(finish, finish);
+  });
+}
+
 async function enqueueInit(fn: () => Promise<void>, front = false) {
   if (front) initQueue.unshift(fn);
   else initQueue.push(fn);
@@ -152,7 +164,7 @@ async function enqueueInit(fn: () => Promise<void>, front = false) {
   isProcessingQueue = true;
   while (initQueue.length > 0) {
     const next = initQueue.shift()!;
-    await next();
+    await withinTurn(next());
     await nextIdleSlot();
   }
   isProcessingQueue = false;

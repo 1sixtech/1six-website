@@ -149,7 +149,7 @@ function canvasPage({ load = (url) => Promise.resolve({ url }), webgl = true, id
     }
     async addModel(options) { this.model = options; step('addModel'); }
     async enableAsciiMosaicFilter(options) { this.filter = options; step('enableAsciiMosaicFilter'); }
-    async waitForSceneTextures() { step('waitForSceneTextures'); }
+    async waitForSceneTextures() { step('waitForSceneTextures'); await controls.sceneReady?.(this); }
     animate() { this.running = true; }
     stopAnimate() { this.running = false; }
     setVideoPlaying(playing) { this.videoPlaying = playing; }
@@ -645,4 +645,21 @@ test('a canvas that cannot start WebGL gives up the video it loaded', async () =
   page.mount();
   await page.settle();
   assert.deepEqual(page.abandoned, ['/mark.mp4']);
+});
+
+test('init queue: a canvas waiting for its first frame gives the queue to the canvases behind it', async () => {
+  const frame = deferred();
+  const page = canvasPage();
+  page.controls.sceneReady = (mosaic) => mosaic.model.textureUrl === '/stalled.mp4' ? frame.promise : undefined;
+  const stalled = page.mount({ textureUrl: '/stalled.mp4' });
+  const behind = page.mount({ textureUrl: '/behind.mp4' });
+  await page.settle();
+  assert.equal(behind.ready, 0, 'its turn has not ended yet');
+  await page.elapse(1500);
+  assert.equal(behind.ready, 1, 'the canvas behind it builds');
+  assert.equal(stalled.ready, 0);
+  frame.resolve();
+  await page.settle();
+  assert.equal(stalled.ready, 1, 'the canvas that lost its turn still finishes');
+  assert.deepEqual(page.retries, []);
 });

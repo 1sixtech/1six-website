@@ -554,3 +554,24 @@ test('source readiness: a paused video with no data is not ready', { skip }, asy
   const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
   t.mock.timers.tick(5001); await pending; mosaic.dispose();
 });
+
+test('source readiness: time in a hidden tab does not count against the deadline', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  globalThis.document = { hidden: true };
+  try {
+    const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+    const { mosaic } = mosaicHarness({ model: videoModel(video) });
+    let rejected = false;
+    const pending = mosaic.waitForSceneTextures().catch(() => { rejected = true; });
+    t.mock.timers.tick(30000);
+    await Promise.resolve();
+    assert.equal(rejected, false, 'a hidden tab presents no frames');
+    globalThis.document.hidden = false;
+    t.mock.timers.tick(5100);
+    await pending;
+    assert.equal(rejected, true, 'a visible page whose video never reports still gives up');
+    mosaic.dispose();
+  } finally {
+    delete globalThis.document;
+  }
+});
