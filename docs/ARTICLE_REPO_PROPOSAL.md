@@ -21,6 +21,9 @@ Apply them in this order:
 3. After `Validate articles` passes once on that pull request, make it required on `main`.
 4. Set the token in Vercel. This can happen at any point.
 
+Do steps 1 and 2 together. Until the check is required, a stray file in a published folder fails the
+website build, and only the Vercel dashboard shows it.
+
 ## 1. Required check: `Validate articles`
 
 The check builds the website's `main` with the pull request's articles. It is the production build
@@ -64,7 +67,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the website from this pull request's articles
         env:
-          WRITING_GIT_REF: ${{ github.event.pull_request.head.sha }}
+          # The merge of this pull request into main, which is what production will build.
+          WRITING_GIT_REF: ${{ github.sha }}
           WRITING_GITHUB_TOKEN: ${{ github.token }}
         run: pnpm build
 ```
@@ -75,7 +79,7 @@ within the past seven days, so it needs one passing run first.
 
 What to expect:
 
-- **Failures name the article.** For example: `002-arbitrage-in-reality-cross-venue needs a date like
+- **Failures say what to fix.** For example: `002-arbitrage-in-reality-cross-venue needs a date like
   2026-11-08, found "2026-11-8 (draft)"`.
 - **It must stay on `pull_request`, with no secrets and no write permission.** A pull request can
   change what this workflow runs, even from a fork. It is safe because `pull_request` gives forks no
@@ -84,8 +88,9 @@ What to expect:
   `main` still requires no approval, with admin bypass. The owner accepted that on 2026-11-09.
 - **A broken website `main` turns article pull requests red.** The production deploy would fail the
   same way, so this is an accurate signal.
-- **It checks the pull request as last pushed.** It does not include later changes to either
-  repository's `main`, so re-run it before merging a pull request that has sat for a while.
+- **It checks the merge as of the last push.** A re-run uses the same merge commit, so to include
+  later article merges, update the pull request's branch. If article pull requests start to overlap,
+  also turn on **Require branches to be up to date before merging**.
 - **It does not catch a figure path with a typo.** The site renders a broken image instead of failing.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
@@ -96,7 +101,8 @@ Thumbs.db
 ```
 
 If a bad article is already on `main` and a website fix cannot wait, set `WRITING_GIT_REF` in Vercel to
-the last good article commit, deploy, then remove it once the article is fixed.
+the last good article commit, deploy, then remove it once the article is fixed. While it is set, new
+articles do not publish, yet the publish job still reports a finished build.
 
 ## 2. Publish job waits for the build
 
@@ -125,20 +131,19 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 16
     permissions:
       issues: write
     steps:
       - name: Trigger the website deployment
         env:
           DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
-          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "SITE_SHA=$(gh api repos/1sixtech/1six-website/commits/main --jq .sha)" >> "$GITHUB_ENV"
           echo "HOOK_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           curl --fail-with-body --silent --show-error --max-time 30 --retry 3 --retry-all-errors --request POST "$DEPLOY_HOOK_URL"
 
       - name: Wait for the website build
+        timeout-minutes: 13
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -146,7 +151,9 @@ jobs:
           deadline=$((SECONDS + 720))
           while [ "$SECONDS" -lt "$deadline" ]; do
             sleep 20
-            deployment=$(gh api "$site/deployments?sha=$SITE_SHA&environment=Production&per_page=1" --jq '.[0].id // empty') || continue
+            # Read each time: the hook builds whatever website main is when it fires.
+            sha=$(gh api "$site/commits/main" --jq .sha) || continue
+            deployment=$(gh api "$site/deployments?sha=$sha&environment=Production&per_page=1" --jq '.[0].id // empty') || continue
             [ -n "$deployment" ] || continue
             result=$(gh api "$site/deployments/$deployment/statuses?per_page=1" \
               --jq ".[0] | select(.created_at >= \"$HOOK_STARTED\") | \"\(.state) \(.description)\"") || continue
@@ -182,7 +189,8 @@ that is already spent still fails the build.
 
 1. Create a fine-grained personal access token with **Public repositories** read-only access and no
    other permissions.
-2. Add it in Vercel as `WRITING_GITHUB_TOKEN` for Production and Preview.
+2. Add it in Vercel as `WRITING_GITHUB_TOKEN` for **Production only**. Preview builds run branch code,
+   which could read the token and use up its quota.
 
 **An expired token fails every build** with a 401 that names the variable, so set a renewal reminder
 at the token's expiry. Removing the variable returns the build to anonymous access.
@@ -193,18 +201,20 @@ at the token's expiry. Removing the variable returns the build to anonymous acce
 |-------|----------|
 | The check goes red on the original bad article | A real `next build` with `Date: 2026-11-8 (draft)` exited 1 and named the article |
 | The check's commands work from nothing | `pnpm install --frozen-lockfile` and `pnpm build` at the head of article PR 2, from a clean copy on Node 22, took 10 seconds on a laptop with a warm pnpm store |
+| The check can read a merge commit | Commit lookup, listing, contents API, and raw host all answered for a fork pull request's merge commit on `actions/checkout` |
 | A token works for every request | A real authenticated sync used 14 API calls and matched the anonymous sync byte for byte |
 | Hook-triggered builds are reported to GitHub | The 2026-11-09 09:20 UTC hook run added a `success` status at 09:21:13 |
 | Failed builds are reported to GitHub | Two failed preview builds on 2026-11-08 show `failure` with a `vercel inspect` command |
-| The wait logic takes the right branch | Ran against a stubbed `gh` for success, failure, error, stale status, no record yet, timeout, and an API hiccup, and its two API reads against real data |
+| The wait logic takes the right branch | Ran against a stubbed `gh` for success, failure, error, stale status, no record yet, timeout, and an API failure, and its two API reads against real data |
 
 Not verified, because it needs a run in the article repository:
 
 - Neither workflow has run in GitHub Actions.
 - A failed **production** build from a hook has not been seen. If Vercel wrote no status for one, the
   job would still go red when its 12 minutes ran out.
-- The job's token reading another public repository's deployments follows GitHub's documentation for
-  public resources. If that were wrong, the job would go red and open an issue on its first run.
+- The job's token reading the website repository's deployments. GitHub documents these reads as open
+  for public resources, and `actions/setup-node` reads another organization's public repository with
+  the same token. If that were wrong, the job would go red and open an issue on its first run.
 - A cancelled build has never occurred on this project. If Vercel writes no status for one, the job
   goes red at 12 minutes.
 - The wait cannot tell which article commit a build read. A website deploy of the same commit that

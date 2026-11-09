@@ -113,9 +113,9 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 - `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
   filters show all articles. Empty categories show an explanation and a link back to all writing.
 - The sync fails and leaves the last good sync in place on a truncated GitHub listing, or on a numbered folder that has no
-  README, holds a symbolic link, or has a name the site would not load (one rule: `writingSlug.mjs`); every such folder is named
-  at once. After drafts are known, a published article may carry only AVIF, GIF, JPEG, PNG, SVG, and WebP files of at most
-  5 MB, again naming every problem. A draft's other files are not checked.
+  README or one over 5 MB, holds a symbolic link, or has a name the site would not load (one rule: `writingSlug.mjs`); every
+  such folder is named at once. After drafts are known, published articles may carry only AVIF, GIF, JPEG, PNG, SVG, and WebP
+  files of at most 5 MB each and 200 MB in total, again naming every problem. A draft's other files are not checked.
 - GitHub 403, 429, and 5xx answers are retried three times, honoring `Retry-After` and the rate-limit reset. A wait longer
   than a minute is not attempted: the sync fails at once. With `WRITING_GITHUB_TOKEN` every request uses the REST API;
   without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails the build.

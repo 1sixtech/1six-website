@@ -351,7 +351,7 @@ test('every image type an article can show is copied, in either case', async () 
   for (const name of images) assert.equal(run.written.get(`/repo/public/writing-assets/001-live/assets/${name}`), 'image');
 });
 
-test('any other file in a published article fails the sync before anything is downloaded', async () => {
+test('any other file in a published article fails the sync before any asset is downloaded', async () => {
   const run = await runSync({
     ...LIVE,
     '001-live/assets/page.html': '<script>alert(1)</script>',
@@ -398,6 +398,28 @@ test('an asset over the size limit fails the sync before it is downloaded; one a
     assert.equal(unsized.exit, 1, `a listing that gives ${size} as the size does not get a pass`);
     assert.match(unsized.errors[0].message, /001-live\/assets\/mystery\.png: the GitHub listing gave no size/);
   }
+});
+
+test('a README over the size limit fails the sync before anything is downloaded, draft or not', async () => {
+  const run = await runSync(
+    { ...LIVE, '002-wip/README.md': DRAFT },
+    { sizes: { '002-wip/README.md': MAX_ASSET_BYTES + 1 } },
+  );
+  assertRefusedAtListing(run, [/002-wip\/README\.md: is over the 5 MB limit \(5242881 bytes\)/]);
+});
+
+test('published assets are capped in total as well as each, before any asset is downloaded', async () => {
+  const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.png`, 'image']));
+  const sizes = (count) => Object.fromEntries(Object.keys(figures(count)).map((file) => [file, MAX_ASSET_BYTES]));
+
+  const atLimit = await runSync({ ...LIVE, ...figures(40) }, { sizes: sizes(40) });
+  assert.equal(atLimit.exit, undefined, '40 files of 5 MB is exactly 200 MB');
+
+  const over = await runSync({ ...LIVE, ...figures(41) }, { sizes: sizes(41) });
+  assert.equal(over.exit, 1);
+  assert.match(over.errors[0].message, /published assets total 214958080 bytes, over the 200 MB limit for one build/);
+  assert.equal(over.requests.length, 3, 'the lookup, the listing, and the README that shows it is published');
+  assert.deepEqual(over.operations, [], 'the last good sync stays in place');
 });
 
 test("a draft's working files are not checked, because they are never copied", async () => {
@@ -468,7 +490,7 @@ test('a limit that resets beyond the wait budget fails now and names the token',
   assert.equal(tooLong.requests.length, 1, 'a Retry-After past the budget is not waited out either');
 
   const authenticated = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'tok' }, replies: { '/commits/': limited() } });
-  assert.doesNotMatch(authenticated.errors[0].message, /Set WRITING_GITHUB_TOKEN/, 'a token is already set');
+  assert.doesNotMatch(authenticated.errors[0].message, /WRITING_GITHUB_TOKEN/, 'a limited token is neither advised nor blamed');
 });
 
 test('anything else is an answer, not an outage, and is not retried', async () => {
@@ -563,6 +585,19 @@ test('only files count: the sub-folders and submodules GitHub also lists are nei
 test('a listing with no file list fails the sync without touching the last good content', async () => {
   const run = await runSync({ ...LIVE }, { listing: () => ({}) });
   assertRefusedAtListing(run, []);
+});
+
+test('a numbered folder holding only a submodule is still found, and fails for having no README', async () => {
+  const run = await runSync(
+    { ...LIVE },
+    {
+      listing: ({ tree, truncated }) => ({
+        truncated,
+        tree: [...tree, { type: 'tree', path: '002-vendored' }, { type: 'commit', path: '002-vendored/upstream' }],
+      }),
+    },
+  );
+  assertRefusedAtListing(run, [/002-vendored: has no README\.md/]);
 });
 
 test('a folder is numbered only if its name opens with three digits and a hyphen', async () => {
