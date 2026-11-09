@@ -61,7 +61,7 @@ src/
     intro/                    # PageEntry, IntroOrchestrator, IntroOverlay
     writing/                  # WritingIndex filters, ArticleList, full-size FigureViewer
     team/                     # CareersSection.tsx (parked, not rendered)
-    layout/                   # Header.tsx, Footer.tsx
+    layout/                   # Header.tsx, Footer.tsx, FooterLink.tsx
     ui/                       # Reusable: ScrollRevealWrapper, RollingNumber, ThemeToggle, Logo
     providers/                # ThemeProvider.tsx
   hooks/
@@ -69,7 +69,7 @@ src/
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
-    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
+    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
@@ -193,6 +193,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 - Responsive: mobile-first with `md:` breakpoint (768px)
 - About shows one section per screen on phones and desktop: bands are `100lvh` tall and the root snaps to them
   (`mandatory`, viewports 640px and taller, 760px at tablet widths, no reduced motion). Bands grow with their content rather than clip it.
+  A menu link turns the snap off until the next route commits (`data-nav-leaving`): iOS re-applies the old section after the menu lock lifts, onto the next page.
 - Path alias: `@/*` maps to `./src/*`
 
 ### Performance
@@ -260,7 +261,7 @@ Navigation order is About, Thesis, Writing. `/about`, `/research`, and `/team` a
 redirects. Unknown article and author slugs return 404.
 
 Home anchors: `/#products`, `/#origins`, `/#investors`, `/#contact`.
-Thesis anchors: `/thesis#thesis`, `/thesis#products`.
+Thesis anchors: `/thesis#thesis`, `/thesis#products`. The header and footer Thesis links, pressed on Thesis, go to Hero and drop any hash.
 
 SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
 and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
@@ -306,6 +307,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
 - [TODOS.md](TODOS.md): remaining work and completed release items.
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
+- [docs/QA_CHECKLIST.md](docs/QA_CHECKLIST.md): what must pass before a release, for Thesis sections, capture, scroll locks, and page entry.
 - [docs/ABOUT_MOBILE_DESIGN.md](docs/ABOUT_MOBILE_DESIGN.md): mobile About composition, type roles, spacing, and review evidence.
 - [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
