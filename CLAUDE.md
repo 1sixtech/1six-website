@@ -104,8 +104,10 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   explicit categories fail the build. Articles sort newest first, with article number as the tie-breaker.
 - `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
   filters show all articles. Empty categories show an explanation and a link back to all writing.
-- Confirmed author profiles live in `writingCatalog.ts`. Article bylines resolve by author name;
-  an unknown author remains plain text. Profiles list only that author's published articles.
+- Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
+  omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
+  Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
+  that author's published articles.
 - Synced Markdown is untrusted: raw HTML is escaped, unsafe links lose their target, and unexpected
   rendered tags or attributes fail the build. Figures open at full size. `/writing-assets/:path*`
   has a sandboxed CSP for standalone assets; article and author pages keep the site's normal policy.
@@ -251,9 +253,9 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Tests cover pure logic, article safety, and actual crossing, intro, mobile
-  capture, and header navigation effects with controlled dependencies. There is no DOM test package
-  or in-repo browser runner; use gstack `/browse`
+  stripped natively). Tests cover pure logic, article safety, writer profile output, and actual
+  crossing, intro, mobile capture, and header navigation effects with controlled dependencies.
+  There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 
 ## Key Dependencies

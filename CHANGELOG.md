@@ -3,6 +3,16 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.3.1] - 2026-11-09
+
+### Added
+
+- Henry P. now has a writer profile showing the Two-time ICPC World Finalist credential, linked from "Arbitrage in reality, part 1: one coin, twelve venues".
+
+### Changed
+
+- A writer profile can show confirmed credentials alone when no biography has been supplied.
+
 ## [0.3.3.0] - 2026-11-09
 
 ### Changed

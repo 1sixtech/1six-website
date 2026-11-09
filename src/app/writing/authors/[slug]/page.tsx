@@ -20,12 +20,14 @@ export async function generateMetadata({ params }: WriterPageProps): Promise<Met
   const writer = getWriter(slug);
   if (!writer) return { title: 'Writer not found' };
   const url = `https://1six.tech/writing/authors/${writer.slug}`;
+  const credentials = `${writer.credentials.join('. ')}.`;
+  const socialDescription = writer.bio || credentials;
   return {
     title: `${writer.name} — Writing`,
-    description: `${writer.bio} ${writer.credentials.join('. ')}.`,
+    description: writer.bio ? `${writer.bio} ${credentials}` : credentials,
     alternates: { canonical: url },
-    openGraph: { title: `${writer.name} | 1SIX`, description: writer.bio, url, type: 'profile' },
-    twitter: { card: 'summary_large_image', title: `${writer.name} | 1SIX`, description: writer.bio },
+    openGraph: { title: `${writer.name} | 1SIX`, description: socialDescription, url, type: 'profile' },
+    twitter: { card: 'summary_large_image', title: `${writer.name} | 1SIX`, description: socialDescription },
   };
 }
 
@@ -41,7 +43,7 @@ export default async function WriterPage({ params }: WriterPageProps) {
       <header className="writing-profile">
         <p className="writing-entry__category">Writer</p>
         <h1 className="writing-page-title">{writer.name}</h1>
-        <p className="writing-profile__bio">{writer.bio}</p>
+        {writer.bio ? <p className="writing-profile__bio">{writer.bio}</p> : null}
         <ul className="writing-profile__credentials">
           {writer.credentials.map((credential) => <li key={credential}>{credential}</li>)}
         </ul>

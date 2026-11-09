@@ -9,17 +9,23 @@ export type WritingCategory = typeof WRITING_CATEGORIES[number]['id'];
 export interface Writer {
   slug: string;
   name: string;
-  bio: string;
+  /** Omitted when the owner confirmed credentials but no sentence about the writer. */
+  bio?: string;
   credentials: string[];
 }
 
-/** Public author details supplied in the November 2026 website brief. */
+/** Public author details confirmed by the owner in November 2026. */
 export const WRITERS: Writer[] = [
   {
     slug: 'dean-n',
     name: 'Dean N.',
     bio: 'Dean writes about financial infrastructure and how it performs in practice.',
     credentials: ['First Prize, ICPC Asia Regional — 2021 & 2022'],
+  },
+  {
+    slug: 'henry-p',
+    name: 'Henry P.',
+    credentials: ['Two-time ICPC World Finalist'],
   },
 ];
 
