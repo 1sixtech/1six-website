@@ -40,7 +40,7 @@ web
 ## Brand Commitments
 
 - Name: 1SIX (wordmark and titles), written "1six" in lowercase body copy; lowercase manifesto voice.
-- The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction.
+- The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction; Henry P.'s profile by the owner (2026-11-09).
 - Accent #FF3700 on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes.
 - ASCII-mosaic WebGL imagery (desert, graph, "16" symbol, world map) is the visual signature.
 
@@ -50,7 +50,9 @@ web
 - Team origins: Harvard College and Schwarzman Scholars; IOI Medalists, ICPC World Finalists, and Codeforces Grandmasters. The older institution, protocol, finance, and special-forces claims are no longer part of the site.
 - Pending partnerships: USA Esports Association, KeSPA, AESF, IESF, and Lighter. The owner says these are not yet confirmed (2026-11-09); the section and its links are hidden. Do not publish names, logos, or relationship claims until explicitly reconfirmed.
 - Research: "How Hyperliquid data feed latency is measured" (Dean N., 30 Oct 2026) at `/writing/001-hyperliquid-data-feed-latency`. The former "we measure" home section is removed; the article remains published.
+- Research: "Arbitrage in reality, part 1: one coin, twelve venues" (Henry P., 8 Nov 2026) at `/writing/002-arbitrage-in-reality-cross-venue`.
 - Dean N.: First Prize, ICPC Asia Regional, 2021 and 2022, at `/writing/authors/dean-n`. His short bio describes his published work on financial infrastructure. Do not attribute the team's collective ICPC World Finalist credential to Dean.
+- Henry P.: two-time ICPC World Finalist (owner, 2026-11-09), at `/writing/authors/henry-p`. No years and no bio sentence were supplied; do not add either without confirmation.
 - Absent, never fabricate: additional names or bios, final product or partner logos, traction metrics, user counts, revenue, customer logos, testimonials, press, round size or terms, office locations.
 
 ## Product Principles

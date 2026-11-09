@@ -19,3 +19,11 @@ test('an article byline resolves to its public writer profile without fabricatin
   assert.equal(getWriterByName('Unlisted contributor'), undefined);
   assert.equal(getWriter('../dean-n'), undefined);
 });
+
+test('Henry P. has a public profile carrying only the owner-confirmed credential', () => {
+  const henry = getWriterByName('Henry P.');
+  assert.ok(henry);
+  assert.equal(getWriter('henry-p'), henry);
+  assert.equal(henry.bio, undefined);
+  assert.deepEqual(henry.credentials, ['Two-time ICPC World Finalist']);
+});
