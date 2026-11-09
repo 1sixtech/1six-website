@@ -1,6 +1,6 @@
 # About mobile composition
 
-Current direction, v0.3.3.0 with one section per screen (2026-11-09). Review scope
+Current direction, v0.3.4.0 with one section per screen (2026-11-09). Review scope
 is About on phones. The existing Pretendard, orange/monochrome palette, lowercase
 voice, ASCII 16, factual copy, and desktop paired-column composition remain.
 
@@ -51,10 +51,10 @@ moves exactly one section. The mark and statement share the first screen on a ph
   Safari also draws the page behind its floating toolbar below the large viewport, so
   About's footer carries extra top padding to keep the logo out of that strip.
 - Bands use `min-height`, so larger text or longer copy grows instead of clipping.
-  Snapping needs a viewport 640px or taller, or 760px at tablet widths where Backers
-  is one column, the point where every section fits; a mandatory stop inside something
-  taller would hide the rest of it. On a short phone the statement adds a second stop
-  so the end of the first screen can be reached.
+  Snapping needs a viewport 640px or taller, or 760px at tablet widths (768–1023px)
+  where Backers is one column, the point where every section fits; a mandatory stop
+  inside something taller would hide the rest of it. On a short phone the statement
+  adds a second stop so the end of the first screen can be reached.
 - Reduced motion scrolls freely.
 - The fill completes as the last section arrives: 16, 37, 58, 79, 100 at the five stops.
 - WebKit has open reports of mandatory snapping losing momentum, and fast flicks are

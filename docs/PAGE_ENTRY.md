@@ -1,6 +1,6 @@
 # Page entry and shared preparation
 
-Current contract, v0.3.3.0 with the video reliability fixes (2026-11-09). The owner
+Current contract, v0.3.4.0 (2026-11-09). The owner
 approved a shared first-entry experience, then clarified that Writing should open
 immediately, About should prepare Thesis in the background, and refresh/revisit
 should skip the logo.
@@ -35,10 +35,11 @@ inherit a copy of sessionStorage, so a new tab does not always replay.
 
 The selected route/section reports real readiness through `introState`: About's
 current mark, Thesis's hero, its first slide, or its map. Atlas handles and fallback
-markup are insufficient: glyph data, decoded media, and the first mosaic render
-must be ready. Text-only pages wait for neither a foreign canvas nor background
-transfers. Optional preparation starts when fonts and the current scene are ready,
-or when the five-second readiness deadline expires.
+markup are insufficient: glyph data, the source's real pixels (an image's data, a
+video's first frame), and the first mosaic render must be ready. Text-only pages
+wait for neither a foreign canvas nor background transfers. Optional preparation
+starts when fonts and the current scene are ready, or when the five-second readiness
+deadline expires.
 
 Thesis's text starts after the site logo has gone. Its `thesis-entry-lock` is
 separate and has the existing 2.5-second safety timer. Recognized section entries
@@ -70,24 +71,35 @@ optional work. Errors/timeouts do not block entry or become permanent ready flag
 
 ## Video loading and failure
 
-Warmup never starts a decoder. Priming every Thesis video at once ran eight players
+Warmup is byte-only and never starts a decoder; only `videoPool.load`, called for a
+mounted canvas, does. Priming every Thesis video at once ran eight players
 together just as the Hero appeared, on a phone whose decoders are shared with
 anything else running, such as a video call.
 
-- A mounted canvas loads its own video through `videoPool`, one queue turn at a time.
-  A source that takes over 1.5 seconds gives up its turn and rejoins when it arrives,
-  so it cannot hold the canvases behind it.
+- A mounted canvas loads its own video through `videoPool.load`, one queue turn at a
+  time. No turn outlasts 1.5 seconds (`withinTurn`), so nothing a canvas waits for can
+  hold the canvases behind it. A source slower than that rejoins at the front when it
+  arrives; a canvas waiting on a first frame keeps waiting outside the queue.
 - `play()` is requested right after `load()`, and any of `canplay`, `loadeddata`, or a
-  video frame callback counts as a first frame. iOS can hold `canplay` until playback
-  is requested; waiting for `canplay` before asking to play can wait forever.
-- A source that fails retries after one and three seconds, then falls back to the
-  still. Returning to a visible tab starts it over.
+  video frame callback completes the load. iOS can hold `canplay` until playback is
+  requested; waiting for `canplay` before asking to play can wait forever.
+- A completed load is not readiness. A canvas reports ready only after a real first
+  frame (`AscMosaic.waitForSceneTextures`). A playing video must present one: WebKit
+  can report `HAVE_ENOUGH_DATA` before any frame exists, and uploading then reads back
+  an empty texture, tiles one glyph, and can block the main thread for a second. Only
+  a video that cannot report frames, because it is paused (Low Power Mode) or the
+  browser has no `requestVideoFrameCallback`, is taken on `readyState`.
+- A source that fails, or shows no frame within five seconds, retries after one and
+  three seconds, then falls back to the still. Time in a hidden tab does not count
+  against the five seconds. Returning to a visible tab starts a failed source over.
 - There is no stand-in material. A solid color, or a texture that has no frame yet,
   would be tiled as one glyph across the canvas, which is the symptom this replaced.
   The mosaic draws nothing until a frame has been uploaded.
-- A hidden Thesis slide stays mounted but paused. The last canvas to release a video
-  destroys it, because a paused video still holds its decoder. Leaving any route
-  cancels pending loads and tears down the pool.
+- A hidden Thesis slide stays mounted but paused, as does an eager canvas off screen
+  (merely touching the viewport edge counts as off screen). The last canvas to release
+  a video destroys it, because a paused video still holds its decoder. A canvas that
+  leaves before taking its video calls `videoPool.abandon`, which stops the load or
+  frees the element. Leaving any route cancels pending loads and tears down the pool.
 
 ## Regression checks
 
@@ -97,7 +109,9 @@ missing or blocked chunks; reduced motion; Save-Data; hidden/visible transitions
 leaving mid-load; and direct section hashes. Confirm Writing has no visible logo
 at first paint and completed visits do not replay it. Fail or stall every `.mp4`
 and confirm the page shows no repeated-glyph tile, and that a source failing once
-recovers on its own.
+recovers on its own. Hold back a playing video's first frame and confirm that canvas
+does not report ready, the canvases behind it still build after its 1.5-second turn,
+and it retries at the five-second deadline.
 
 On native iOS, verify the complete Thesis slide/exit/re-entry flow, and check a
 physical iPhone: simulators do not reproduce device media failures. Desktop WebKit does not prove UIKit momentum behavior. Do not weaken the
