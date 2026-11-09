@@ -408,6 +408,17 @@ test('a README over the size limit fails the sync before anything is downloaded,
   assertRefusedAtListing(run, [/002-wip\/README\.md: is over the 5 MB limit \(5242881 bytes\)/]);
 });
 
+test('READMEs are capped in total before any is downloaded, and one with no listed size is refused', async () => {
+  const folders = Array.from({ length: 41 }, (_, index) => `0${String(index).padStart(2, '0')}-article`);
+  const files = Object.fromEntries(folders.map((folder) => [`${folder}/README.md`, PUBLISHED]));
+  const sizes = Object.fromEntries(Object.keys(files).map((file) => [file, MAX_ASSET_BYTES]));
+  const over = await runSync(files, { sizes });
+  assertRefusedAtListing(over, [/READMEs total 214958080 bytes, over the 200 MB limit for one build/]);
+
+  const unsized = await runSync({ ...LIVE }, { sizes: { '001-live/README.md': undefined } });
+  assertRefusedAtListing(unsized, [/001-live\/README\.md: the GitHub listing gave no size/]);
+});
+
 test('published assets are capped in total as well as each, before any asset is downloaded', async () => {
   const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.png`, 'image']));
   const sizes = (count) => Object.fromEntries(Object.keys(figures(count)).map((file) => [file, MAX_ASSET_BYTES]));
@@ -587,17 +598,13 @@ test('a listing with no file list fails the sync without touching the last good 
   assertRefusedAtListing(run, []);
 });
 
-test('a numbered folder holding only a submodule is still found, and fails for having no README', async () => {
-  const run = await runSync(
-    { ...LIVE },
-    {
-      listing: ({ tree, truncated }) => ({
-        truncated,
-        tree: [...tree, { type: 'tree', path: '002-vendored' }, { type: 'commit', path: '002-vendored/upstream' }],
-      }),
-    },
-  );
-  assertRefusedAtListing(run, [/002-vendored: has no README\.md/]);
+test('a numbered folder holding only a submodule, or a submodule in its place, is found and fails for having no README', async () => {
+  const withEntries = (extra) => ({ listing: ({ tree, truncated }) => ({ truncated, tree: [...tree, ...extra] }) });
+  const nested = await runSync({ ...LIVE }, withEntries([{ type: 'tree', path: '002-vendored' }, { type: 'commit', path: '002-vendored/upstream' }]));
+  assertRefusedAtListing(nested, [/002-vendored: has no README\.md/]);
+
+  const atRoot = await runSync({ ...LIVE }, withEntries([{ type: 'commit', mode: '160000', path: '003-vendored' }]));
+  assertRefusedAtListing(atRoot, [/003-vendored: has no README\.md/]);
 });
 
 test('a folder is numbered only if its name opens with three digits and a hyphen', async () => {

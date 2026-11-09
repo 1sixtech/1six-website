@@ -35,8 +35,8 @@ const MAX_ASSET_MB = 5;
 const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a
 // repeated file once, so many small entries in the listing can still be many gigabytes.
-const MAX_TOTAL_ASSET_MB = 200;
-const MAX_TOTAL_ASSET_BYTES = MAX_TOTAL_ASSET_MB * 1024 * 1024;
+const MAX_TOTAL_MB = 200;
+const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
@@ -136,9 +136,17 @@ async function save(bytes, destination) {
   await writeFile(destination, bytes);
 }
 
-function numberedFolders(files) {
-  const folders = files.filter((file) => file.includes('/')).map((file) => file.split('/')[0]);
+function numberedFolders(listing) {
+  // A file at the top level is not a folder, but a tree or a submodule there is.
+  const folders = listing
+    .filter((entry) => entry.type !== 'blob' || entry.path.includes('/'))
+    .map((entry) => entry.path.split('/')[0]);
   return [...new Set(folders)].filter((folder) => NUMBERED_FOLDER.test(folder));
+}
+
+function sizeProblems(file, size) {
+  if (!Number.isInteger(size)) return [`${file}: the GitHub listing gave no size`];
+  return size > MAX_ASSET_BYTES ? [`${file}: is over the ${MAX_ASSET_MB} MB limit (${size} bytes)`] : [];
 }
 
 function folderProblems(folder, entries) {
@@ -149,7 +157,7 @@ function folderProblems(folder, entries) {
   }
   const readme = inFolder.find((entry) => entry.path === `${folder}/README.md`);
   if (!readme) problems.push(`${folder}: has no README.md`);
-  else if (readme.size > MAX_ASSET_BYTES) problems.push(`${readme.path}: is over the ${MAX_ASSET_MB} MB limit (${readme.size} bytes)`);
+  else problems.push(...sizeProblems(readme.path, readme.size));
   for (const entry of inFolder) {
     if (entry.mode === SYMLINK_MODE) problems.push(`${entry.path}: a symbolic link cannot be published`);
   }
@@ -162,15 +170,14 @@ function assetProblems({ path: file, size }) {
   if (!ASSET_EXTENSIONS.has(extension)) {
     problems.push(`${file}: ${extension || 'a file with no extension'} is not an allowed type (${[...ASSET_EXTENSIONS].join(', ')})`);
   }
-  if (!Number.isInteger(size)) problems.push(`${file}: the GitHub listing gave no size`);
-  else if (size > MAX_ASSET_BYTES) problems.push(`${file}: is over the ${MAX_ASSET_MB} MB limit (${size} bytes)`);
+  problems.push(...sizeProblems(file, size));
   return problems;
 }
 
-function totalProblems(assets) {
-  const total = assets.reduce((sum, { size }) => sum + size, 0);
-  return total > MAX_TOTAL_ASSET_BYTES
-    ? [`published assets total ${total} bytes, over the ${MAX_TOTAL_ASSET_MB} MB limit for one build`]
+function totalProblems(label, entries) {
+  const total = entries.reduce((sum, { size }) => sum + size, 0);
+  return total > MAX_TOTAL_BYTES
+    ? [`${label} total ${total} bytes, over the ${MAX_TOTAL_MB} MB limit for one build`]
     : [];
 }
 
@@ -185,10 +192,11 @@ async function main() {
   const listing = await listFiles(commit);
   const entries = listing.filter((entry) => entry.type === 'blob');
 
-  // Read from the whole listing, so a folder holding only a submodule is still found.
+  // Read from the whole listing, so a submodule in a numbered folder's place is still found.
   // A misnamed folder would otherwise publish its figures without its article.
-  const folders = numberedFolders(listing.map((entry) => entry.path));
-  refuse(commit, folders.flatMap((folder) => folderProblems(folder, entries)));
+  const folders = numberedFolders(listing);
+  const readmes = entries.filter((entry) => folders.some((folder) => entry.path === `${folder}/README.md`));
+  refuse(commit, [...folders.flatMap((folder) => folderProblems(folder, entries)), ...totalProblems('READMEs', readmes)]);
 
   const articles = await Promise.all(
     folders.map(async (slug) => ({ slug, bytes: await fetchFile(commit, `${slug}/README.md`) })),
@@ -203,7 +211,7 @@ async function main() {
   const assets = published.flatMap(({ slug }) =>
     entries.filter((entry) => entry.path.startsWith(`${slug}/`) && entry.path !== `${slug}/README.md`),
   );
-  refuse(commit, [...assets.flatMap(assetProblems), ...totalProblems(assets)]);
+  refuse(commit, [...assets.flatMap(assetProblems), ...totalProblems('published assets', assets)]);
 
   // Everything arrives before anything is removed, so a failed download leaves
   // the last good sync in place.

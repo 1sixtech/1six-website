@@ -11,7 +11,7 @@ hears nothing. Three changes close that gap:
 |---|--------|-------|---------------|
 | 1 | Required pull-request check | Article repository | A malformed article is stopped before merge |
 | 2 | Publish job waits for the build | Article repository | A failed build no longer looks like a success |
-| 3 | Read-only GitHub token | Vercel environment | Builds stop sharing the anonymous 60-an-hour limit |
+| 3 | Read-only GitHub token | Vercel environment | Production builds stop sharing the anonymous 60-an-hour limit |
 
 Apply them in this order:
 
@@ -21,8 +21,8 @@ Apply them in this order:
 3. After `Validate articles` passes once on that pull request, make it required on `main`.
 4. Set the token in Vercel. This can happen at any point.
 
-Do steps 1 and 2 together. Until the check is required, a stray file in a published folder fails the
-website build, and only the Vercel dashboard shows it.
+Do steps 1 and 2 together. Until step 2 lands, a stray file in a published folder fails the website
+build and only the Vercel dashboard shows it.
 
 ## 1. Required check: `Validate articles`
 
@@ -101,8 +101,9 @@ Thumbs.db
 ```
 
 If a bad article is already on `main` and a website fix cannot wait, set `WRITING_GIT_REF` in Vercel to
-the last good article commit, deploy, then remove it once the article is fixed. While it is set, new
-articles do not publish, yet the publish job still reports a finished build.
+the last good article commit and deploy. Once the article is fixed, remove the variable and redeploy,
+because removing it does not start a build. While it is set, new articles do not publish, yet the
+publish job still reports a finished build.
 
 ## 2. Publish job waits for the build
 
@@ -140,7 +141,7 @@ jobs:
           DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
           echo "HOOK_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
-          curl --fail-with-body --silent --show-error --max-time 30 --retry 3 --retry-all-errors --request POST "$DEPLOY_HOOK_URL"
+          curl --fail-with-body --silent --show-error --max-time 30 --retry 3 --retry-max-time 120 --retry-all-errors --request POST "$DEPLOY_HOOK_URL"
 
       - name: Wait for the website build
         timeout-minutes: 13
@@ -148,11 +149,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           site=repos/1sixtech/1six-website
+          # The hook has just fired and builds website main as of now, so hold that commit for the whole wait.
+          for attempt in 1 2 3; do
+            sha=$(gh api "$site/commits/main" --jq .sha) && break
+            sleep 5
+          done
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Could not read the website commit."; exit 1; }
           deadline=$((SECONDS + 720))
           while [ "$SECONDS" -lt "$deadline" ]; do
             sleep 20
-            # Read each time: the hook builds whatever website main is when it fires.
-            sha=$(gh api "$site/commits/main" --jq .sha) || continue
             deployment=$(gh api "$site/deployments?sha=$sha&environment=Production&per_page=1" --jq '.[0].id // empty') || continue
             [ -n "$deployment" ] || continue
             result=$(gh api "$site/deployments/$deployment/statuses?per_page=1" \
@@ -190,9 +195,9 @@ that is already spent still fails the build.
 1. Create a fine-grained personal access token with **Public repositories** read-only access and no
    other permissions.
 2. Add it in Vercel as `WRITING_GITHUB_TOKEN` for **Production only**. Preview builds run branch code,
-   which could read the token and use up its quota.
+   which could read the token and use up its quota, so they stay anonymous.
 
-**An expired token fails every build** with a 401 that names the variable, so set a renewal reminder
+**An expired token fails every production build** with a 401 that names the variable, so set a renewal reminder
 at the token's expiry. Removing the variable returns the build to anonymous access.
 
 ## What was verified
@@ -205,7 +210,7 @@ at the token's expiry. Removing the variable returns the build to anonymous acce
 | A token works for every request | A real authenticated sync used 14 API calls and matched the anonymous sync byte for byte |
 | Hook-triggered builds are reported to GitHub | The 2026-11-09 09:20 UTC hook run added a `success` status at 09:21:13 |
 | Failed builds are reported to GitHub | Two failed preview builds on 2026-11-08 show `failure` with a `vercel inspect` command |
-| The wait logic takes the right branch | Ran against a stubbed `gh` for success, failure, error, stale status, no record yet, timeout, and an API failure, and its two API reads against real data |
+| The wait logic takes the right branch | Ran against a stubbed `gh` for success, failure, error, stale status, no record yet, timeout, API failures, and website main moving during the wait, and its three API reads against real data |
 
 Not verified, because it needs a run in the article repository:
 
@@ -218,7 +223,8 @@ Not verified, because it needs a run in the article repository:
 - A cancelled build has never occurred on this project. If Vercel writes no status for one, the job
   goes red at 12 minutes.
 - The wait cannot tell which article commit a build read. A website deploy of the same commit that
-  finishes just after the hook fires could be reported in place of the hook's own build.
+  finishes just after the hook fires could be reported in place of the hook's own build, as could a
+  website merge landing in the instant between the hook and the job reading website `main`.
 - Vercel's rollback documentation says new production builds do not go live until a rollback is
   undone. The job could then go green while the site serves the older deployment.
 
