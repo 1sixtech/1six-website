@@ -73,6 +73,8 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
+    writingDraft.mjs          # Draft marker rule, shared by the site and the sync script
+    writingSlug.mjs           # Article folder-name rule, shared by the site and the sync script
     themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
@@ -280,8 +282,9 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Tests cover pure logic, article safety, writer profile output, and actual
-  crossing, intro, mobile capture, and header navigation effects with controlled dependencies.
+  stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
+  writer profile output, and actual crossing, intro, mobile capture, and header navigation effects
+  with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 
