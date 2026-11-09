@@ -30,7 +30,7 @@ function eventSource() {
   };
 }
 
-function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
+function crossingHarness({ reducedMotion = false, withMeter = false, noBands = false } = {}) {
   let effect;
   const observers = [];
   let frameId = 0;
@@ -64,7 +64,7 @@ function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
     querySelectorAll: (selector) => ({
       '[data-crossing-count]': counts,
       '.crossing-mark, .crossing-meter__fill': fillTargets,
-      '[data-crossing-band]': bands,
+      '[data-crossing-band]': noBands ? [] : bands,
     })[selector] ?? [],
   };
   const dependencies = {
@@ -108,7 +108,7 @@ function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
   const cleanup = effect();
 
   return {
-    root, label, counts, fills, motion, window, frames, cancelled, observer: observers[0], cleanup,
+    root, label, counts, fills, motion, window, frames, cancelled, bands, observer: observers[0], cleanup,
     paint() {
       for (const [id, callback] of [...frames]) {
         frames.delete(id);
@@ -179,6 +179,30 @@ test('crossing: the fill reaches 100% exactly as the last section arrives, in eq
     }
     assert.equal(crossing.root.dataset.complete, 'true');
   } finally { crossing.cleanup(); }
+});
+
+test('crossing: a resize or reflow re-measures where the last section lands; with no sections the mark reads complete', () => {
+  const crossing = crossingHarness();
+  try {
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '58%');
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 2000 - crossing.window.scrollY });
+    crossing.window.emit('resize');
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '37%', 'a taller page spreads the same fill further');
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 1000 - crossing.window.scrollY });
+    crossing.observer.callback();
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '58%', 'content reflow counts too');
+    assert.equal(crossing.root.dataset.complete, 'false');
+  } finally { crossing.cleanup(); }
+
+  const empty = crossingHarness({ noBands: true });
+  try {
+    empty.paint();
+    assert.equal(empty.counts[0].textContent, '100%');
+    assert.equal(empty.root.dataset.complete, 'true');
+  } finally { empty.cleanup(); }
 });
 
 test('crossing: the compact mobile meter keeps a section cue at the reading edge', () => {

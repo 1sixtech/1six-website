@@ -287,6 +287,7 @@ test('coverage atlas: the empty placeholder does not report readiness before its
 test('plain atlas: readiness waits for image data instead of the TextureLoader handle', async () => {
   const filter = new AsciiMosaicFilter(fakeRenderer(), 40, 20, { mosaicCellTextureUrl: PLAIN });
   assert.equal(filter.isReady(), false);
+  assert.equal(filter.atlasResult.texture.generateMipmaps, false, 'nearest sampling never reads mipmaps');
   await settled();
   assert.equal(filter.isReady(), true);
   filter.dispose();

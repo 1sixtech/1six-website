@@ -272,6 +272,63 @@ test('autoplay rejection preserves a decoded first frame and does not poison lat
   assert.equal(video.pauseCalls, 1);
 });
 
+test('a priming play that settles before any frame does not decide the load (Low Power Mode refuses it)', async () => {
+  for (const [settle, pauses] of [
+    [(attempt) => attempt.reject(new Error('NotAllowedError: Low Power Mode')), 0],
+    [(attempt) => attempt.resolve(), 1],
+  ]) {
+    const pool = poolHarness();
+    const ready = pool.warmup(VIDEO_URL);
+    const video = pool.videos[0];
+    settle(video.plays[0]);
+    await flush();
+    assert.equal(pool.isPooled(video), false, 'a play result is not a frame');
+    assert.equal(pool.timers.size, 1, 'the load still has its deadline');
+    assert.equal(video.pauseCalls, pauses);
+    video.fire('loadeddata');
+    assert.equal(await ready, video);
+    assert.equal(pool.isPooled(video), true);
+    assert.equal(video.src, `${VIDEO_URL}#t=0.001`, 'the #t frame stays for a still mosaic');
+    assert.equal(pool.timers.size, 0);
+  }
+});
+
+test('release is safe on anything: a foreign element, a repeat, a throwing pause, and it spares what replaced it', async () => {
+  const pool = poolHarness();
+  const touched = [];
+  const foreign = {
+    play() { touched.push('play'); return Promise.resolve(); },
+    pause() { touched.push('pause'); },
+    removeAttribute() { touched.push('removeAttribute'); },
+    load() { touched.push('load'); },
+  };
+  pool.acquire(foreign);
+  pool.release(foreign);
+  assert.deepEqual(touched, [], 'an element the pool did not create is not its to play or destroy');
+  assert.equal(pool.isPooled(foreign), false);
+
+  const firstReady = pool.warmup(VIDEO_URL);
+  const first = pool.videos[0];
+  first.fire('canplay');
+  await firstReady;
+  pool.acquire(first);
+  pool.release(first);
+
+  const secondReady = pool.warmup(VIDEO_URL);
+  const second = pool.videos[1];
+  second.fire('canplay');
+  await secondReady;
+  pool.acquire(second);
+  pool.release(first); // a stale release: the canvas that held `first` disposing late
+  assert.equal(second.src, `${VIDEO_URL}#t=0.001`, 'the element that replaced it keeps its source');
+  assert.equal(second.pauseCalls, 0);
+  assert.equal(pool.warmup(VIDEO_URL), secondReady, 'and stays in the pool');
+
+  second.pause = () => { throw new Error('InvalidStateError'); };
+  assert.doesNotThrow(() => pool.release(second));
+  assert.notEqual(pool.warmup(VIDEO_URL), secondReady, 'a failed cleanup still leaves the pool');
+});
+
 test('teardown clears acquired videos and is idempotent even when priming play settles later', async () => {
   const pool = poolHarness();
   const ready = pool.warmup(VIDEO_URL);

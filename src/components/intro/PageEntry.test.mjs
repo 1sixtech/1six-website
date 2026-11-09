@@ -106,6 +106,8 @@ test('page entry: seen or already-warmed visual entries skip the logo; reduced m
     assert.equal(entry.locked, false);
     assert.equal(entry.html.dataset.introSkip, 'true');
     assert.equal(entry.textLocked, !options.reduced);
+    entry.signalReady();
+    assert.equal(entry.sharedWarmups.length, options.reduced ? 0 : 1, 'reduced motion downloads nothing optional');
   }
 });
 

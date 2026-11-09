@@ -195,6 +195,22 @@ test('a phone does not spend data warming video its media stack would download a
   assert.ok(warmup.calls.some((call) => call.url === siteAssets.ATLASES.dark.hero));
 });
 
+test('on a phone a video entrance never counts as warmed, while an image-only one can, and nothing is fetched twice', async () => {
+  const warmup = warmupHarness({ coarsePointer: true });
+  const run = warmup.warmSharedAssets('/writing', 'dark');
+  await warmup.drain();
+  await run;
+  assert.equal(warmup.calls.length, 8, 'the eight images and no video');
+  for (const theme of ['light', 'dark']) {
+    for (const target of ['/', '/thesis', '/thesis#thesis']) {
+      assert.equal(warmup.hasWarmedEntry(target, theme), false, `${target}: its video was never fetched`);
+    }
+    assert.equal(warmup.hasWarmedEntry('/thesis#products', theme), true, 'the map and its atlas were');
+  }
+  await warmup.warmSharedAssets('/writing', 'dark');
+  assert.equal(warmup.calls.length, 8);
+});
+
 test('failed HTTP, network, and body reads are retried next time, while successful Blob sources are reused', async () => {
   const warmup = warmupHarness();
   const first = warmup.warmSharedAssets('/writing', 'light');

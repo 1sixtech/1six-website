@@ -250,6 +250,18 @@ test('video frames: a paused video with no data draws nothing', { skip }, () => 
   mosaic.stopAnimate();
 });
 
+test('video frames: without frame callbacks, a playing video draws as soon as it has data, not before', { skip }, () => {
+  const video = { paused: false, readyState: 1, HAVE_CURRENT_DATA: 2 };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(3);
+  assert.equal(drawn(), 0, 'no frame to read yet');
+  video.readyState = 2;
+  runFrames(1);
+  assert.equal(drawn(), 1, 'the render loop itself marks the first frame');
+  mosaic.stopAnimate();
+});
+
 test('render on demand: size, camera and filter changes each owe exactly one frame', { skip }, () => {
   const { mosaic, drawn } = mosaicHarness();
   mosaic.setRenderOnDemand(true);
@@ -357,6 +369,94 @@ test('dispose: a model still loading at dispose is freed when it arrives, never 
   }
 });
 
+
+test('source failure: a video that cannot load rejects the model; nothing stands in for the mosaic to tile', { skip }, async () => {
+  const videos = [];
+  globalThis.document = {
+    createElement: () => {
+      const video = fakeVideo();
+      videos.push(video);
+      return video;
+    },
+  };
+  try {
+    const { mosaic } = mosaicHarness({ model: null });
+    const loading = mosaic.addModel({ shape: 'plane', textureUrl: '/fails.mp4', textureType: 'video' });
+    const [video] = videos;
+    video.error = { code: 4 };
+    video.dispatchEvent(new Event('error'));
+
+    await assert.rejects(loading, /load error for \/fails\.mp4 \(code 4\)/);
+    assert.equal(mosaic.model, null, 'the mosaic keeps no model');
+    assert.equal(mosaic.scene.children.length, 0, 'no solid-colour mesh for the filter to read');
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('source failure: a missing image keeps its empty map, so readiness times out instead of a stand-in being drawn', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const images = [];
+  globalThis.document = {
+    createElementNS: () => {
+      const image = new EventTarget();
+      images.push(image);
+      return image;
+    },
+  };
+  try {
+    const missing = mosaicHarness({ model: null });
+    const model = await missing.mosaic.addModel({ shape: 'plane', textureUrl: '/missing.png', textureType: 'image' });
+    images[0].dispatchEvent(new Event('error'));
+    assert.equal(model.material.map.image, null, 'no pixels to report');
+    assert.equal(model.material.color.getHex(), 0xffffff, 'and no failure colour to tile');
+    const timedOut = assert.rejects(missing.mosaic.waitForSceneTextures(), /timed out/);
+    t.mock.timers.tick(5001);
+    await timedOut;
+
+    const arriving = mosaicHarness({ model: null });
+    const loaded = await arriving.mosaic.addModel({ shape: 'plane', textureUrl: '/found.png', textureType: 'image' });
+    Object.assign(images[1], { width: 16, height: 16 }).dispatchEvent(new Event('load'));
+    assert.equal(loaded.material.map.image, images[1]);
+    await arriving.mosaic.waitForSceneTextures();
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('source reuse: a loaded video is wrapped as is, with no second decoder, and lives until its last model goes', { skip }, async () => {
+  const videos = [];
+  globalThis.document = {
+    createElement: () => {
+      const video = fakeVideo();
+      videos.push(video);
+      return video;
+    },
+  };
+  try {
+    const { warmup, isPooled } = await import('../videoPool.ts');
+    const ready = warmup('/loaded.mp4');
+    videos[0].dispatchEvent(new Event('canplay'));
+    const loaded = await ready;
+    assert.equal(isPooled(loaded), true);
+
+    const canvases = [mosaicHarness({ model: null }), mosaicHarness({ model: null })];
+    const [model] = await Promise.all(canvases.map(({ mosaic }) =>
+      mosaic.addModel({ shape: 'plane', textureUrl: '/loaded.mp4', textureType: 'video', existingVideo: loaded })));
+    assert.equal(videos.length, 1, 'no second decoder');
+    assert.equal(model.material.map.image, loaded);
+    assert.equal(loaded.paused, false, 'taking it over resumes playback');
+
+    canvases[0].mosaic.dispose();
+    assert.equal(loaded.src, '/loaded.mp4#t=0.001', 'the other canvas still shows it');
+    assert.equal(loaded.paused, false);
+    canvases[1].mosaic.dispose();
+    assert.equal(loaded.src, '', 'the last model frees the decoder');
+    assert.equal(loaded.paused, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
 
 test('source readiness: an image handle waits for decoded image data', { skip }, async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
