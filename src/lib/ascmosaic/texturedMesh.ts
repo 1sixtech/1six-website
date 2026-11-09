@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // See the cross-layer coupling note in ascmosaic/index.ts — same
-// justification applies here. The fast path needs to tell the pool
-// "a new consumer is using this video" so refcounted release works.
-import { acquire as acquirePooledVideo } from '@/lib/videoPool';
+// justification applies here. Every video comes from the pool, which has to
+// know "a new consumer is using this video" so refcounted release works.
+import { acquire as acquirePooledVideo, warmup as warmupPooledVideo } from '@/lib/videoPool';
 
 export type TexturedMeshShape = 'sphere' | 'cube' | 'plane' | 'glb';
 
@@ -33,115 +33,31 @@ export interface TexturedMeshOptions {
   /** 평면 세로 (shape: plane) */
   height?: number;
   /**
-   * Pre-warmed video element to reuse instead of fetching the URL.
-   * When provided (and its readyState >= HAVE_CURRENT_DATA), the texture
-   * wraps this element directly and skips the canplay wait.
-   * Used by videoPool integration to eliminate re-download latency.
+   * A video from videoPool with a decoded frame, already loaded by the caller.
+   * Without it the texture loads `textureUrl` through the pool itself.
    */
   existingVideo?: HTMLVideoElement;
 }
 
 const DEFAULT_TEXTURE_URL = '/resource/earth.jpg';
 
-declare global {
-  interface Window {
-    ASC_MOSAIC_BASE_URL?: string;
-  }
-}
-
-function createVideoTexture(
+/**
+ * Wrap a pooled video. A source that cannot load rejects: there is no stand-in.
+ * A solid-color material here is what the mosaic tiled as one repeated glyph
+ * across the whole canvas, with nothing to ever replace it.
+ */
+async function createVideoTexture(
   videoUrl: string,
   existingVideo?: HTMLVideoElement,
 ): Promise<THREE.VideoTexture> {
-  // Fast path: reuse a pre-warmed video from videoPool.
-  // acquirePooledVideo() bumps the pool's refcount AND resumes playback
-  // (the pool leaves warmed videos paused after the initial prime — see
-  // videoPool.ts lifecycle contract). The matching release() is called
-  // from AscMosaic's dispose paths when the containing mosaic is
-  // unmounted, so the refcount cleanly tracks active consumers.
-  //
-  // Safari Low Power Mode and backgrounded tab heuristics can still
-  // reject play() inside acquire(); if that happens the VideoTexture
-  // shows the last decoded frame rather than throwing — the lazy path
-  // below would have failed on the same policy anyway.
-  if (existingVideo && existingVideo.readyState >= 2) {
-    const texture = new THREE.VideoTexture(existingVideo);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    acquirePooledVideo(existingVideo);
-    return Promise.resolve(texture);
-  }
-
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    try {
-      const baseUrl = (window.location.origin === 'null' || window.location.protocol === 'blob:')
-        ? ((window as Window & { ASC_MOSAIC_BASE_URL?: string }).ASC_MOSAIC_BASE_URL || '')
-        : window.location.origin;
-      if (baseUrl) {
-        const urlObj = new URL(videoUrl, baseUrl + '/');
-        const currentOrigin = (window.location.origin === 'null' || window.location.protocol === 'blob:')
-          ? new URL(baseUrl).origin
-          : window.location.origin;
-        if (urlObj.origin !== currentOrigin) {
-          video.crossOrigin = 'anonymous';
-        }
-      }
-    } catch {
-      // ignore
-    }
-    // #t=0.001 forces the browser to decode the first frame even when play()
-    // is blocked (iOS Low Power Mode), so a static frame is available.
-    video.src = videoUrl + '#t=0.001';
-    video.autoplay = true;
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute('playsinline', '');
-    video.preload = 'auto';
-
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        reject(new Error('Video load timeout'));
-      }
-    }, 10000);
-
-    const cleanup = () => clearTimeout(timeout);
-
-    video.addEventListener('canplay', () => {
-      if (resolved) return;
-      cleanup();
-      resolved = true;
-      // Build the texture as soon as a frame is decodable — do NOT gate this on
-      // play() succeeding. Under iOS Low Power Mode (and normal autoplay
-      // policy) play() is rejected, but `canplay` means a frame is already
-      // decoded, so the VideoTexture shows that frame. Gating on play() and
-      // rejecting here was the root cause of the garbled mosaic on
-      // battery-saver devices: the reject cascaded to createTexturedMesh's
-      // catch, which swapped in a solid-color material that the ASCII filter
-      // tiled as one repeated cell. A static first frame renders correctly.
-      const texture = new THREE.VideoTexture(video);
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      resolve(texture);
-      // Best-effort playback. If it's blocked (Low Power Mode), the texture
-      // stays on the decoded frame (static) instead of animating — fine.
-      video.play().catch(() => {});
-    }, { once: true });
-
-    video.addEventListener('error', () => {
-      cleanup();
-      if (!resolved) {
-        resolved = true;
-        const err = video.error;
-        reject(new Error(err ? `Video load error (${err.code})` : 'Video load failed'));
-      }
-    }, { once: true });
-
-    video.load();
-  });
+  const video = existingVideo ?? await warmupPooledVideo(videoUrl);
+  const texture = new THREE.VideoTexture(video);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  // Bumps the refcount and resumes playback. Low Power Mode can still reject
+  // play(); the mosaic then keeps showing the decoded frame.
+  acquirePooledVideo(video);
+  return texture;
 }
 
 function buildGeometry(shape: Exclude<TexturedMeshShape, 'glb'>, options: TexturedMeshOptions): THREE.BufferGeometry {
@@ -226,48 +142,20 @@ export function createTexturedMesh(options: TexturedMeshOptions = {}): Promise<T
       mesh.name = 'TexturedMesh';
       mesh.scale.setScalar(scale);
       return mesh;
-    }).catch(() => {
-      const material = new THREE.MeshBasicMaterial({
-        color: 0x4a90e2,
-        side: shape === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.name = 'TexturedMesh';
-      mesh.scale.setScalar(scale);
-      return mesh;
     });
   }
 
-  const textureLoader = new THREE.TextureLoader();
-  let texture: THREE.Texture | null = null;
-  let textureLoadFailed = false;
+  // A missing image has no pixels to report; AscMosaic.waitForSceneTextures
+  // rejects at its deadline rather than letting the mosaic tile an empty map.
+  const texture: THREE.Texture = new THREE.TextureLoader().load(textureUrl, () => {
+    texture.needsUpdate = true;
+  });
 
-  try {
-    texture = textureLoader.load(
-      textureUrl,
-      () => {
-        if (texture) texture.needsUpdate = true;
-      },
-      undefined,
-      () => {
-        textureLoadFailed = true;
-      }
-    );
-  } catch {
-    textureLoadFailed = true;
-  }
-
-  const materialOptions: THREE.MeshBasicMaterialParameters = {
+  const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
+    map: texture,
     side: shape === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
-  };
-  if (texture && !textureLoadFailed) {
-    materialOptions.map = texture;
-  } else {
-    materialOptions.color = 0x4a90e2;
-  }
-
-  const material = new THREE.MeshBasicMaterial(materialOptions);
+  });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'TexturedMesh';
   mesh.scale.setScalar(scale);

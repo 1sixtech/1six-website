@@ -34,8 +34,9 @@ function NameList({ names, stacked = false, className = '' }: NameListProps) {
 /**
  * About — "The crossing".
  *
- * The left third pins the ASCII "16" with CSS sticky while the story scrolls
- * past on the right. The mark starts 16% filled (the first 16%) and follows the scroll, so it reads 100% at the contact.
+ * One section per screen, on every device. The left third pins the ASCII "16"
+ * with CSS sticky while the sections pass on the right. The mark starts 16%
+ * filled (the first 16%) and follows the scroll, so it reads 100% at the contact.
  */
 export function AboutCrossing() {
   return (
@@ -62,19 +63,21 @@ export function AboutCrossing() {
               data-crossing-label="about"
               aria-labelledby="about-title"
             >
-              <h1 id="about-title" className="crossing-display">
-                <span>we don’t dream.</span> <span>we build.</span>
-              </h1>
-              <p className="crossing-lead">
-                we are a team of diehards. we don’t spend days and nights ruminating on
-                ideals. we take action to make them real.
-              </p>
-              <p className="crossing-body">
-                we bring experience from Harvard College, Schwarzman Scholars, and
-                world-class competitive programming to cross the first{' '}
-                <span className="crossing-figure">16%</span>.
-              </p>
-              <OnwardLink href="#products">what we build</OnwardLink>
+              <div className="crossing-band__body">
+                <h1 id="about-title" className="crossing-display">
+                  <span>we don’t dream.</span> <span>we build.</span>
+                </h1>
+                <p className="crossing-lead">
+                  we are a team of diehards. we don’t spend days and nights ruminating on
+                  ideals. we take action to make them real.
+                </p>
+                <p className="crossing-body">
+                  we bring experience from Harvard College, Schwarzman Scholars, and
+                  world-class competitive programming to cross the first{' '}
+                  <span className="crossing-figure">16%</span>.
+                </p>
+                <OnwardLink href="#products">what we build</OnwardLink>
+              </div>
             </section>
 
             <section
@@ -85,19 +88,21 @@ export function AboutCrossing() {
               data-crossing-label="products"
               aria-labelledby="products-title"
             >
-              <h2 id="products-title" className="crossing-heading">products.</h2>
-              <div className="crossing-product">
-                <p className="crossing-tag crossing-product__tag">01 / esports</p>
-                <a className="crossing-product__name" href="https://predict.everywhere.trade">
-                  <span>predict.</span><span>everywhere.trade</span>
-                </a>
-                <p className="crossing-body">An esports-focused prediction market.</p>
-                <a className="crossing-product__visit" href="https://predict.everywhere.trade">
-                  <span className="crossing-product__visit-label">Visit website</span> <span aria-hidden="true">↗</span>
-                </a>
+              <div className="crossing-band__body">
+                <h2 id="products-title" className="crossing-heading">products.</h2>
+                <div className="crossing-product">
+                  <p className="crossing-tag crossing-product__tag">01 / esports</p>
+                  <a className="crossing-product__name" href="https://predict.everywhere.trade">
+                    <span>predict.</span><span>everywhere.trade</span>
+                  </a>
+                  <p className="crossing-body">An esports-focused prediction market.</p>
+                  <a className="crossing-product__visit" href="https://predict.everywhere.trade">
+                    <span className="crossing-product__visit-label">Visit website</span> <span aria-hidden="true">↗</span>
+                  </a>
+                </div>
+                <p className="crossing-product__coming">More Coming Soon</p>
+                <OnwardLink href="#origins">where we come from</OnwardLink>
               </div>
-              <p className="crossing-product__coming">More Coming Soon</p>
-              <OnwardLink href="#origins">where we come from</OnwardLink>
             </section>
 
             <section
@@ -108,20 +113,22 @@ export function AboutCrossing() {
               data-crossing-label="origins"
               aria-labelledby="origins-title"
             >
-              <h2 id="origins-title" className="crossing-heading">
-                where we come from.
-              </h2>
-              <dl className="crossing-ledger">
-                {ORIGINS.map(({ discipline, names }) => (
-                  <div key={discipline} className="crossing-ledger__row">
-                    <dt className="crossing-tag">{discipline}</dt>
-                    <dd>
-                      <NameList names={names} stacked />
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              <OnwardLink href="#investors">who backs us</OnwardLink>
+              <div className="crossing-band__body">
+                <h2 id="origins-title" className="crossing-heading">
+                  where we come from.
+                </h2>
+                <dl className="crossing-ledger">
+                  {ORIGINS.map(({ discipline, names }) => (
+                    <div key={discipline} className="crossing-ledger__row">
+                      <dt className="crossing-tag">{discipline}</dt>
+                      <dd>
+                        <NameList names={names} stacked />
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <OnwardLink href="#investors">who backs us</OnwardLink>
+              </div>
             </section>
 
             <section
@@ -132,22 +139,24 @@ export function AboutCrossing() {
               data-crossing-label="backers"
               aria-labelledby="investors-title"
             >
-              <h2 id="investors-title" className="crossing-heading">
-                backed by
-              </h2>
-              <ul className="crossing-backers">
-                {BACKERS.map(({ name, role }) => (
-                  <li key={name} className="crossing-backer">
-                    <p className="crossing-backer__name">{name}</p>
-                    <p className="crossing-backer__role">{role}</p>
-                  </li>
-                ))}
-              </ul>
-              <div className="crossing-firms">
-                <NameList names={FIRMS} className="crossing-firms__names" />
-                <p className="crossing-firms__more">and more</p>
+              <div className="crossing-band__body">
+                <h2 id="investors-title" className="crossing-heading">
+                  backed by
+                </h2>
+                <ul className="crossing-backers">
+                  {BACKERS.map(({ name, role }) => (
+                    <li key={name} className="crossing-backer">
+                      <p className="crossing-backer__name">{name}</p>
+                      <p className="crossing-backer__role">{role}</p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="crossing-firms">
+                  <NameList names={FIRMS} className="crossing-firms__names" />
+                  <p className="crossing-firms__more">and more</p>
+                </div>
+                <OnwardLink href="#contact">work with us</OnwardLink>
               </div>
-              <OnwardLink href="#contact">work with us</OnwardLink>
             </section>
 
             <section
@@ -158,17 +167,18 @@ export function AboutCrossing() {
               data-crossing-label="contact"
               aria-labelledby="contact-title"
             >
-              <h2 id="contact-title" className="crossing-heading">
-                work with us.
-              </h2>
-              <p className="crossing-close">
-                we build for <span className="crossing-close__figure">the next 84%</span>.
-                <br />want to build together?
-              </p>
-              <a className="crossing-email" href={`mailto:${CONTACT_EMAIL}`}>
-                {CONTACT_EMAIL}
-              </a>
-              <span className="crossing-end" data-crossing-end aria-hidden="true" />
+              <div className="crossing-band__body">
+                <h2 id="contact-title" className="crossing-heading">
+                  work with us.
+                </h2>
+                <p className="crossing-close">
+                  we build for <span className="crossing-close__figure">the next 84%</span>.
+                  <br />want to build together?
+                </p>
+                <a className="crossing-email" href={`mailto:${CONTACT_EMAIL}`}>
+                  {CONTACT_EMAIL}
+                </a>
+              </div>
             </section>
           </div>
         </div>

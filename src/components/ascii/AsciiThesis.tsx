@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useContext, useLayoutEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { setRouteVisualReady } from '@/lib/introState';
 import { ATLASES, THESIS_SLIDE_VIDEOS } from '@/lib/siteAssets';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import { ThesisSlideActive } from '@/components/home/thesisSlideActive';
 
 const AsciiCanvas = dynamic(
   () => import('./AsciiCanvas').then((mod) => ({ default: mod.AsciiCanvas })),
@@ -28,6 +29,7 @@ interface AsciiThesisProps {
 /** Thesis inline ASCII art — flat plane, mouse avoid */
 export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
   const { theme } = useTheme();
+  const slideActive = useContext(ThesisSlideActive);
   const liveState = useRef<number | null>(null);
   useLayoutEffect(() => {
     liveState.current = stateNumber;
@@ -69,6 +71,7 @@ export function AsciiThesis({ stateNumber }: AsciiThesisProps) {
       planeHeight={4}
       renderScale={4.5}
       onReady={handleReady}
+      paused={!slideActive}
       eager
     />
   );

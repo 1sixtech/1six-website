@@ -48,25 +48,23 @@ function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
     innerHeight: 800,
     matchMedia: () => motion,
   };
-  // Contact's document position makes the scrolling span exactly 1000px:
-  // 1736 - 800 (viewport) + 64 (contact inset).
-  const end = { getBoundingClientRect: () => ({ bottom: 1736 - window.scrollY }) };
   const meter = { dataset: {}, getBoundingClientRect: () => ({ height: 54, bottom: 54 }) };
   const label = { textContent: 'about' };
+  // The last section sits 1000px down, the whole span of the crossing.
   const bands = [
     { dataset: { crossingLabel: 'about' }, getBoundingClientRect: () => ({ top: -window.scrollY }) },
     { dataset: { crossingLabel: 'products' }, getBoundingClientRect: () => ({ top: 600 - window.scrollY }) },
+    { dataset: { crossingLabel: 'contact' }, getBoundingClientRect: () => ({ top: 1000 - window.scrollY }) },
   ];
   const root = {
     dataset: {},
     getBoundingClientRect: () => ({ top: -window.scrollY }),
-    querySelector: (selector) => selector === '[data-crossing-end]' ? end
-      : withMeter && selector === '.crossing-meter' ? meter
+    querySelector: (selector) => withMeter && selector === '.crossing-meter' ? meter
       : withMeter && selector === '[data-crossing-label-target]' ? label : null,
     querySelectorAll: (selector) => ({
       '[data-crossing-count]': counts,
       '.crossing-mark, .crossing-meter__fill': fillTargets,
-      '[data-crossing-band]': withMeter ? bands : [],
+      '[data-crossing-band]': bands,
     })[selector] ?? [],
   };
   const dependencies = {
@@ -169,6 +167,19 @@ test('crossing: cleanup cancels pending paint and removes scroll, resize and pre
   assert.deepEqual(crossing.counts.map((element) => element.textContent), ['58%', '58%']);
 });
 
+
+test('crossing: the fill reaches 100% exactly as the last section arrives, in equal steps', () => {
+  const crossing = crossingHarness();
+  try {
+    for (const [scrollY, count] of [[0, '16%'], [250, '37%'], [500, '58%'], [750, '79%'], [1000, '100%'], [1300, '100%']]) {
+      crossing.window.scrollY = scrollY;
+      crossing.window.emit('scroll');
+      crossing.paint();
+      assert.equal(crossing.counts[0].textContent, count, `at ${scrollY}px`);
+    }
+    assert.equal(crossing.root.dataset.complete, 'true');
+  } finally { crossing.cleanup(); }
+});
 
 test('crossing: the compact mobile meter keeps a section cue at the reading edge', () => {
   const crossing = crossingHarness({ withMeter: true });

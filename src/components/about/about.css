@@ -5,6 +5,10 @@
    scrolls. CrossingRoot writes the fill to the mark and mobile meter only,
    and updates their percentage labels on the same animation frame.
 
+   One section per screen, on phones and desktop: each band is a screen tall
+   and the page settles on it. A band grows with its content rather than
+   clipping it, and short viewports and reduced motion scroll freely.
+
    Hierarchy does not rely on size alone. Each type role differs from
    its neighbour in at least two of size, weight, tone and space, and
    each section opens with a head: a rule in the text's own ink with the
@@ -33,12 +37,14 @@
   --crossing-meter-h: 30px;
 
   /* Spacing roles, on a 4px grid and far apart in value: section rule to
-     title, title to its first content, either side of a hairline inside a
-     list, and the end of one section to the rule of the next. */
+     title, title to its first content, and either side of a hairline inside
+     a list. */
   --crossing-rule-gap: 16px;
   --crossing-head-gap: 24px;
   --crossing-row-pad: 16px;
-  --crossing-section-gap: 96px;
+  /* The browser toolbar's share of the large viewport. A band fills the
+     screen with the toolbar hidden and keeps its content clear of it shown. */
+  --crossing-toolbar: calc(100lvh - 100svh);
 
   position: relative;
 }
@@ -54,7 +60,6 @@
     --crossing-rule-gap: 24px;
     --crossing-head-gap: 32px;
     --crossing-row-pad: 24px;
-    --crossing-section-gap: clamp(128px, 16svh, 176px);
   }
 }
 
@@ -360,19 +365,27 @@
 }
 
 /* ── Bands ──
+   One screen each, content centred on the same axis as the desktop mark.
    Each section opens with its head: the rule, in the title's own ink, a
-   tier above the hairlines inside the lists, then the title close beneath
-   it. The long interval is the one before the next rule. */
+   tier above the hairlines inside the lists, then the title close beneath it. */
 
 .crossing-bands {
   min-width: 0;
 }
 
 .crossing-band {
-  padding-block: var(--crossing-rule-gap) var(--crossing-section-gap);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100lvh;
+  padding-block: calc(var(--crossing-header) + 20px) calc(var(--crossing-toolbar) + 24px);
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.crossing-band__body {
+  padding-top: var(--crossing-rule-gap);
   border-top: 1px solid var(--color-text);
-  /* An in-page jump lands the rule just under the header and meter. */
-  scroll-margin-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 2px);
 }
 
 /* Bands take focus after an in-page link so the reading position follows;
@@ -381,24 +394,26 @@
   outline: none;
 }
 
-.crossing-band--statement {
-  padding-block: 24px var(--crossing-section-gap);
+.crossing-band--statement .crossing-band__body {
+  padding-top: 0;
   border-top: 0;
 }
 
 @media (min-width: 768px) {
   .crossing-band {
-    scroll-margin-top: calc(var(--crossing-header) + 48px);
+    padding-block: calc(var(--crossing-header) + 48px) calc(var(--crossing-toolbar) + 48px);
+  }
+}
+
+/* The page settles on a section. Only where every section fits a screen: a
+   mandatory stop inside something taller would hide the rest of it. */
+@media (min-height: 640px) and (prefers-reduced-motion: no-preference) {
+  html:has(.crossing) {
+    scroll-snap-type: y mandatory;
   }
 
-  /* First viewport: the statement is centred on the same axis as the mark. */
-  .crossing-band--statement {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-start;
-    min-height: 100svh;
-    padding-block: calc(var(--crossing-header) + 48px) 48px;
+  body:has(.crossing) footer {
+    scroll-snap-align: end;
   }
 }
 
@@ -758,11 +773,6 @@
   }
 }
 
-.crossing-end {
-  display: block;
-  height: 1px;
-}
-
 /* ── Reduced motion: the crossing is shown complete and still ── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -783,6 +793,7 @@
     --crossing-meter-h: 0px;
     --crossing-rule-gap: 20px;
     --crossing-head-gap: 20px;
+    --crossing-mark-m: clamp(184px, 48vw, 208px);
   }
 
 
@@ -801,20 +812,19 @@
     pointer-events: none;
   }
 
-  .crossing-band {
-    scroll-margin-top: calc(var(--crossing-header) + 20px);
-  }
-
   [data-theme='dark'] .crossing:not([data-complete='true']) .crossing-mark__ink canvas {
     filter: brightness(1.25);
   }
 
+  /* The first screen is the mark and the statement together, so the page's
+     first stop is the mark and the statement fills what the mark leaves. */
   .crossing-aside {
     padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 20px);
+    scroll-snap-align: start;
   }
 
   .crossing-mark {
-    width: clamp(184px, 48vw, 208px);
+    width: var(--crossing-mark-m);
   }
 
   .crossing-mark__ink {
@@ -827,7 +837,10 @@
   }
 
   .crossing-band--statement {
-    padding-block: 16px 64px;
+    justify-content: flex-start;
+    min-height: calc(100lvh - var(--crossing-header) - var(--crossing-meter-h) - 20px - var(--crossing-mark-m));
+    padding-block: 16px calc(var(--crossing-toolbar) + 24px);
+    scroll-snap-align: none;
   }
 
   .crossing-display {
@@ -917,9 +930,16 @@
     display: none;
   }
 
-  .crossing-band--statement > .crossing-onward {
+  .crossing-band--statement .crossing-onward {
     display: inline-block;
     margin-top: 20px;
+  }
+
+  /* Safari draws the page behind its floating toolbar, below the large
+     viewport a band fills. Keep the footer's logo out of that strip so the
+     last section is alone on its screen. */
+  body:has(.crossing) footer {
+    padding-top: 72px;
   }
 
   /* The footer is shared; these rules affect About only. Keep one left axis

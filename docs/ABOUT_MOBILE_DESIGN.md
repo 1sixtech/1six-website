@@ -1,8 +1,8 @@
 # About mobile composition
 
-Current direction, v0.3.3.0 (2026-11-09). Review scope is About on phones.
-The existing Pretendard, orange/monochrome palette, lowercase voice, ASCII 16,
-native scroll, factual copy, and desktop paired-column composition remain.
+Current direction, v0.3.3.0 with one section per screen (2026-11-09). Review scope
+is About on phones. The existing Pretendard, orange/monochrome palette, lowercase
+voice, ASCII 16, factual copy, and desktop paired-column composition remain.
 
 ## Diagnosis
 
@@ -28,13 +28,11 @@ and the footer rewrapped between nearby phone widths.
 | Lead and credentials | 20px | 19px; comfortable leading and tracking |
 | Backer/firm names | 20px | 24px with 15px supporting roles |
 | Body | 17px/1.55 | Preserved |
-| Intro trailing interval | 96px | 64px |
-| Ordinary section interval | 96px | Preserved |
+| Section spacing | 96px between sections | One section per screen |
 | Footer on About | Wrapping, right-aligned | Stable left-aligned two-column grid; 44px links |
 
 The first-screen cue is visible at 375/390/402/430 × 714. A 320px narrow check has no
-horizontal overflow; shorter screens scroll naturally, without a fixed hero
-height or smaller body text. The dark mark is slightly brighter on mobile;
+horizontal overflow; screens under 640px tall scroll naturally, without smaller body text. The dark mark is slightly brighter on mobile;
 completion still applies the orange treatment. The large email remains the final
 primary action and fits the inspected widths.
 
@@ -42,6 +40,24 @@ The mobile product kicker is hidden because the description already states its
 category. The website underline belongs to its label, not the whole flex row.
 The initial in-page link remains a normal anchor without JavaScript; keyboard
 activation and reduced motion move immediately, while pointer activation can glide.
+
+## One section per screen
+
+The owner asked for one section per screen on phones and desktop (2026-11-09). Each
+band is `100lvh` tall with its content centered, and the root snaps to it, so a flick
+moves exactly one section. The mark and statement share the first screen on a phone.
+
+- Padding keeps content clear of the header and of Safari's toolbar (`100lvh - 100svh`).
+  Safari also draws the page behind its floating toolbar below the large viewport, so
+  About's footer carries extra top padding to keep the logo out of that strip.
+- Bands use `min-height`, so larger text or longer copy grows instead of clipping.
+  Snapping needs a viewport 640px or taller, the point where every section fits; a
+  mandatory stop inside something taller would hide the rest of it.
+- Reduced motion scrolls freely.
+- The fill completes as the last section arrives: 16, 37, 58, 79, 100 at the five stops.
+- WebKit has open reports of mandatory snapping losing momentum, and fast flicks are
+  worth rechecking on a device after layout changes. It behaved on iOS 26.5 and 27.0
+  simulators. `scroll-snap-stop: always` is what limits a flick to one section.
 
 ## Scope and implementation
 

@@ -26,12 +26,13 @@ function deferred() {
 
 // The real fetch headers and body have independent lifetimes. In particular,
 // these responses may arrive after abort, as an already-resolved browser task can.
-function warmupHarness() {
+function warmupHarness({ coarsePointer = false } = {}) {
   const calls = [];
   const blobs = [];
   const timers = new Map();
   const events = [];
   const window = new EventTarget();
+  window.matchMedia = () => ({ matches: coarsePointer });
   window.addEventListener('entry:ready', (event) => events.push(event));
   let timerId = 0;
   let active = 0;
@@ -120,7 +121,7 @@ test('shared assets contain exactly the 17 live visual resources, with no fonts 
     '/resource/Source_Team symbol.mp4', '/resource/Source_Desert.mp4',
     ...Array.from({ length: 6 }, (_, index) => `/resource/Source_About 0${index + 1}.mp4`),
     '/resource/Source_Graph.mp4', '/resource/Source_World map.webp',
-    ...['1-1', '2-1', '4-1', '5-2', '1-2', '2-2', '5-1'].map((suffix) =>
+    ...['1-1', '2-1', '4-1 9px', '5-2 9px', '1-2', '2-2', '5-1 9px'].map((suffix) =>
       `/resource/Monotone Cell F_${suffix}.png`),
   ];
   assert.equal(siteAssets.SHARED_VISUAL_ASSETS.length, 17);
@@ -143,13 +144,17 @@ test('asset warmup uses at most two low-priority requests, including time spent 
   await run;
   assert.equal(warmup.peakActive, 2);
   assert.equal(warmup.calls.length, 17);
-  assert.equal(warmup.blobs.length, 17);
+  assert.equal(warmup.blobs.length, 8, 'only images are retained as Blob URLs');
   assert.equal(warmup.timers.size, 0);
   for (const call of warmup.calls) {
     assert.equal(call.options.priority, 'low');
     assert.equal(call.options.signal.aborted, false);
     assert.equal(call.bodyReads, 1);
     const source = warmup.warmedAssetSource(call.url);
+    if (call.url.endsWith('.mp4')) {
+      assert.equal(source, call.url, 'video never takes a Blob source');
+      continue;
+    }
     const retained = warmup.blobs.find((entry) => entry.source === source);
     assert.ok(retained, `${call.url} resolves to its retained body`);
     assert.equal(await retained.blob.text(), call.url);
@@ -173,10 +178,21 @@ test('asset warmup excludes the current route and theme while About downloads th
         siteAssets.SHARED_VISUAL_ASSETS.filter((url) => !current.includes(url)));
       for (const url of current) assert.equal(warmup.warmedAssetSource(url), url);
       if (pathname === '/') {
-        assert.ok(siteAssets.THESIS_VIDEOS.every((url) => warmup.warmedAssetSource(url).startsWith('blob:')));
+        assert.ok(siteAssets.THESIS_VIDEOS.every((url) => warmup.warmedAssetSource(url) === url));
+        assert.ok(warmup.warmedAssetSource(siteAssets.ATLASES[theme].hero).startsWith('blob:'));
       }
     }
   }
+});
+
+test('a phone does not spend data warming video its media stack would download again', async () => {
+  const warmup = warmupHarness({ coarsePointer: true });
+  const run = warmup.warmSharedAssets('/', 'dark');
+  await warmup.drain();
+  await run;
+  assert.ok(warmup.calls.length > 0);
+  assert.ok(warmup.calls.every((call) => !call.url.endsWith('.mp4')));
+  assert.ok(warmup.calls.some((call) => call.url === siteAssets.ATLASES.dark.hero));
 });
 
 test('failed HTTP, network, and body reads are retried next time, while successful Blob sources are reused', async () => {
@@ -190,7 +206,7 @@ test('failed HTTP, network, and body reads are retried next time, while successf
   await warmup.drain();
   await first;
   const failed = warmup.calls.slice(0, 3).map((call) => call.url);
-  assert.equal(warmup.blobs.length, 14);
+  assert.equal(warmup.blobs.length, 8);
   assert.equal(warmup.calls[0].bodyReads, 0, 'an HTTP error body is not cached');
   for (const url of failed) assert.equal(warmup.warmedAssetSource(url), url);
   const successful = new Map(warmup.calls.slice(3).map((call) => [call.url, warmup.warmedAssetSource(call.url)]));
@@ -198,7 +214,7 @@ test('failed HTTP, network, and body reads are retried next time, while successf
   await warmup.drain();
   await retry;
   assert.deepEqual(warmup.calls.slice(17).map((call) => call.url), failed);
-  assert.equal(warmup.blobs.length, 17);
+  assert.equal(warmup.blobs.length, 8);
   for (const [url, source] of successful) assert.equal(warmup.warmedAssetSource(url), source);
   await warmup.warmSharedAssets('/writing', 'light');
   assert.equal(warmup.calls.length, 20, 'a fully warmed document performs no additional fetches');
@@ -234,8 +250,8 @@ test('a new route supersedes the old warmup and stale responses cannot populate 
   await warmup.drain();
   await currentRun;
   assert.equal(warmup.warmedAssetSource(siteAssets.HERO_VIDEO), siteAssets.HERO_VIDEO);
-  const teamSource = warmup.warmedAssetSource(siteAssets.TEAM_VIDEO);
-  assert.equal(await warmup.blobs.find((entry) => entry.source === teamSource).blob.text(), siteAssets.TEAM_VIDEO);
+  const teamSource = warmup.warmedAssetSource(siteAssets.ATLASES.light.team);
+  assert.equal(await warmup.blobs.find((entry) => entry.source === teamSource).blob.text(), siteAssets.ATLASES.light.team);
   assert.equal(warmup.timers.size, 0);
 });
 
@@ -253,7 +269,7 @@ test('an expired request never caches a late successful body and the remaining q
   await warmup.drain();
   await run;
   assert.equal(warmup.calls.length, 17);
-  assert.equal(warmup.blobs.length, 16);
+  assert.equal(warmup.blobs.length, 8);
   assert.equal(warmup.warmedAssetSource(expired.url), expired.url);
   assert.equal(warmup.timers.size, 0);
 });

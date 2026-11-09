@@ -11,12 +11,14 @@ const code = ts.transpileModule(readFileSync(file, 'utf8'), {
 }).outputText;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-function canvasHarness({ reduced = false, image = false } = {}) {
+function canvasHarness({ reduced = false, image = false, warmup = () => Promise.resolve({}) } = {}) {
   const hooks = [];
   let cursor = 0;
   let effects = [];
   let ready = 0;
   const frames = [];
+  const timers = [];
+  let builds = 0;
   const jsx = (type, props) => ({ type, props });
   const dependencies = {
     react: {
@@ -30,16 +32,19 @@ function canvasHarness({ reduced = false, image = false } = {}) {
     'react/jsx-runtime': { jsx, jsxs: jsx },
     '@/hooks/useReducedMotion': { useReducedMotion: () => reduced },
     '@/hooks/useDevicePixelRatio': { useDevicePixelRatio: () => 1 },
-    '@/lib/videoPool': { get: () => undefined, getWarmup: () => undefined },
+    '@/lib/videoPool': { warmup },
     '@/lib/assetWarmup': { warmedAssetSource: (url) => url },
     './pixelScale': { outputPixelRatio: () => 1, toDevicePixels: (options) => options },
-    '@/lib/ascmosaic': { AscMosaic: class { constructor() { throw new Error('WebGL unavailable'); } } },
+    '@/lib/ascmosaic': { AscMosaic: class { constructor() { builds++; throw new Error('WebGL unavailable'); } } },
   };
   const exports = {};
   new vm.Script(code, { filename: file.pathname }).runInContext(vm.createContext({
     exports,
     require(name) { assert.ok(Object.hasOwn(dependencies, name), name); return dependencies[name]; },
     requestAnimationFrame: (fn) => frames.push(fn),
+    setTimeout: (fn, delay) => timers.push({ fn, delay }),
+    clearTimeout() {},
+    document: { addEventListener() {}, removeEventListener() {}, hidden: false },
     IntersectionObserver: class { observe() {} disconnect() {} },
     console: { warn() {} },
   }));
@@ -54,6 +59,9 @@ function canvasHarness({ reduced = false, image = false } = {}) {
   const cleanups = effects.map((setup) => setup());
   return {
     get ready() { return ready; },
+    get builds() { return builds; },
+    timers,
+    rerun() { cursor = 0; effects = []; exports.AsciiCanvas(props); effects.forEach((setup) => setup()); },
     rerender: () => { tree = render(); return tree; },
     cleanup: () => cleanups.forEach((cleanup) => cleanup?.()),
     get media() { return tree.props.children; },
@@ -72,6 +80,18 @@ test('ASCII fallback: WebGL failure waits for a decoded, settled video frame bef
   assert.equal(canvas.ready, 0);
   video.props.onSeeked({ currentTarget: { readyState: 2, seeking: false } });
   assert.equal(canvas.ready, 1);
+});
+
+test('video source failure: retries, never builds a mosaic without a video, then falls back', async (t) => {
+  let warmups = 0;
+  const canvas = canvasHarness({ warmup: () => { warmups++; return Promise.reject(new Error('load error')); } });
+  t.after(() => canvas.cleanup());
+  await flush(); await flush();
+  assert.equal(warmups, 1);
+  assert.equal(canvas.builds, 0, 'no source, no mosaic: an empty texture would tile one glyph');
+  const retries = canvas.timers.filter((timer) => timer.delay === 1000 || timer.delay === 3000);
+  assert.deepEqual(retries.map((timer) => timer.delay), [1000]);
+  assert.equal(canvas.rerender().props['data-ascii-still'], undefined, 'still retrying');
 });
 
 test('ASCII fallback: reduced motion reports its still video only after decoded data arrives', (t) => {

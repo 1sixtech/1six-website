@@ -21,17 +21,13 @@ function deferred() {
 
 // Decoder readiness and play() completion are deliberately separate. Safari can
 // dispatch canplay while the priming play promise is still waiting to settle.
-function poolHarness({ sources = new Map() } = {}) {
+function poolHarness({ frameCallbacks = false } = {}) {
   const exports = {};
   const videos = [];
   const timers = new Map();
   let timerId = 0;
   const context = vm.createContext({
     exports,
-    require(specifier) {
-      assert.equal(specifier, './assetWarmup');
-      return { warmedAssetSource: (url) => sources.get(url) ?? url };
-    },
     setTimeout(callback, delay) {
       timers.set(++timerId, { callback, delay });
       videos.at(-1).timer = timerId;
@@ -73,6 +69,7 @@ function poolHarness({ sources = new Map() } = {}) {
           },
           pause() { this.pauseCalls++; this.paused = true; },
         };
+        if (frameCallbacks) video.requestVideoFrameCallback = (callback) => { video.frameCallback = callback; };
         videos.push(video);
         return video;
       },
@@ -92,32 +89,28 @@ function poolHarness({ sources = new Map() } = {}) {
 
 function assertNoPendingListeners(video) {
   assert.equal(video.listeners.get('canplay')?.size ?? 0, 0);
+  assert.equal(video.listeners.get('loadeddata')?.size ?? 0, 0);
   assert.equal(video.listeners.get('error')?.size ?? 0, 0);
 }
 
-test('video pool exposes the same pending promise without creating another decoder and reuses warmed bytes', async () => {
-  const pool = poolHarness({ sources: new Map([[VIDEO_URL, 'blob:warmed-desert']]) });
-  assert.equal(pool.getWarmup(VIDEO_URL), undefined);
-  assert.equal(pool.get(VIDEO_URL), undefined);
-  assert.equal(pool.videos.length, 0, 'lookup alone must never create a decoder');
+test('video pool loads the network URL once and asks to play before a frame exists', async () => {
+  const pool = poolHarness();
   const first = pool.warmup(VIDEO_URL);
-  assert.equal(pool.getWarmup(VIDEO_URL), first);
   assert.equal(pool.warmup(VIDEO_URL), first);
   assert.equal(pool.videos.length, 1);
   const video = pool.videos[0];
-  assert.equal(video.src, 'blob:warmed-desert#t=0.001');
+  assert.equal(video.src, `${VIDEO_URL}#t=0.001`, 'iOS is unreliable with blob-backed video; only the real URL is used');
   assert.equal(video.preload, 'auto');
   assert.equal(video.muted, true);
   assert.equal(video.playsInline, true);
   assert.equal(video.attributes.get('playsinline'), '');
   assert.equal(video.loop, true);
   assert.equal(video.loadCalls, 1);
-  assert.equal(pool.get(VIDEO_URL), undefined, 'an unready decoder is not pooled');
+  assert.equal(video.plays.length, 1, 'iOS can hold canplay until playback is requested');
+  assert.equal(pool.isPooled(video), false, 'an unready decoder is not pooled');
   video.fire('canplay');
   assert.equal(await first, video, 'a decoded first frame does not wait for autoplay permission');
-  assert.equal(pool.get(VIDEO_URL), video);
   assert.equal(pool.isPooled(video), true);
-  assert.equal(pool.getWarmup(VIDEO_URL), first);
   assert.equal(pool.warmup(VIDEO_URL), first);
   assert.equal(video.plays.length, 1);
   assertNoPendingListeners(video);
@@ -125,6 +118,35 @@ test('video pool exposes the same pending promise without creating another decod
   video.plays[0].resolve();
   await flush();
   assert.equal(video.pauseCalls, 1, 'unused primed media pauses to release decoder work');
+});
+
+for (const signal of ['loadeddata', 'a frame callback']) {
+  test(`a frame reported by ${signal} is enough when canplay never fires`, async () => {
+    const pool = poolHarness({ frameCallbacks: true });
+    const ready = pool.warmup(VIDEO_URL);
+    const video = pool.videos[0];
+    if (signal === 'loadeddata') video.fire('loadeddata');
+    else video.frameCallback();
+    assert.equal(await ready, video);
+    assert.equal(pool.isPooled(video), true);
+    assert.equal(pool.timers.size, 0);
+    assertNoPendingListeners(video);
+  });
+}
+
+test('the last release destroys the element so a paused video cannot keep its decoder', async () => {
+  const pool = poolHarness();
+  const ready = pool.warmup(VIDEO_URL);
+  const video = pool.videos[0];
+  video.fire('canplay');
+  await ready;
+  pool.acquire(video);
+  pool.release(video);
+  assert.equal(video.src, '');
+  assert.equal(video.loadCalls, 2);
+  const next = pool.warmup(VIDEO_URL);
+  assert.notEqual(next, ready, 'a later canvas gets a fresh element');
+  assert.equal(pool.videos.length, 2);
 });
 
 test('route teardown rejects every pending warmup, clears sources, and ignores late canplay and error callbacks', async () => {
@@ -142,11 +164,8 @@ test('route teardown rejects every pending warmup, clears sources, and ignores l
     assertNoPendingListeners(video);
     video.callbacks.get('canplay')[0]();
     video.callbacks.get('error')[0]();
-    assert.equal(video.plays.length, 0, 'an obsolete callback never primes a cancelled decoder');
-  });
-  urls.forEach((url) => {
-    assert.equal(pool.get(url), undefined);
-    assert.equal(pool.getWarmup(url), undefined);
+    assert.equal(video.plays.length, 1, 'an obsolete callback never starts another play');
+    assert.equal(pool.isPooled(video), false);
   });
 
   const retry = pool.warmup(VIDEO_URL);
@@ -154,11 +173,11 @@ test('route teardown rejects every pending warmup, clears sources, and ignores l
   const current = pool.videos.at(-1);
   obsolete[0].callbacks.get('canplay')[0]();
   obsolete[0].callbacks.get('error')[0]();
-  assert.equal(pool.getWarmup(VIDEO_URL), retry, 'old callbacks cannot remove the current promise');
-  assert.equal(pool.get(VIDEO_URL), undefined);
+  assert.equal(pool.warmup(VIDEO_URL), retry, 'old callbacks cannot remove the current promise');
+  assert.equal(pool.isPooled(current), false);
   current.fire('canplay');
   assert.equal(await retry, current);
-  assert.equal(pool.get(VIDEO_URL), current);
+  assert.equal(pool.isPooled(current), true);
   assert.notEqual(current, obsolete[0]);
 });
 
@@ -171,8 +190,7 @@ test('a timed-out decoder is evicted and a later warmup gets a fresh request', a
   await rejected;
   assert.equal(expired.src, '');
   assert.equal(expired.loadCalls, 2);
-  assert.equal(pool.getWarmup(VIDEO_URL), undefined);
-  assert.equal(pool.get(VIDEO_URL), undefined);
+  assert.equal(pool.isPooled(expired), false);
   assertNoPendingListeners(expired);
   assert.equal(pool.timers.size, 0);
 
@@ -180,13 +198,13 @@ test('a timed-out decoder is evicted and a later warmup gets a fresh request', a
   assert.notEqual(retry, first);
   expired.callbacks.get('canplay')[0]();
   expired.callbacks.get('error')[0]();
-  assert.equal(pool.getWarmup(VIDEO_URL), retry);
-  assert.equal(pool.get(VIDEO_URL), undefined);
-  assert.equal(expired.plays.length, 0);
+  assert.equal(pool.warmup(VIDEO_URL), retry);
+  assert.equal(pool.isPooled(expired), false);
+  assert.equal(expired.plays.length, 1);
   const current = pool.videos.at(-1);
   current.fire('canplay');
   assert.equal(await retry, current);
-  assert.equal(pool.get(VIDEO_URL), current);
+  assert.equal(pool.isPooled(current), true);
 });
 
 test('a media load error evicts its cached rejection so retry can decode successfully', async () => {
@@ -197,8 +215,7 @@ test('a media load error evicts its cached rejection so retry can decode success
   const rejected = assert.rejects(first, /load error.*\(code 3\)/);
   failed.fire('error');
   await rejected;
-  assert.equal(pool.getWarmup(VIDEO_URL), undefined);
-  assert.equal(pool.get(VIDEO_URL), undefined);
+  assert.equal(pool.isPooled(failed), false);
   assert.equal(pool.timers.size, 0);
   assertNoPendingListeners(failed);
 
@@ -206,12 +223,12 @@ test('a media load error evicts its cached rejection so retry can decode success
   assert.notEqual(retry, first);
   failed.callbacks.get('error')[0]();
   failed.callbacks.get('canplay')[0]();
-  assert.equal(pool.getWarmup(VIDEO_URL), retry);
-  assert.equal(pool.get(VIDEO_URL), undefined);
+  assert.equal(pool.warmup(VIDEO_URL), retry);
+  assert.equal(pool.isPooled(failed), false);
   const current = pool.videos.at(-1);
   current.fire('canplay');
   assert.equal(await retry, current);
-  assert.equal(pool.get(VIDEO_URL), current);
+  assert.equal(pool.isPooled(current), true);
 });
 
 test('late priming play completion never pauses a video already acquired by a renderer', async () => {
@@ -232,6 +249,7 @@ test('late priming play completion never pauses a video already acquired by a re
   pool.release(video);
   assert.equal(video.pauseCalls, 1);
   assert.equal(video.paused, true);
+  assert.equal(video.src, '', 'the last owner frees the decoder');
   video.plays.slice(1).forEach((attempt) => attempt.resolve());
   await flush();
   assert.equal(video.pauseCalls, 1);
@@ -245,13 +263,11 @@ test('autoplay rejection preserves a decoded first frame and does not poison lat
   video.plays[0].reject(new Error('NotAllowedError: Low Power Mode'));
   assert.equal(await ready, video);
   await flush();
-  assert.equal(pool.get(VIDEO_URL), video);
   assert.equal(pool.isPooled(video), true);
   pool.acquire(video);
   video.plays[1].reject(new Error('NotAllowedError: autoplay blocked'));
   await flush();
-  assert.equal(pool.get(VIDEO_URL), video);
-  assert.equal(pool.getWarmup(VIDEO_URL), ready);
+  assert.equal(pool.warmup(VIDEO_URL), ready);
   pool.release(video);
   assert.equal(video.pauseCalls, 1);
 });
@@ -268,12 +284,9 @@ test('teardown clears acquired videos and is idempotent even when priming play s
   assert.equal(video.paused, true);
   assert.equal(video.pauseCalls, 1);
   assert.equal(video.loadCalls, 2);
-  assert.equal(pool.get(VIDEO_URL), undefined);
-  assert.equal(pool.getWarmup(VIDEO_URL), undefined);
   video.plays.forEach((attempt) => attempt.resolve());
   await flush();
   pool.teardownVideoPool();
-  assert.equal(pool.get(VIDEO_URL), undefined);
   assert.equal(video.pauseCalls, 1);
   assert.equal(video.loadCalls, 2);
   assert.equal(pool.timers.size, 0);

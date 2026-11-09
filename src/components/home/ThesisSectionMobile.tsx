@@ -6,6 +6,7 @@ import { EffectFade } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { HASH_SCROLL_REQUEST_EVENT } from '@/lib/hashScroll';
 import { THESIS_STATES, TOTAL } from './thesisData';
+import { ThesisSlideActive } from './thesisSlideActive';
 import { movedAwayFrom } from './captureSettle';
 
 import 'swiper/css';
@@ -811,7 +812,9 @@ export function ThesisSectionMobile() {
                       className={isActive ? '' : 'opacity-0'}
                       aria-hidden={!isActive}
                     >
-                      {state.mobileContent}
+                      <ThesisSlideActive value={isActive}>
+                        {state.mobileContent}
+                      </ThesisSlideActive>
                     </div>
                   ) : (
                     <div className="opacity-0" aria-hidden="true" />

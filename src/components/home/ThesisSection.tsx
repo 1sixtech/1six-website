@@ -7,6 +7,7 @@ import { Observer } from 'gsap/Observer';
 import { useGSAP } from '@gsap/react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { THESIS_STATES, TOTAL } from './thesisData';
+import { ThesisSlideActive } from './thesisSlideActive';
 import { ThesisSectionMobile } from './ThesisSectionMobile';
 
 gsap.registerPlugin(ScrollTrigger, Observer, useGSAP);
@@ -536,16 +537,18 @@ function ThesisSectionDesktop({ isMobile, prefersReducedMotion }: {
               style={index !== 0 ? { visibility: 'hidden', opacity: 0 } : undefined}
             >
               {isNearby && (
-                isMobile ? (
-                  <div className="text-center">
-                    {state.mobileContent}
-                  </div>
-                ) : (
-                  <div className="text-center text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
-                    style={{ color: 'var(--color-text)' }}>
-                    {state.desktopContent}
-                  </div>
-                )
+                <ThesisSlideActive value={index === currentIndex}>
+                  {isMobile ? (
+                    <div className="text-center">
+                      {state.mobileContent}
+                    </div>
+                  ) : (
+                    <div className="text-center text-[36px] font-normal leading-[1.25] tracking-[-0.72px]"
+                      style={{ color: 'var(--color-text)' }}>
+                      {state.desktopContent}
+                    </div>
+                  )}
+                </ThesisSlideActive>
               )}
             </div>
           );

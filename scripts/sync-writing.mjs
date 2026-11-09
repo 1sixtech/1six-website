@@ -5,6 +5,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDraftArticle } from '../src/lib/writingDraft.mjs';
 
 const REPO = '1sixtech/noctis-articles';
 const REF = process.env.WRITING_GIT_REF ?? 'main';
@@ -17,14 +18,17 @@ function rawUrl(file) {
   return `https://raw.githubusercontent.com/${REPO}/${REF}/${encoded}`;
 }
 
-async function download(file, destination) {
+async function fetchFile(file) {
   const response = await fetch(rawUrl(file), {
     headers: { 'User-Agent': '1six-website' },
   });
   if (!response.ok) {
     throw new Error(`Failed to download ${file}: ${response.status}`);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function save(bytes, destination) {
   await mkdir(path.dirname(destination), { recursive: true });
   await writeFile(destination, bytes);
 }
@@ -51,29 +55,38 @@ async function main() {
     .filter((entry) => entry.type === 'blob')
     .map((entry) => entry.path);
   const readmes = files.filter((file) => /^[0-9]{3}-[^/]+\/README\.md$/.test(file));
-  if (readmes.length === 0) {
-    throw new Error(`No numbered articles found in ${REPO}@${REF}`);
+  const articles = await Promise.all(
+    readmes.map(async (readme) => ({ readme, bytes: await fetchFile(readme) })),
+  );
+  // Skipped here, not only when pages are built: anything under public/ has a
+  // URL, so a draft's figures must never reach it.
+  const published = articles.filter(({ bytes }) => !isDraftArticle(bytes.toString('utf8')));
+  if (published.length === 0) {
+    throw new Error(`No published articles found in ${REPO}@${REF}`);
   }
 
   await rm(contentRoot, { recursive: true, force: true });
   await rm(publicRoot, { recursive: true, force: true });
 
   await Promise.all(
-    readmes.flatMap((readme) => {
+    published.flatMap(({ readme, bytes }) => {
       const slug = readme.split('/')[0];
       const assets = files.filter(
         (file) => file.startsWith(`${slug}/`) && file !== readme,
       );
       return [
-        download(readme, path.join(contentRoot, slug, 'README.md')),
-        ...assets.map((file) =>
-          download(file, path.join(publicRoot, slug, file.slice(slug.length + 1))),
+        save(bytes, path.join(contentRoot, slug, 'README.md')),
+        ...assets.map(async (file) =>
+          save(await fetchFile(file), path.join(publicRoot, slug, file.slice(slug.length + 1))),
         ),
       ];
     }),
   );
 
-  console.log(`Synced ${readmes.length} writing article(s) from ${REPO}@${REF}`);
+  const drafts = articles.length - published.length;
+  console.log(
+    `Synced ${published.length} writing article(s) from ${REPO}@${REF}${drafts ? `, skipped ${drafts} draft(s)` : ''}`,
+  );
 }
 
 main().catch((error) => {

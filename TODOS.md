@@ -6,23 +6,11 @@
 
 **What:** Change a mounted canvas's glyph atlas without re-initializing it, and give the thesis canvases a coverage atlas.
 
-**Why:** The thesis atlas now depends on the theme, so a theme switch tears down and rebuilds every mounted thesis canvas (eager ones too), and each rebuild uploads a 7992x1999 atlas again (about 64 MB per context).
+**Why:** The thesis atlas now depends on the theme, so a theme switch tears down and rebuilds every mounted thesis canvas (eager ones too), reloading its video and recreating its context. The glyph sheets themselves are now 108x27, so this is no longer a memory problem.
 
-**Context:** `AsciiCanvas` re-inits whenever `mosaicCellUrl` changes. An `AsciiMosaicFilter.setAtlas(url)` (load, `useAtlas`, dispose the old one) applied from an effect would avoid the rebuild; `smoothCells` would shrink each atlas to a few KB. Found by the v0.2.0.0 performance review.
+**Context:** `AsciiCanvas` re-inits whenever `mosaicCellUrl` changes. An `AsciiMosaicFilter.setAtlas(url)` (load, `useAtlas`, dispose the old one) applied from an effect would avoid the rebuild. Found by the v0.2.0.0 performance review.
 
 **Effort:** M
-**Priority:** P3
-**Depends on:** None
-
-### Release pooled videos when a mosaic is disposed
-
-**What:** Have `AscMosaic.disposeModel()` call `videoPool.release(video)` for a pooled video, as the `addModel()` replace path already does.
-
-**Why:** `src/lib/videoPool.ts` documents that `AscMosaic.dispose` releases pooled videos, but only the replace path does. Each dispose of a canvas on a pooled video (a theme switch re-init, for one) leaves its refcount one too high, so the pool never pauses that video when its last canvas goes. The decoders keep running until the route-leave teardown.
-
-**Context:** Present on `main` before v0.2.0.0. Found while fixing a late-model leak in the v0.2.0.0 review. Watch the eager Thesis canvases after the change: `setVideoPlaying` pauses their videos directly when off-screen.
-
-**Effort:** S
 **Priority:** P3
 **Depends on:** None
 
@@ -61,6 +49,14 @@ The crossing performance and reduced-motion items are recorded under Completed.
 ## Completed
 
 The original problem statements below describe the earlier release; each resolution records the current behavior.
+
+### Release pooled videos when a mosaic is disposed
+
+**What:** Have `AscMosaic.disposeModel()` call `videoPool.release(video)` for a pooled video, as the `addModel()` replace path already does.
+
+**Resolution:** Every dispose path releases, and the last release destroys the element so its decoder is freed.
+
+**Completed:** 2026-11-09
 
 ### Prepare the About mark during the company-logo loader
 

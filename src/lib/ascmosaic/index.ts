@@ -477,31 +477,40 @@ export class AscMosaic {
    * Bumping needsUpdate while paused-with-a-frame makes the renderer re-upload
    * the current frame, so a static-but-correct ASCII frame shows instead.
    * Playing videos keep video.paused === false, so this is a no-op for them.
+   *
+   * Returns whether the mosaic has a frame to read. Until a video's first frame
+   * is uploaded its texture is empty, and the filter would tile that single
+   * brightness as one glyph across the whole canvas.
    */
-  private refreshPausedVideoFrame(): void {
-    if (!this.model) return;
-    this.model.traverse((obj) => {
+  private refreshVideoFrame(): boolean {
+    let hasFrame = true;
+    this.model?.traverse((obj) => {
       if (
         obj instanceof THREE.Mesh &&
         obj.material instanceof THREE.MeshBasicMaterial &&
         obj.material.map instanceof THREE.VideoTexture
       ) {
-        const video = obj.material.map.image as HTMLVideoElement;
+        const map = obj.material.map;
+        const video = map.image as HTMLVideoElement;
         // HAVE_CURRENT_DATA (2) means a frame exists to upload.
         if (video && video.paused && video.readyState >= 2) {
-          obj.material.map.needsUpdate = true;
+          map.needsUpdate = true;
         }
+        // Without requestVideoFrameCallback the renderer's own update() is
+        // what marks a frame, and the renderer is not reached until one exists.
+        map.update();
+        if (map.version === 0) hasFrame = false;
       }
     });
+    return hasFrame;
   }
 
   private render(): void {
+    if (!this.refreshVideoFrame()) return;
     if (this.asciiMosaicFilter && this.asciiMosaicFilter.getEnabled()) {
-      this.refreshPausedVideoFrame();
       this.asciiMosaicFilter.renderToTarget(this.scene, this.camera);
       this.asciiMosaicFilter.render();
     } else {
-      this.refreshPausedVideoFrame();
       this.renderer.render(this.scene, this.camera);
     }
   }
@@ -927,7 +936,9 @@ export class AscMosaic {
           if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
             const videoTexture = obj.material.map as THREE.VideoTexture;
             const video = videoTexture.image as HTMLVideoElement;
-            if (video && !videoPool.isPooled(video)) {
+            if (video && videoPool.isPooled(video)) {
+              videoPool.release(video);
+            } else if (video) {
               video.pause();
               video.src = '';
               video.load();

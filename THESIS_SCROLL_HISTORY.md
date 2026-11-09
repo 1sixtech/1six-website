@@ -797,3 +797,25 @@ URLs after a native iOS cache probe demonstrated a duplicate full transfer when 
 generic fetch was followed by media Range requests. Pending decoder warmup is reused
 and cancelled on route leave. Current ownership and verification requirements are in
 [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md).
+
+---
+
+## 14. Repeated-glyph canvases on iPhone (2026-11-09)
+
+After v0.3.3.0, phones entering Thesis from About sometimes showed a full-screen grid
+of one glyph on every canvas; a reload often cleared it. Screenshots showed the Hero
+tiling the `/` cell, which needs a source brightness of 0.15-0.58. An empty texture
+reads 0 and would tile `|`. The match was `createTexturedMesh`'s failure path, a blue
+`0x4a90e2` material (linear brightness 0.27). Forcing every video to fail in the
+simulator reproduced the screenshot exactly, so this was a failed load, not a
+decoder or a capture problem.
+
+iOS 26.5 and 27.0 simulators did not fail on their own, so the device-side trigger is
+inferred rather than observed. Client navigation was the only path that handed `<video>`
+a Blob URL (reload does not, matching "refresh fixes it"), WebKit has reports of
+blob-backed media not reaching `canplay` before `play()`, and our code waited for
+`canplay` before calling `play()`. The same release also started eight players at once.
+
+The fix removes each contributor and the failure mode itself; see
+[docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md). Capture is unchanged: the slide components only
+gained a provider telling their canvases which slide is showing.

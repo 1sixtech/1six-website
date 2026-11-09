@@ -373,6 +373,7 @@ export class AsciiMosaicFilter {
       (error) => { console.warn('모자이크 셀 텍스처 로딩 실패:', error); }
     );
     texture.premultiplyAlpha = premultiply;
+    texture.generateMipmaps = false; // nearest sampling never reads them
     texture.minFilter = THREE.NearestFilter;
     texture.magFilter = THREE.NearestFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;

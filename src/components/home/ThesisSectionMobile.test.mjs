@@ -81,6 +81,7 @@ function thesisHarness({ scrollY = 0 } = {}) {
     'swiper/css': {},
     'swiper/css/effect-fade': {},
     '@/lib/hashScroll': { HASH_SCROLL_REQUEST_EVENT: '1six:hash-scroll-request' },
+    './thesisSlideActive': { ThesisSlideActive: Symbol('ThesisSlideActive') },
     './thesisData': {
       TOTAL,
       THESIS_STATES: Array.from({ length: TOTAL }, (_, id) => ({ id })),

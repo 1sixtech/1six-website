@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
+import { isDraftArticle } from './writingDraft.mjs';
 
 // writing.ts reads content/writing and public/ under the working directory,
 // which the build syncs from another repository: run it on a fixture instead.
@@ -272,4 +273,76 @@ test('publication metadata connects categories and authors and orders newest wri
       rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
     }
   }
+});
+
+const removeArticle = (slug) => rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
+
+test('a draft date keeps an article off the site in every header form', async () => {
+  const { getArticles } = await import('./writing.ts');
+  const drafts = {
+    '002-byline-draft': '# Byline draft\n\nAuthor: Dean N.\nDate: 2026-11-08 (draft)\n\nNot yet.\n',
+    '003-front-draft': '---\ntitle: Front draft\nauthor: Dean N.\ndate: "2026-11-09 (Draft)"\n---\n\nNot yet.\n',
+    '004-crlf-draft': '# CRLF draft\r\n\r\nDate: 2026-11-10 (draft)\r\n\r\nNot yet.\r\n',
+  };
+  try {
+    for (const [slug, markdown] of Object.entries(drafts)) write(`content/writing/${slug}/README.md`, markdown);
+    const listed = getArticles().map((article) => article.slug);
+    for (const slug of Object.keys(drafts)) {
+      assert.equal(listed.includes(slug), false, `${slug} is not listed`);
+      assert.equal(getArticle(slug), null, `${slug} has no article page`);
+    }
+    assert.ok(listed.includes(SLUG), 'published articles are unaffected');
+  } finally {
+    Object.keys(drafts).forEach(removeArticle);
+  }
+});
+
+test('a plain date line is read as the date and left out of the article', () => {
+  try {
+    write('content/writing/002-dated/README.md', '# Dated\n\nAuthor: Dean N.\nDate: 2026-11-08\n\nThe body.\n');
+    const article = getArticle('002-dated');
+    assert.equal(article.date, '2026-11-08');
+    assert.equal(article.dateLabel, '8 Nov 2026');
+    assert.equal(article.html.includes('Date:'), false);
+    assert.match(article.html, /The body/);
+  } finally {
+    removeArticle('002-dated');
+  }
+});
+
+test('a missing or impossible date fails the build and names the article', () => {
+  const invalid = [
+    ['002-no-date', '# No date\n\nAuthor: Dean N.\n\nText.\n', 'none'],
+    ['002-words', '# Words\n\nDate: soon\n\nText.\n', '"soon"'],
+    ['002-month', '---\ntitle: Month\ndate: 2026-13-45\n---\n\nText.\n', '"2026-13-45"'],
+    ['002-rollover', '# Rollover\n\nDate: 2026-02-31\n\nText.\n', '"2026-02-31"'],
+    ['002-other-note', '# Note\n\nDate: 2026-11-08 (tentative)\n\nText.\n', '"2026-11-08 (tentative)"'],
+  ];
+  for (const [slug, markdown, found] of invalid) {
+    try {
+      write(`content/writing/${slug}/README.md`, markdown);
+      assert.throws(
+        () => getArticle(slug),
+        (error) => error.message.includes(`writing: ${slug} needs a date like 2026-11-08, found ${found}`),
+        slug,
+      );
+    } finally {
+      removeArticle(slug);
+    }
+  }
+});
+
+test('only the date line of an article can mark it as a draft', () => {
+  for (const markdown of [
+    'Date: 2026-11-08 (draft)',
+    'date: 2026-11-08 (DRAFT)',
+    "date: '2026-11-08 (draft)'",
+    '# Title\r\n\r\nDate: 2026-11-08  (draft)\r\n\r\nBody',
+  ]) assert.equal(isDraftArticle(markdown), true, markdown);
+  for (const markdown of [
+    'Date: 2026-11-08',
+    'The Date: 2026-11-08 (draft) was moved.',
+    'Date: 2026-11-08 (draft) of the note',
+    'Updated: 2026-11-08 (draft)',
+  ]) assert.equal(isDraftArticle(markdown), false, markdown);
 });

@@ -62,8 +62,8 @@ function imageModel(image = { width: 16, height: 16 }) {
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map }));
 }
 
-function videoModel() {
-  const map = new THREE.VideoTexture({ paused: false, readyState: 4 });
+function videoModel(video = { paused: false, readyState: 4, HAVE_CURRENT_DATA: 2 }) {
+  const map = new THREE.VideoTexture(video);
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map }));
 }
 
@@ -201,6 +201,55 @@ test('render on demand: waits for the image to arrive; video and a moving scene 
   }
 });
 
+test('video frames: nothing draws until a frame is uploaded, so an empty texture never tiles one glyph', { skip }, () => {
+  // A playing video reports frames through requestVideoFrameCallback.
+  let presentFrame;
+  const video = {
+    paused: false,
+    readyState: 2,
+    requestVideoFrameCallback(callback) {
+      presentFrame = callback;
+      return 1;
+    },
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(5);
+  assert.equal(drawn(), 0, 'a video that has not presented a frame draws nothing');
+  presentFrame();
+  runFrames(1);
+  assert.equal(drawn(), 1, 'the first presented frame draws');
+  mosaic.stopAnimate();
+});
+
+test('video frames: a paused video with decoded data still draws its frame (Low Power Mode)', { skip }, () => {
+  const video = {
+    paused: true,
+    readyState: 2,
+    requestVideoFrameCallback: () => 1,
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  assert.equal(drawn(), 1);
+  mosaic.stopAnimate();
+});
+
+test('video frames: a paused video with no data draws nothing', { skip }, () => {
+  const video = {
+    paused: true,
+    readyState: 1,
+    requestVideoFrameCallback: () => 1,
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(3);
+  assert.equal(drawn(), 0);
+  mosaic.stopAnimate();
+});
+
 test('render on demand: size, camera and filter changes each owe exactly one frame', { skip }, () => {
   const { mosaic, drawn } = mosaicHarness();
   mosaic.setRenderOnDemand(true);
@@ -267,6 +316,9 @@ function fakeVideo() {
     src: '',
     paused: true,
     setAttribute() {},
+    removeAttribute(name) {
+      if (name === 'src') this.src = '';
+    },
     play() {
       this.paused = false;
       return Promise.resolve();

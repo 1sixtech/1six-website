@@ -1,8 +1,9 @@
 # Page entry and shared preparation
 
-Current contract, v0.3.3.0 (2026-11-09). The owner approved a shared first-entry
-experience, then clarified that Writing should open immediately, About should
-prepare Thesis in the background, and refresh/revisit should skip the logo.
+Current contract, v0.3.3.0 with the video reliability fixes (2026-11-09). The owner
+approved a shared first-entry experience, then clarified that Writing should open
+immediately, About should prepare Thesis in the background, and refresh/revisit
+should skip the logo.
 
 | Entry | Logo | Blocking work |
 |---|---|---|
@@ -44,30 +45,49 @@ separate and has the existing 2.5-second safety timer. Recognized section entrie
 do not acquire that offscreen text lock. `ThesisSectionMobile` capture, cached
 position math, and directional cooldowns remain unchanged.
 
-## Shared assets and iOS reuse
+## Shared assets
 
-`siteAssets.ts` lists only active visuals (17 unique URLs, approximately 1.14 MB),
+`siteAssets.ts` lists only active visuals (17 unique URLs, approximately 0.77 MB),
 shared by real renderers and the warmup queue. It excludes retired media, all-font
 bulk downloads, article archives, and built chunk filenames. Next router prefetch
 prepares route code/payloads through the framework's own API.
 
 After current-screen readiness or its deadline, two low-priority workers download
-remaining visuals. About is not blocked by Thesis's downloads. Bytes are kept as
-Blob URLs for this document and used by AsciiCanvas and videoPool. A native iOS 27
-probe showed a full fetch followed by another full media Range transfer; handing the
-same bytes to the media consumer avoided that second transfer. This is byte
-reuse, not a promise that GPU initialization or video decoding is already done.
+remaining visuals. About is not blocked by Thesis's downloads. Image bytes are kept
+as Blob URLs for this document and used by the texture loaders. This is byte reuse,
+not a promise that GPU initialization is already done.
+
+Video is different. It never takes a Blob source: v0.3.3.0 did, and iPhones then fell
+back to "dots everywhere" on client navigation into Thesis (see WebKit 270772 and
+232076 for the platform behavior). A native iOS 27 probe showed the media stack
+downloads a fetched file again as Range requests, so phones skip warming video and
+desktop keeps it for the HTTP cache.
 
 Foreground navigation cancels unfinished background work. Completed bytes remain
 available across SPA routes. Returning to a visible tab resumes unfinished work
 only after its foreground gate has passed. Reduced motion and Save-Data suppress
 optional work. Errors/timeouts do not block entry or become permanent ready flags.
 
-Only the open Thesis route primes its remaining video decoders, after its entry
-scene is ready or its deadline expires. A canvas reuses a pending pool promise
-rather than creating a second decoder. Leaving the route cancels pending promises,
-removes sources, and tears down the pool. A priming play completion cannot pause an
-acquired video.
+## Video loading and failure
+
+Warmup never starts a decoder. Priming every Thesis video at once ran eight players
+together just as the Hero appeared, on a phone whose decoders are shared with
+anything else running, such as a video call.
+
+- A mounted canvas loads its own video through `videoPool`, one queue turn at a time.
+  A source that takes over 1.5 seconds gives up its turn and rejoins when it arrives,
+  so it cannot hold the canvases behind it.
+- `play()` is requested right after `load()`, and any of `canplay`, `loadeddata`, or a
+  video frame callback counts as a first frame. iOS can hold `canplay` until playback
+  is requested; waiting for `canplay` before asking to play can wait forever.
+- A source that fails retries after one and three seconds, then falls back to the
+  still. Returning to a visible tab starts it over.
+- There is no stand-in material. A solid color, or a texture that has no frame yet,
+  would be tiled as one glyph across the canvas, which is the symptom this replaced.
+  The mosaic draws nothing until a frame has been uploaded.
+- A hidden Thesis slide stays mounted but paused. The last canvas to release a video
+  destroys it, because a paused video still holds its decoder. Leaving any route
+  cancels pending loads and tears down the pool.
 
 ## Regression checks
 
@@ -75,10 +95,12 @@ Run `pnpm test`, `pnpm lint`, and `pnpm build`. Check first entry/reload/client
 navigation for About, Thesis, Writing, article, and author; delayed fonts/media;
 missing or blocked chunks; reduced motion; Save-Data; hidden/visible transitions;
 leaving mid-load; and direct section hashes. Confirm Writing has no visible logo
-at first paint and completed visits do not replay it.
+at first paint and completed visits do not replay it. Fail or stall every `.mp4`
+and confirm the page shows no repeated-glyph tile, and that a source failing once
+recovers on its own.
 
-On native iOS, verify warmed media reuse and the complete Thesis slide/exit/re-entry
-flow. Desktop WebKit does not prove UIKit momentum behavior. Do not weaken the
+On native iOS, verify the complete Thesis slide/exit/re-entry flow, and check a
+physical iPhone: simulators do not reproduce device media failures. Desktop WebKit does not prove UIKit momentum behavior. Do not weaken the
 production CSP for local HTTP testing; use a loopback-only test transport or HTTPS.
 
 Partnerships and their links are hidden pending confirmation. Their former names
