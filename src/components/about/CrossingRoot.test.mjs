@@ -123,7 +123,7 @@ test('crossing: reduced motion completes both meters and preference changes rest
   try {
     const states = [
       [true, '100%', '100.000', 'true'],
-      [false, '58%', '58.000', 'false'],
+      [false, '58%', '58.042', 'false'],
       [true, '100%', '100.000', 'true'],
     ];
     for (const [index, [reducedMotion, expectedCount, expectedFill, complete]] of states.entries()) {
@@ -177,6 +177,19 @@ test('crossing: the fill reaches 100% exactly as the last section arrives, in eq
       crossing.paint();
       assert.equal(crossing.counts[0].textContent, count, `at ${scrollY}px`);
     }
+    assert.equal(crossing.root.dataset.complete, 'true');
+  } finally { crossing.cleanup(); }
+});
+
+test('crossing: settling a hair short of the last section at a fractional display scale still completes', () => {
+  const crossing = crossingHarness();
+  try {
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 1000.40015 - crossing.window.scrollY });
+    crossing.window.emit('resize');
+    crossing.window.scrollY = 1000.3999;
+    crossing.window.emit('scroll');
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '100%');
     assert.equal(crossing.root.dataset.complete, 'true');
   } finally { crossing.cleanup(); }
 });

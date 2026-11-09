@@ -406,8 +406,11 @@
 }
 
 /* The page settles on a section. Only where every section fits a screen: a
-   mandatory stop inside something taller would hide the rest of it. */
-@media (min-height: 640px) and (prefers-reduced-motion: no-preference) {
+   mandatory stop inside something taller would hide the rest of it. Backers
+   stay one column until 1024px, which takes 760px at tablet widths. */
+@media (min-height: 760px) and (prefers-reduced-motion: no-preference),
+  (min-height: 640px) and (max-width: 767px) and (prefers-reduced-motion: no-preference),
+  (min-height: 640px) and (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
   html:has(.crossing) {
     scroll-snap-type: y mandatory;
   }
@@ -793,6 +796,7 @@
     --crossing-meter-h: 0px;
     --crossing-rule-gap: 20px;
     --crossing-head-gap: 20px;
+    --crossing-aside-gap: 20px;
     --crossing-mark-m: clamp(184px, 48vw, 208px);
   }
 
@@ -819,7 +823,7 @@
   /* The first screen is the mark and the statement together, so the page's
      first stop is the mark and the statement fills what the mark leaves. */
   .crossing-aside {
-    padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + 20px);
+    padding-top: calc(var(--crossing-header) + var(--crossing-meter-h) + var(--crossing-aside-gap));
     scroll-snap-align: start;
   }
 
@@ -838,9 +842,15 @@
 
   .crossing-band--statement {
     justify-content: flex-start;
-    min-height: calc(100lvh - var(--crossing-header) - var(--crossing-meter-h) - 20px - var(--crossing-mark-m));
+    min-height: calc(100lvh - var(--crossing-header) - var(--crossing-meter-h) - var(--crossing-aside-gap) - var(--crossing-mark-m));
     padding-block: 16px calc(var(--crossing-toolbar) + 24px);
     scroll-snap-align: none;
+  }
+
+  /* On a short phone the mark and statement run past the screen. This second
+     stop brings the rest into view; on a taller one it is the top of the page. */
+  .crossing-band--statement .crossing-band__body {
+    scroll-snap-align: end;
   }
 
   .crossing-display {

@@ -76,6 +76,10 @@ test('About: one screen per section, with the contact last, every onward link la
   assert.equal(css.match(/scroll-snap-type/g).length, 1);
   assert.match(
     css,
-    /@media \(min-height: 640px\) and \(prefers-reduced-motion: no-preference\) \{\s*html:has\(\.crossing\) \{\s*scroll-snap-type: y mandatory;/,
+    /@media \(min-height: 760px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(max-width: 767px\) and \(prefers-reduced-motion: no-preference\),\s*\(min-height: 640px\) and \(min-width: 1024px\) and \(prefers-reduced-motion: no-preference\) \{\s*html:has\(\.crossing\) \{\s*scroll-snap-type: y mandatory;/,
   );
+
+  // The phone's first screen is two boxes, the mark and the statement. Without a
+  // stop at the statement's end, a short phone could never rest on what is below the fold.
+  assert.match(css, /\.crossing-band--statement \.crossing-band__body \{\s*scroll-snap-align: end;/);
 });

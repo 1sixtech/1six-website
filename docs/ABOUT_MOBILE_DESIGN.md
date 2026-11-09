@@ -51,8 +51,10 @@ moves exactly one section. The mark and statement share the first screen on a ph
   Safari also draws the page behind its floating toolbar below the large viewport, so
   About's footer carries extra top padding to keep the logo out of that strip.
 - Bands use `min-height`, so larger text or longer copy grows instead of clipping.
-  Snapping needs a viewport 640px or taller, the point where every section fits; a
-  mandatory stop inside something taller would hide the rest of it.
+  Snapping needs a viewport 640px or taller, or 760px at tablet widths where Backers
+  is one column, the point where every section fits; a mandatory stop inside something
+  taller would hide the rest of it. On a short phone the statement adds a second stop
+  so the end of the first screen can be reached.
 - Reduced motion scrolls freely.
 - The fill completes as the last section arrives: 16, 37, 58, 79, 100 at the five stops.
 - WebKit has open reports of mandatory snapping losing momentum, and fast flicks are
@@ -64,7 +66,8 @@ moves exactly one section. The mark and statement share the first screen on a ph
 Phone refinements are scoped below 768px in about.css. Footer rules additionally
 require body:has(.crossing), so Writing and Thesis retain their existing footer.
 The progress layer is noninteractive and sits in the header row without covering
-its controls. Its measured geometry drives section labels and anchor offsets.
+its controls. Its measured geometry drives section labels; band padding keeps an
+in-page jump clear of the header.
 No new product image, logo, business claim, or decorative animation was invented.
 Partnerships remain hidden pending explicit confirmation.
 

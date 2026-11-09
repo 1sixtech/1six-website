@@ -57,8 +57,10 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
       const scroll = window.scrollY;
       start = root.getBoundingClientRect().top + scroll;
       // Sections are a screen tall, so each one arrives a fixed step further
-      // along, and the crossing completes as the last section lands.
-      finish = (bands[bands.length - 1] ?? root).getBoundingClientRect().top + scroll;
+      // along, and the crossing completes as the last section lands. At a
+      // fractional display scale the page settles a hair short of that position,
+      // so the last pixel counts as arrived.
+      finish = (bands[bands.length - 1] ?? root).getBoundingClientRect().top + scroll - 1;
       const meterRect = meter?.getBoundingClientRect();
       strip = meterRect && meterRect.height > 0 ? meterRect.bottom : 0;
       schedule();
