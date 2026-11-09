@@ -30,7 +30,7 @@ function eventSource() {
   };
 }
 
-function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
+function crossingHarness({ reducedMotion = false, withMeter = false, noBands = false } = {}) {
   let effect;
   const observers = [];
   let frameId = 0;
@@ -48,25 +48,23 @@ function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
     innerHeight: 800,
     matchMedia: () => motion,
   };
-  // Contact's document position makes the scrolling span exactly 1000px:
-  // 1736 - 800 (viewport) + 64 (contact inset).
-  const end = { getBoundingClientRect: () => ({ bottom: 1736 - window.scrollY }) };
   const meter = { dataset: {}, getBoundingClientRect: () => ({ height: 54, bottom: 54 }) };
   const label = { textContent: 'about' };
+  // The last section sits 1000px down, the whole span of the crossing.
   const bands = [
     { dataset: { crossingLabel: 'about' }, getBoundingClientRect: () => ({ top: -window.scrollY }) },
     { dataset: { crossingLabel: 'products' }, getBoundingClientRect: () => ({ top: 600 - window.scrollY }) },
+    { dataset: { crossingLabel: 'contact' }, getBoundingClientRect: () => ({ top: 1000 - window.scrollY }) },
   ];
   const root = {
     dataset: {},
     getBoundingClientRect: () => ({ top: -window.scrollY }),
-    querySelector: (selector) => selector === '[data-crossing-end]' ? end
-      : withMeter && selector === '.crossing-meter' ? meter
+    querySelector: (selector) => withMeter && selector === '.crossing-meter' ? meter
       : withMeter && selector === '[data-crossing-label-target]' ? label : null,
     querySelectorAll: (selector) => ({
       '[data-crossing-count]': counts,
       '.crossing-mark, .crossing-meter__fill': fillTargets,
-      '[data-crossing-band]': withMeter ? bands : [],
+      '[data-crossing-band]': noBands ? [] : bands,
     })[selector] ?? [],
   };
   const dependencies = {
@@ -110,7 +108,7 @@ function crossingHarness({ reducedMotion = false, withMeter = false } = {}) {
   const cleanup = effect();
 
   return {
-    root, label, counts, fills, motion, window, frames, cancelled, observer: observers[0], cleanup,
+    root, label, counts, fills, motion, window, frames, cancelled, bands, observer: observers[0], cleanup,
     paint() {
       for (const [id, callback] of [...frames]) {
         frames.delete(id);
@@ -125,7 +123,7 @@ test('crossing: reduced motion completes both meters and preference changes rest
   try {
     const states = [
       [true, '100%', '100.000', 'true'],
-      [false, '58%', '58.000', 'false'],
+      [false, '58%', '58.042', 'false'],
       [true, '100%', '100.000', 'true'],
     ];
     for (const [index, [reducedMotion, expectedCount, expectedFill, complete]] of states.entries()) {
@@ -169,6 +167,56 @@ test('crossing: cleanup cancels pending paint and removes scroll, resize and pre
   assert.deepEqual(crossing.counts.map((element) => element.textContent), ['58%', '58%']);
 });
 
+
+test('crossing: the fill reaches 100% exactly as the last section arrives, in equal steps', () => {
+  const crossing = crossingHarness();
+  try {
+    for (const [scrollY, count] of [[0, '16%'], [250, '37%'], [500, '58%'], [750, '79%'], [1000, '100%'], [1300, '100%']]) {
+      crossing.window.scrollY = scrollY;
+      crossing.window.emit('scroll');
+      crossing.paint();
+      assert.equal(crossing.counts[0].textContent, count, `at ${scrollY}px`);
+    }
+    assert.equal(crossing.root.dataset.complete, 'true');
+  } finally { crossing.cleanup(); }
+});
+
+test('crossing: settling a hair short of the last section at a fractional display scale still completes', () => {
+  const crossing = crossingHarness();
+  try {
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 1000.40015 - crossing.window.scrollY });
+    crossing.window.emit('resize');
+    crossing.window.scrollY = 1000.3999;
+    crossing.window.emit('scroll');
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '100%');
+    assert.equal(crossing.root.dataset.complete, 'true');
+  } finally { crossing.cleanup(); }
+});
+
+test('crossing: a resize or reflow re-measures where the last section lands; with no sections the mark reads complete', () => {
+  const crossing = crossingHarness();
+  try {
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '58%');
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 2000 - crossing.window.scrollY });
+    crossing.window.emit('resize');
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '37%', 'a taller page spreads the same fill further');
+    crossing.bands.at(-1).getBoundingClientRect = () => ({ top: 1000 - crossing.window.scrollY });
+    crossing.observer.callback();
+    crossing.paint();
+    assert.equal(crossing.counts[0].textContent, '58%', 'content reflow counts too');
+    assert.equal(crossing.root.dataset.complete, 'false');
+  } finally { crossing.cleanup(); }
+
+  const empty = crossingHarness({ noBands: true });
+  try {
+    empty.paint();
+    assert.equal(empty.counts[0].textContent, '100%');
+    assert.equal(empty.root.dataset.complete, 'true');
+  } finally { empty.cleanup(); }
+});
 
 test('crossing: the compact mobile meter keeps a section cue at the reading edge', () => {
   const crossing = crossingHarness({ withMeter: true });

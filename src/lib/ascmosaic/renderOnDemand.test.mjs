@@ -62,8 +62,8 @@ function imageModel(image = { width: 16, height: 16 }) {
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map }));
 }
 
-function videoModel() {
-  const map = new THREE.VideoTexture({ paused: false, readyState: 4 });
+function videoModel(video = { paused: false, readyState: 4, HAVE_CURRENT_DATA: 2 }) {
+  const map = new THREE.VideoTexture(video);
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map }));
 }
 
@@ -201,6 +201,94 @@ test('render on demand: waits for the image to arrive; video and a moving scene 
   }
 });
 
+test('video frames: nothing draws until a frame is uploaded, so an empty texture never tiles one glyph', { skip }, () => {
+  // A playing video reports frames through requestVideoFrameCallback.
+  let presentFrame;
+  const video = {
+    paused: false,
+    readyState: 2,
+    requestVideoFrameCallback(callback) {
+      presentFrame = callback;
+      return 1;
+    },
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(5);
+  assert.equal(drawn(), 0, 'a video that has not presented a frame draws nothing');
+  presentFrame();
+  runFrames(1);
+  assert.equal(drawn(), 1, 'the first presented frame draws');
+  mosaic.stopAnimate();
+});
+
+test('video frames: a paused video with decoded data still draws its frame (Low Power Mode)', { skip }, () => {
+  const video = {
+    paused: true,
+    readyState: 2,
+    requestVideoFrameCallback: () => 1,
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  assert.equal(drawn(), 1);
+  mosaic.stopAnimate();
+});
+
+test('video frames: a playing video that reports data but no frame never uploads, however long it waits', { skip }, () => {
+  const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const model = videoModel(video);
+  const { mosaic, drawn } = mosaicHarness({ model });
+  mosaic.animate();
+  runFrames(600);
+  assert.equal(drawn(), 0, 'an upload here would read an empty texture and tile one glyph');
+  assert.equal(model.material.map.version, 0);
+  mosaic.stopAnimate();
+});
+
+test('context loss: a restored canvas resumes only if the page still wants it running', { skip }, () => {
+  const { mosaic } = mosaicHarness();
+  mosaic.animate();
+  mosaic.stopAnimate(); // a hidden slide
+  mosaic.haltLoop(); // its context is lost
+  mosaic.restoreContext();
+  assert.equal(mosaic.isAnimating, false, 'a hidden slide stays still');
+
+  mosaic.animate();
+  mosaic.haltLoop();
+  assert.equal(mosaic.isAnimating, false, 'a lost context stops the loop');
+  mosaic.restoreContext();
+  assert.equal(mosaic.isAnimating, true, 'a running canvas resumes');
+  mosaic.stopAnimate();
+});
+
+test('video frames: a paused video with no data draws nothing', { skip }, () => {
+  const video = {
+    paused: true,
+    readyState: 1,
+    requestVideoFrameCallback: () => 1,
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(3);
+  assert.equal(drawn(), 0);
+  mosaic.stopAnimate();
+});
+
+test('video frames: without frame callbacks, a playing video draws as soon as it has data, not before', { skip }, () => {
+  const video = { paused: false, readyState: 1, HAVE_CURRENT_DATA: 2 };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(3);
+  assert.equal(drawn(), 0, 'no frame to read yet');
+  video.readyState = 2;
+  runFrames(1);
+  assert.equal(drawn(), 1, 'the render loop itself marks the first frame');
+  mosaic.stopAnimate();
+});
+
 test('render on demand: size, camera and filter changes each owe exactly one frame', { skip }, () => {
   const { mosaic, drawn } = mosaicHarness();
   mosaic.setRenderOnDemand(true);
@@ -264,9 +352,13 @@ test('dispose: a repeat call frees nothing twice, and a context already taken ba
 /** A <video> that reports canplay only when the test says so. */
 function fakeVideo() {
   return Object.assign(new EventTarget(), {
+    remove() {},
     src: '',
     paused: true,
     setAttribute() {},
+    removeAttribute(name) {
+      if (name === 'src') this.src = '';
+    },
     play() {
       this.paused = false;
       return Promise.resolve();
@@ -281,6 +373,7 @@ function fakeVideo() {
 test('dispose: a model still loading at dispose is freed when it arrives, never attached', { skip }, async () => {
   const videos = [];
   globalThis.document = {
+    body: { appendChild() {} },
     createElement: () => {
       const video = fakeVideo();
       videos.push(video);
@@ -306,6 +399,96 @@ test('dispose: a model still loading at dispose is freed when it arrives, never 
 });
 
 
+test('source failure: a video that cannot load rejects the model; nothing stands in for the mosaic to tile', { skip }, async () => {
+  const videos = [];
+  globalThis.document = {
+    body: { appendChild() {} },
+    createElement: () => {
+      const video = fakeVideo();
+      videos.push(video);
+      return video;
+    },
+  };
+  try {
+    const { mosaic } = mosaicHarness({ model: null });
+    const loading = mosaic.addModel({ shape: 'plane', textureUrl: '/fails.mp4', textureType: 'video' });
+    const [video] = videos;
+    video.error = { code: 4 };
+    video.dispatchEvent(new Event('error'));
+
+    await assert.rejects(loading, /load error for \/fails\.mp4 \(code 4\)/);
+    assert.equal(mosaic.model, null, 'the mosaic keeps no model');
+    assert.equal(mosaic.scene.children.length, 0, 'no solid-colour mesh for the filter to read');
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('source failure: a missing image keeps its empty map, so readiness times out instead of a stand-in being drawn', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const images = [];
+  globalThis.document = {
+    createElementNS: () => {
+      const image = new EventTarget();
+      images.push(image);
+      return image;
+    },
+  };
+  try {
+    const missing = mosaicHarness({ model: null });
+    const model = await missing.mosaic.addModel({ shape: 'plane', textureUrl: '/missing.png', textureType: 'image' });
+    images[0].dispatchEvent(new Event('error'));
+    assert.equal(model.material.map.image, null, 'no pixels to report');
+    assert.equal(model.material.color.getHex(), 0xffffff, 'and no failure colour to tile');
+    const timedOut = assert.rejects(missing.mosaic.waitForSceneTextures(), /timed out/);
+    t.mock.timers.tick(5001);
+    await timedOut;
+
+    const arriving = mosaicHarness({ model: null });
+    const loaded = await arriving.mosaic.addModel({ shape: 'plane', textureUrl: '/found.png', textureType: 'image' });
+    Object.assign(images[1], { width: 16, height: 16 }).dispatchEvent(new Event('load'));
+    assert.equal(loaded.material.map.image, images[1]);
+    await arriving.mosaic.waitForSceneTextures();
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('source reuse: a loaded video is wrapped as is, with no second decoder, and lives until its last model goes', { skip }, async () => {
+  const videos = [];
+  globalThis.document = {
+    body: { appendChild() {} },
+    createElement: () => {
+      const video = fakeVideo();
+      videos.push(video);
+      return video;
+    },
+  };
+  try {
+    const { load, isPooled } = await import('../videoPool.ts');
+    const ready = load('/loaded.mp4');
+    videos[0].dispatchEvent(new Event('canplay'));
+    const loaded = await ready;
+    assert.equal(isPooled(loaded), true);
+
+    const canvases = [mosaicHarness({ model: null }), mosaicHarness({ model: null })];
+    const [model] = await Promise.all(canvases.map(({ mosaic }) =>
+      mosaic.addModel({ shape: 'plane', textureUrl: '/loaded.mp4', textureType: 'video', existingVideo: loaded })));
+    assert.equal(videos.length, 1, 'no second decoder');
+    assert.equal(model.material.map.image, loaded);
+    assert.equal(loaded.paused, false, 'taking it over resumes playback');
+
+    canvases[0].mosaic.dispose();
+    assert.equal(loaded.src, '/loaded.mp4#t=0.001', 'the other canvas still shows it');
+    assert.equal(loaded.paused, false);
+    canvases[1].mosaic.dispose();
+    assert.equal(loaded.src, '', 'the last model frees the decoder');
+    assert.equal(loaded.paused, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test('source readiness: an image handle waits for decoded image data', { skip }, async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { mosaic } = mosaicHarness({ model: imageModel(null) });
@@ -330,4 +513,69 @@ test('source readiness: a missing image has a bounded deadline', { skip }, async
   const { mosaic } = mosaicHarness({ model: imageModel(null) });
   const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
   t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});
+
+test('source readiness: a playing video waits for its first presented frame, not for readyState', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let present;
+  const video = {
+    paused: false,
+    readyState: 4,
+    requestVideoFrameCallback(callback) { present = callback; return 1; },
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
+  let ready = false;
+  const pending = mosaic.waitForSceneTextures().then(() => { ready = true; });
+  t.mock.timers.tick(1000); await Promise.resolve(); assert.equal(ready, false, 'readyState 4 is not a frame');
+  present();
+  t.mock.timers.tick(16); await pending; assert.equal(ready, true);
+  mosaic.dispose();
+});
+
+test('source readiness: a video that never presents a frame fails at the deadline, so the canvas can retry', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
+  t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});
+
+test('source readiness: a paused video with data and a browser without frame callbacks are ready at once', { skip }, async () => {
+  const lowPower = { paused: true, readyState: 2, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const older = { paused: false, readyState: 2 };
+  for (const video of [lowPower, older]) {
+    const { mosaic } = mosaicHarness({ model: videoModel(video) });
+    await mosaic.waitForSceneTextures();
+    mosaic.dispose();
+  }
+});
+
+test('source readiness: a paused video with no data is not ready', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const video = { paused: true, readyState: 1, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
+  t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});
+
+test('source readiness: time in a hidden tab does not count against the deadline', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  globalThis.document = { hidden: true };
+  try {
+    const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+    const { mosaic } = mosaicHarness({ model: videoModel(video) });
+    let rejected = false;
+    const pending = mosaic.waitForSceneTextures().catch(() => { rejected = true; });
+    t.mock.timers.tick(30000);
+    await Promise.resolve();
+    assert.equal(rejected, false, 'a hidden tab presents no frames');
+    globalThis.document.hidden = false;
+    t.mock.timers.tick(5100);
+    await pending;
+    assert.equal(rejected, true, 'a visible page whose video never reports still gives up');
+    mosaic.dispose();
+  } finally {
+    delete globalThis.document;
+  }
 });

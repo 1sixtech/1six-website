@@ -6,15 +6,13 @@ import { createTexturedMesh, TexturedMeshOptions } from './texturedMesh';
 import { OrbitControls, OrbitControlsOptions } from './orbitControls';
 import * as THREE from 'three';
 // Cross-layer coupling: ascmosaic is a self-contained WebGL library, but
-// this project shares HTMLVideoElement instances via a global pool so
-// multiple sections can reuse pre-warmed videos. The dispose paths below
-// route pooled videos through videoPool.release() (refcounted pause)
-// instead of the normal kill path (pause + src reset + load), so shared
-// videos survive section unmounts AND stop decoding when no live consumer
-// remains. Non-pooled videos still get the full teardown. If ascmosaic is
-// ever extracted as a standalone library, convert to injected predicates
-// on AscMosaicOptions (`isShared: (v) => boolean`, `onRelease: (v) => void`)
-// instead of importing the pool directly.
+// this project shares HTMLVideoElement instances through a global pool, so
+// a video has one element and one decoder however many canvases use it. The
+// texture loader takes its video from the pool and acquires it, and the
+// dispose path below releases it: the last release destroys the element and
+// frees its decoder. If ascmosaic is ever extracted as a standalone library,
+// convert these to injected callbacks on AscMosaicOptions (`loadVideo`,
+// `acquireVideo`, `releaseVideo`) instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
 /** AscMosaic 생성 옵션 */
@@ -72,6 +70,8 @@ export class AscMosaic {
   private sceneTexturesSettled: boolean = false;
   /** Set by the first dispose(); a repeat call has nothing left to free. */
   private disposed: boolean = false;
+  /** Whether the page wants the loop running; losing the context does not change this. */
+  private wantsLoop: boolean = false;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -108,16 +108,8 @@ export class AscMosaic {
     // WebGL context loss recovery. Mobile browsers evict contexts on tab switch
     // or memory pressure. Three.js re-uploads textures/shaders internally on
     // restore, but we must pause/resume the animation loop.
-    this.contextLostHandler = (e: Event) => { e.preventDefault(); this.stopAnimate(); };
-    this.contextRestoredHandler = () => {
-      if (this.asciiMosaicFilter) {
-        const w = this.renderer.domElement.width;
-        const h = this.renderer.domElement.height;
-        this.asciiMosaicFilter.setSize(w, h);
-      }
-      this.renderPending = true;
-      this.animate();
-    };
+    this.contextLostHandler = (e: Event) => { e.preventDefault(); this.haltLoop(); };
+    this.contextRestoredHandler = () => this.restoreContext();
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLostHandler);
     this.renderer.domElement.addEventListener('webglcontextrestored', this.contextRestoredHandler);
 
@@ -227,34 +219,7 @@ export class AscMosaic {
 
     if (this.model) {
       this.scene.remove(this.model);
-      this.model.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry?.dispose();
-          if (obj.material instanceof THREE.Material) {
-            if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
-              const videoTexture = obj.material.map as THREE.VideoTexture;
-              const video = videoTexture.image as HTMLVideoElement;
-              if (video) {
-                if (videoPool.isPooled(video)) {
-                  // Pooled videos are shared — decrement refcount so
-                  // the pool can pause the element when no live
-                  // VideoTexture references it anymore.
-                  videoPool.release(video);
-                } else {
-                  // One-off: fully tear down.
-                  video.pause();
-                  video.src = '';
-                  video.load();
-                }
-              }
-              videoTexture.dispose();
-            } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
-              obj.material.map.dispose();
-            }
-            obj.material.dispose();
-          }
-        }
-      });
+      this.disposeModel(this.model);
       this.model = null;
     }
 
@@ -477,36 +442,48 @@ export class AscMosaic {
    * Bumping needsUpdate while paused-with-a-frame makes the renderer re-upload
    * the current frame, so a static-but-correct ASCII frame shows instead.
    * Playing videos keep video.paused === false, so this is a no-op for them.
+   *
+   * Returns whether the mosaic has a frame to read. Until a video's first frame
+   * is uploaded its texture is empty, and the filter would tile that single
+   * brightness as one glyph across the whole canvas.
    */
-  private refreshPausedVideoFrame(): void {
-    if (!this.model) return;
-    this.model.traverse((obj) => {
+  private refreshVideoFrame(): boolean {
+    let hasFrame = true;
+    this.model?.traverse((obj) => {
       if (
         obj instanceof THREE.Mesh &&
         obj.material instanceof THREE.MeshBasicMaterial &&
         obj.material.map instanceof THREE.VideoTexture
       ) {
-        const video = obj.material.map.image as HTMLVideoElement;
-        // HAVE_CURRENT_DATA (2) means a frame exists to upload.
+        const map = obj.material.map;
+        const video = map.image as HTMLVideoElement;
+        // A paused video reports no frames of its own, so the frame it decoded
+        // is uploaded here. A playing one reports them: never upload for it on
+        // readyState alone (see awaitsVideoFrame).
         if (video && video.paused && video.readyState >= 2) {
-          obj.material.map.needsUpdate = true;
+          map.needsUpdate = true;
         }
+        // Without requestVideoFrameCallback the renderer's own update() is
+        // what marks a frame, and the renderer is not reached until one exists.
+        map.update();
+        if (map.version === 0) hasFrame = false;
       }
     });
+    return hasFrame;
   }
 
   private render(): void {
+    if (!this.refreshVideoFrame()) return;
     if (this.asciiMosaicFilter && this.asciiMosaicFilter.getEnabled()) {
-      this.refreshPausedVideoFrame();
       this.asciiMosaicFilter.renderToTarget(this.scene, this.camera);
       this.asciiMosaicFilter.render();
     } else {
-      this.refreshPausedVideoFrame();
       this.renderer.render(this.scene, this.camera);
     }
   }
 
   animate(): void {
+    this.wantsLoop = true;
     if (this.isAnimating) return;
 
     this.isAnimating = true;
@@ -589,13 +566,44 @@ export class AscMosaic {
     return state;
   }
 
-  /** A texture handle is not image readiness. Disposal releases a waiting init. */
+  /**
+   * Whether a video still has nothing to draw. WebKit can report
+   * HAVE_ENOUGH_DATA before any frame exists, and uploading then reads back an
+   * empty texture, which tiles one glyph across the canvas and can block the
+   * main thread for a second. So a playing video waits for its own first frame
+   * report. A paused one never reports, so its decoded frame is taken on trust.
+   */
+  private awaitsVideoFrame(): boolean {
+    let waiting = false;
+    this.model?.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        obj.material instanceof THREE.MeshBasicMaterial &&
+        obj.material.map instanceof THREE.VideoTexture
+      ) {
+        const map = obj.material.map;
+        const video = map.image as HTMLVideoElement;
+        const reportsFrames = !video.paused && 'requestVideoFrameCallback' in video;
+        if (map.version === 0 && (reportsFrames || video.readyState < 2)) waiting = true;
+      }
+    });
+    return waiting;
+  }
+
+  /**
+   * A texture handle is not readiness: an image needs its pixels and a video its
+   * first frame. A source that never delivers rejects at the deadline, so the
+   * caller can retry or show the source still. Disposal releases a waiting init.
+   */
   waitForSceneTextures(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 5000;
+      const patience = 5000;
+      let deadline = Date.now() + patience;
       const check = () => {
+        // A hidden tab presents no frames, so its time does not count.
+        if (typeof document !== 'undefined' && document.hidden) deadline = Date.now() + patience;
         if (this.disposed) reject(new Error('Mosaic disposed before source was ready'));
-        else if (this.sceneTextureState() !== 'loading') resolve();
+        else if (this.sceneTextureState() !== 'loading' && !this.awaitsVideoFrame()) resolve();
         else if (Date.now() >= deadline) reject(new Error('Mosaic source readiness timed out'));
         else setTimeout(check, 16);
       };
@@ -604,11 +612,27 @@ export class AscMosaic {
   }
 
   stopAnimate(): void {
+    this.wantsLoop = false;
+    this.haltLoop();
+  }
+
+  private haltLoop(): void {
     this.isAnimating = false;
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+  }
+
+  private restoreContext(): void {
+    if (this.asciiMosaicFilter) {
+      const w = this.renderer.domElement.width;
+      const h = this.renderer.domElement.height;
+      this.asciiMosaicFilter.setSize(w, h);
+    }
+    this.renderPending = true;
+    // A canvas held still (off screen, or in a hidden slide) stays still.
+    if (this.wantsLoop) this.animate();
   }
 
   /**
@@ -915,9 +939,9 @@ export class AscMosaic {
   }
 
   /**
-   * Frees a model's geometry, material and texture, and stops its video if
-   * it is a one-off (a pooled one stays with the pool). dispose()'s model
-   * teardown, also used for a model that arrives after dispose().
+   * Frees a model's geometry, material and texture, and hands its video back
+   * to the pool. dispose()'s model teardown, also used for a model that
+   * arrives after dispose().
    */
   private disposeModel(model: THREE.Object3D): void {
     model.traverse((obj) => {
@@ -927,11 +951,7 @@ export class AscMosaic {
           if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map instanceof THREE.VideoTexture) {
             const videoTexture = obj.material.map as THREE.VideoTexture;
             const video = videoTexture.image as HTMLVideoElement;
-            if (video && !videoPool.isPooled(video)) {
-              video.pause();
-              video.src = '';
-              video.load();
-            }
+            if (video) videoPool.release(video);
             videoTexture.dispose();
           } else if (obj.material instanceof THREE.MeshBasicMaterial && obj.material.map) {
             obj.material.map.dispose();

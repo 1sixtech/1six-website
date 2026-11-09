@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Marked } from 'marked';
 import { getWriterByName, isWritingCategory, type WritingCategory } from './writingCatalog.ts';
+import { isDraftArticle } from './writingDraft.mjs';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content/writing');
 const SLUG = /^[0-9]{3}-[a-z0-9-]+$/;
@@ -66,19 +67,24 @@ function extractArticle(markdown: string): {
   const { data, body: rawBody } = splitFrontmatter(normalized);
   let body = rawBody.replace(/^\n+/, '');
 
-  const titleLine = body.match(/^#\s+(.+)\n+/);
+  // One character class per line: synced Markdown is untrusted, and a pattern that
+  // can split padding two ways backtracks for minutes on a long line.
+  const titleLine = body.match(/^#[ \t]([^\n]*)\n+/);
   if (titleLine) body = body.slice(titleLine[0].length);
 
-  const authorLine = body.match(/^Author:\s*(.+)\n/);
+  const authorLine = body.match(/^Author:([^\n]*)\n/);
   if (authorLine) body = body.slice(authorLine[0].length);
 
-  const dateLine = body.match(/^Date:\s*(\d{4}-\d{2}-\d{2})\s*\n+/);
+  // Frontmatter already dates the article, so only a plain date here is a byline:
+  // any other "Date:" opening is the article's own text. Without frontmatter the whole
+  // line counts, so a bad value fails the build by name instead of reading as no date.
+  const dateLine = body.match(data.date ? /^Date:\s*(\d{4}-\d{2}-\d{2})\s*\n+/ : /^Date:([^\n]*)\n+/);
   if (dateLine) body = body.slice(dateLine[0].length);
 
   body = body.replace(/^\n+/, '');
   const title = data.title || titleLine?.[1]?.trim() || 'Untitled';
   const author = data.author || authorLine?.[1]?.trim() || '1SIX';
-  const date = data.date || dateLine?.[1] || '';
+  const date = data.date || dateLine?.[1]?.trim() || '';
   // Research is the default publication type. Explicit categories are
   // validated so a typo cannot silently place an op-ed in the wrong section.
   const category = data.category?.toLowerCase() || 'research';
@@ -116,6 +122,13 @@ function summaryFrom(body: string): string {
     .replace(/[*_`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** A real calendar day. Date.parse alone rolls 2026-02-31 over into March. */
+function isWritingDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const time = Date.parse(date);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === date;
 }
 
 export function formatWritingDate(iso: string): string {
@@ -344,9 +357,15 @@ function renderBody(slug: string, body: string): { html: string; headings: Writi
   return { html, headings };
 }
 
-function loadArticle(slug: string): WritingArticle {
+function loadArticle(slug: string): WritingArticle | null {
   const markdown = readFileSync(path.join(CONTENT_DIR, slug, 'README.md'), 'utf8');
+  // The sync already skips drafts; a checkout synced before it did can still hold one.
+  if (isDraftArticle(markdown)) return null;
   const extracted = extractArticle(markdown);
+  if (!isWritingDate(extracted.date)) {
+    const found = extracted.date ? `"${extracted.date}"` : 'none';
+    throw new Error(`writing: ${slug} needs a date like 2026-11-08, found ${found}; refusing to publish it.`);
+  }
   const rendered = renderBody(slug, extracted.body);
   return {
     slug,
@@ -371,10 +390,11 @@ export function getArticles(): WritingArticle[] {
     .filter((entry) => entry.isDirectory() && SLUG.test(entry.name))
     .map((entry) => entry.name)
     .filter((slug) => existsSync(path.join(CONTENT_DIR, slug, 'README.md')));
-  if (slugs.length === 0) {
-    throw new Error('content/writing has no articles.');
+  const articles = slugs.map(loadArticle).filter((article) => article !== null);
+  if (articles.length === 0) {
+    throw new Error('content/writing has no published articles.');
   }
-  return slugs.map(loadArticle).sort((a, b) => b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
+  return articles.sort((a, b) => b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
 }
 
 export function getArticle(slug: string): WritingArticle | null {

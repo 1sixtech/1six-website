@@ -11,7 +11,6 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
     const root = rootRef.current;
     if (!root) return;
 
-    const end = root.querySelector<HTMLElement>('[data-crossing-end]');
     const counts = root.querySelectorAll<HTMLElement>('[data-crossing-count]');
     const fillTargets = root.querySelectorAll<HTMLElement>('.crossing-mark, .crossing-meter__fill');
     const meter = root.querySelector<HTMLElement>('.crossing-meter');
@@ -57,7 +56,11 @@ export function CrossingRoot({ children }: { children: ReactNode }) {
     const measure = () => {
       const scroll = window.scrollY;
       start = root.getBoundingClientRect().top + scroll;
-      finish = (end ?? root).getBoundingClientRect().bottom + scroll - window.innerHeight + 64;
+      // Sections are a screen tall, so each one arrives a fixed step further
+      // along, and the crossing completes as the last section lands. At a
+      // fractional display scale the page settles a hair short of that position,
+      // so the last pixel counts as arrived.
+      finish = (bands[bands.length - 1] ?? root).getBoundingClientRect().top + scroll - 1;
       const meterRect = meter?.getBoundingClientRect();
       strip = meterRect && meterRect.height > 0 ? meterRect.bottom : 0;
       schedule();

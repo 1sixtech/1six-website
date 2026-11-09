@@ -1,62 +1,69 @@
-import { warmedAssetSource } from './assetWarmup';
-
 /**
- * videoPool — Global HTMLVideoElement cache with reference counting.
- *
- * Pre-loads video elements during the intro phase so that AsciiCanvas
- * instances can reuse them instead of waiting on network + canplay.
+ * videoPool — one HTMLVideoElement per URL, refcounted by the canvases using it.
  *
  * Lifecycle contract:
- *   1. `warmup(url)` creates a <video>, primes the decoder via a short
- *      play() burst, then pauses it. The video lives in the pool Map but
- *      is NOT playing until acquired.
- *   2. When an AsciiCanvas receives the video (via createVideoTexture's
- *      fast path) it calls `acquire(video)` which bumps the refcount
- *      and resumes playback.
- *   3. When the canvas's mosaic is disposed (AscMosaic.addModel
- *      replace or AscMosaic.dispose), the library calls `release(video)`
- *      which decrements the refcount and pauses the video if the count
- *      reaches zero. The video element is kept for potential reuse.
- *   4. When the user navigates away from Thesis, PageEntry's
- *      route-leave effect calls `teardownVideoPool()` which pauses all
- *      pooled videos, clears their src, and empties the Map.
+ *   1. `load(url)` creates a <video> and resolves once it has a decoded
+ *      frame. Only a mounted canvas asks for one, so the page decodes what is
+ *      mounted and nothing else: iOS has a limited number of hardware
+ *      decoders, shared with whatever else the phone is doing.
+ *   2. An AsciiCanvas receives the video (createVideoTexture) and calls
+ *      `acquire(video)`, which bumps the refcount and resumes playback.
+ *   3. When its mosaic is disposed, AscMosaic calls `release(video)`. The last
+ *      release destroys the element, because a merely paused video still holds
+ *      its decoder. A canvas that leaves before acquiring calls `abandon(url)`.
+ *   4. On a route change PageEntry calls `teardownVideoPool()`, which cancels
+ *      loads nobody will consume and destroys the rest.
  *
- * The iOS Safari `#t=0.001` URL fragment is appended to force first-frame
- * decode even when the video is off-screen. The short play() burst during
- * warmup completes the canplay → VideoTexture pipeline; pausing
- * immediately afterward frees the decoder thread for other warmups until
- * a canvas actually acquires the video.
+ * The #t=0.001 fragment makes iOS Safari decode the first frame of a video that
+ * cannot play (Low Power Mode): a static frame still draws a correct mosaic.
  *
- * AscMosaic's teardown paths must route through `release()` for pooled
- * videos (never `video.src = ''; video.load()`) — `isPooled(video)` tells
- * them which path to take.
+ * Every video stays in the document while it is pooled. Asked to play before it
+ * has loaded, as step 1 does, a video outside the document stops presenting
+ * frames about a second in on iOS WebKit while currentTime keeps running, so the
+ * mosaic froze until the loop's seek restarted it. Playing earlier is not optional:
+ * iOS may not buffer a video that has not been asked to play.
  */
 
 const pool = new Map<string, HTMLVideoElement>();
-const warmupPromises = new Map<string, Promise<HTMLVideoElement>>();
+const loads = new Map<string, Promise<HTMLVideoElement>>();
 const pooledVideos = new WeakSet<HTMLVideoElement>();
 const refCount = new WeakMap<HTMLVideoElement, number>();
 
 const pendingCancels = new Map<string, () => void>();
-const WARMUP_TIMEOUT_MS = 8000;
+const LOAD_TIMEOUT_MS = 8000;
+const IN_DOCUMENT_STYLE = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none';
+
+function keepInDocument(video: HTMLVideoElement): void {
+  video.setAttribute('style', IN_DOCUMENT_STYLE);
+  video.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(video);
+}
+
+function destroy(video: HTMLVideoElement): void {
+  try {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  } catch {
+    // Best-effort cleanup.
+  }
+  video.remove();
+}
 
 /**
- * Warm up a single video URL. Returns a cached promise on repeat calls.
- * Resolves with a decoded first frame at `canplay`, even when autoplay is
- * blocked. Rejects on error, timeout, or route teardown.
- *
- * On rejection, the cached warmupPromise entry is cleared so a later
- * retry gets a fresh attempt instead of being permanently poisoned by a
- * transient failure (Codex review P2).
+ * Load a single video URL. Returns the cached promise on repeat calls. Resolves
+ * with a decoded frame, even when autoplay is blocked. Rejects on error,
+ * timeout, or route teardown, and clears the cached entry so a later retry gets
+ * a fresh attempt.
  */
-export function warmup(url: string): Promise<HTMLVideoElement> {
-  const existing = warmupPromises.get(url);
+export function load(url: string): Promise<HTMLVideoElement> {
+  const existing = loads.get(url);
   if (existing) return existing;
 
   const promise = new Promise<HTMLVideoElement>((resolve, reject) => {
     const video = document.createElement('video');
-    // #t=0.001 forces iOS Safari to decode the first frame even when hidden
-    video.src = warmedAssetSource(url) + '#t=0.001';
+    keepInDocument(video);
+    video.src = url + '#t=0.001';
     video.muted = true;
     video.playsInline = true;
     video.setAttribute('playsinline', '');
@@ -68,42 +75,27 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
-      warmupPromises.delete(url);
-      video.removeAttribute('src');
-      video.load();
-      reject(new Error(`videoPool: warmup timeout for ${url}`));
-    }, WARMUP_TIMEOUT_MS);
+      loads.delete(url);
+      destroy(video);
+      reject(new Error(`videoPool: load timeout for ${url}`));
+    }, LOAD_TIMEOUT_MS);
 
     const clearPending = () => {
       clearTimeout(timeout);
       pendingCancels.delete(url);
-      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('canplay', onFrame);
+      video.removeEventListener('loadeddata', onFrame);
       video.removeEventListener('error', onError);
     };
-    const onCanPlay = () => {
+    // Any of these means a frame exists. Which one fires first varies: iOS can
+    // hold `canplay` until playback starts, and frame callbacks can precede it.
+    const onFrame = () => {
       if (settled) return;
       settled = true;
       clearPending();
-      // `canplay` means a frame is decoded, so the element is usable NOW.
-      // Pool it regardless of whether play() will be allowed: under iOS Low
-      // Power Mode / autoplay policy, play() is rejected, but the pooled video
-      // still holds a decoded first frame (forced via the #t=0.001 fragment).
-      // Consumers then render that static frame instead of garbage. Gating
-      // pooling on play() success was making warmup REJECT under Low Power
-      // Mode, which cascaded to a solid-color fallback material and the
-      // garbled mosaic. Prime + pause is best-effort.
       pool.set(url, video);
       pooledVideos.add(video);
       refCount.set(video, 0);
-      video.play().then(() => {
-        try { if ((refCount.get(video) ?? 0) === 0) video.pause(); } catch {
-          // Some mobile browsers reject pause() right after play(); ignore —
-          // acquire() calls play() unconditionally when a canvas takes over.
-        }
-      }).catch(() => {
-        // play() blocked (Low Power Mode / autoplay policy). Non-fatal: the
-        // pooled video keeps its decoded first frame for static rendering.
-      });
       resolve(video);
     };
 
@@ -111,8 +103,9 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
-      warmupPromises.delete(url);
+      loads.delete(url);
       const mediaErr = video.error;
+      destroy(video);
       reject(new Error(`videoPool: load error for ${url}${mediaErr ? ` (code ${mediaErr.code})` : ''}`));
     };
 
@@ -120,101 +113,87 @@ export function warmup(url: string): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       clearPending();
-      video.removeAttribute('src');
-      video.load();
-      reject(new Error(`videoPool: cancelled warmup for ${url}`));
+      loads.delete(url);
+      destroy(video);
+      reject(new Error(`videoPool: cancelled load for ${url}`));
     });
-    video.addEventListener('canplay', onCanPlay, { once: true });
+    video.addEventListener('canplay', onFrame, { once: true });
+    video.addEventListener('loadeddata', onFrame, { once: true });
     video.addEventListener('error', onError, { once: true });
+    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(onFrame);
     video.load();
+    // Ask to play before waiting for a frame: iOS may not buffer a video that
+    // has not been asked to play, and waiting for `canplay` first can wait
+    // forever. A blocked request (Low Power Mode) falls back to the #t frame.
+    video.play().then(() => {
+      try { if ((refCount.get(video) ?? 0) === 0) video.pause(); } catch {
+        // Some mobile browsers reject pause() right after play(); acquire()
+        // calls play() unconditionally when a canvas takes over.
+      }
+    }).catch(() => {});
   });
 
-  warmupPromises.set(url, promise);
+  loads.set(url, promise);
   return promise;
 }
 
-/**
- * Warm up many URLs in parallel. Uses `Promise.allSettled` so a single
- * failure does not block the rest. Callers should not depend on the
- * returned array for readiness — use `get(url)` to check individually.
- */
-export function warmupAll(urls: readonly string[]): Promise<PromiseSettledResult<HTMLVideoElement>[]> {
-  return Promise.allSettled(urls.map(warmup));
-}
-
-/** Reuse an existing request; a miss must not create another decoder. */
-export function getWarmup(url: string): Promise<HTMLVideoElement> | undefined {
-  return warmupPromises.get(url);
-}
-
-/** Look up a decoded pooled video without starting a request. */
-export function get(url: string): HTMLVideoElement | undefined {
-  return pool.get(url);
-}
-
-/**
- * True if `video` was created by `warmup()`. Used by AscMosaic's dispose
- * paths to decide whether to route through `release()` (pooled) or to
- * fully kill the element (not pooled).
- */
+/** True once `load()` has a decoded frame for `video`. */
 export function isPooled(video: HTMLVideoElement): boolean {
   return pooledVideos.has(video);
 }
 
 /**
- * Acquire a pooled video for active use (called from the createVideoTexture
- * fast path). Bumps the refcount and resumes playback. Safe to call on
- * non-pooled videos — it is a no-op in that case.
+ * Acquire a pooled video for active use (called from createVideoTexture). Bumps
+ * the refcount and resumes playback. Safe to call on non-pooled videos — it is
+ * a no-op in that case.
  */
 export function acquire(video: HTMLVideoElement): void {
   if (!pooledVideos.has(video)) return;
   refCount.set(video, (refCount.get(video) ?? 0) + 1);
-  // Resume playback. play() returns a promise; rejection is ignored
-  // (user-gesture policy, Low Power Mode). The VideoTexture will show
-  // the last decoded frame if play stays blocked.
+  // play() rejection is ignored (user-gesture policy, Low Power Mode). The
+  // mosaic keeps uploading the decoded frame of a paused video.
   void video.play().catch(() => {});
 }
 
 /**
- * Release a pooled video (called from AscMosaic's dispose paths).
- * Decrements the refcount. When the count reaches zero, pauses the video
- * to stop decoder work and GPU uploads. Safe to call on non-pooled videos.
+ * Release a pooled video (called from AscMosaic's dispose paths). The last
+ * release destroys it. Safe to call on non-pooled videos.
  */
 export function release(video: HTMLVideoElement): void {
   if (!pooledVideos.has(video)) return;
   const next = (refCount.get(video) ?? 0) - 1;
-  if (next <= 0) {
-    refCount.set(video, 0);
-    try {
-      video.pause();
-    } catch {
-      // Same as warmup — safe to ignore a transient pause rejection.
-    }
-  } else {
+  if (next > 0) {
     refCount.set(video, next);
+    return;
   }
+  refCount.set(video, 0);
+  for (const [url, pooled] of pool) {
+    if (pooled === video) {
+      pool.delete(url);
+      loads.delete(url);
+    }
+  }
+  destroy(video);
 }
 
 /**
- * Tear down the entire pool — pauses and fully kills every pooled
- * element. Called by PageEntry when the user navigates away from
- * `/thesis`, so the pool does not leak across SPA routes. Safe to call
- * multiple times.
+ * A canvas left before taking its video: stop the load, or free the element if
+ * no consumer acquired it. Nothing else would, and a paused video holds a decoder.
+ */
+export function abandon(url: string): void {
+  pendingCancels.get(url)?.();
+  const video = pool.get(url);
+  if (video && !refCount.get(video)) release(video);
+}
+
+/**
+ * Tear down the entire pool: cancel pending loads and destroy every pooled
+ * element. Called by PageEntry on every route change. Safe to call repeatedly.
  */
 export function teardownVideoPool(): void {
   for (const cancel of pendingCancels.values()) cancel();
   pendingCancels.clear();
-  for (const video of pool.values()) {
-    try {
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
-    } catch {
-      // Ignore — best-effort cleanup.
-    }
-  }
+  for (const video of pool.values()) destroy(video);
   pool.clear();
-  warmupPromises.clear();
-  // refCount is a WeakMap; entries get collected when the video elements
-  // themselves are GC'd. Nothing to clear explicitly.
+  loads.clear();
 }

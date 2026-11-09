@@ -83,6 +83,7 @@ public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
   writing-assets/             # Downloaded article assets (gitignored)
 scripts/sync-writing.mjs       # Sync from 1sixtech/noctis-articles
+scripts/bake-mosaic-atlases.mjs # Cell-sized glyph sheets from the 16 MP exports
 vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
 
@@ -102,6 +103,8 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 - Frontmatter accepts `title`, `author`, `date`, `summary`, and `category`. Category IDs are `research`,
   `op-ed`, and `announcements` (case-insensitive); omitted categories default to Research, and invalid
   explicit categories fail the build. Articles sort newest first, with article number as the tie-breaker.
+- A date marked `(draft)`, such as `Date: 2026-11-08 (draft)`, keeps an article and its assets off the site; the
+  sync skips it. A missing or impossible date fails the build and names the article.
 - `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
   filters show all articles. Empty categories show an explanation and a link back to all writing.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
@@ -143,10 +146,11 @@ unlocks after eight seconds if application chunks never hydrate. `PageEntry` own
 HeroSection owns a separate `thesis-entry-lock`, so it cannot release the logo. Direct Thesis
 section links wait for their target scene and do not acquire the offscreen hero's text lock.
 
-Shared visual downloads use two low-priority workers and a bounded, document-owned Blob cache
-(~1.14 MB for the current allowlist). Native iOS testing showed generic fetch followed by media
-Range requests downloaded the video twice; renderers and videoPool consume the retained Blob URL
-instead. No foreign-route decoder or WebGL canvas is created by this cache. Navigation interrupts
+Shared visual downloads use two low-priority workers (~0.77 MB for the current allowlist). Images
+keep their bytes as document-owned Blob URLs for the real texture loaders. Video never takes a Blob
+source: iOS Safari is unreliable with blob-backed media. Phones skip warming video altogether, since
+a native iOS probe showed their media stack downloads it again as Range requests. No foreign-route
+decoder or WebGL canvas is created by this cache. Navigation interrupts
 background work; visibility resumes it after foreground readiness or its deadline. Reduced motion and
 Save-Data suppress optional warming. Renderer readiness still requires actual atlas/frame data.
 See [page entry](docs/PAGE_ENTRY.md) for ownership, repeat visits, and regression checks.
@@ -162,6 +166,15 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 - Opt-in per canvas: `pixelRatioCap` (output at the device pixel ratio), `smoothCells` (glyphs pre-rendered
   at their exact pixel coverage), `renderOnDemand` (a still image redraws only on its noise ticks).
   The world map uses all three.
+- A video that cannot load rejects and is retried; the mosaic never draws without a real frame. A stand-in
+  color or an empty texture tiles one glyph across the whole canvas.
+- Only mounted canvases decode video, and a hidden Thesis slide holds still. iOS decoders are limited and shared
+  with the rest of the phone. A pooled video stays in the document (2px, nearly transparent): asked to play before it has
+  loaded, a video outside the document stops presenting frames about a second in on iOS WebKit, while its clock keeps running.
+- A canvas reports ready only after a real first frame. No init-queue turn outlasts 1.5 seconds, so a slow source or a
+  stalled first frame cannot hold the canvases behind it.
+- Cell-sized glyph sheets come from `scripts/bake-mosaic-atlases.mjs`: uploading the 16-megapixel exports
+  stalled the main thread and cost tens of megabytes of GPU memory per canvas.
 - Without WebGL (or under reduced motion) a canvas shows its source media, still
 
 ### Styling
@@ -174,11 +187,13 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
   Do not re-subset the font yourself: "Pretendard" is a Reserved Font Name under the OFL.
 - Dark mode: CSS variable aliasing via `data-theme` attribute
 - Responsive: mobile-first with `md:` breakpoint (768px)
+- About shows one section per screen on phones and desktop: bands are `100lvh` tall and the root snaps to them
+  (`mandatory`, viewports 640px and taller, 760px at tablet widths, no reduced motion). Bands grow with their content rather than clip it.
 - Path alias: `@/*` maps to `./src/*`
 
 ### Performance
 
-- `PageEntry` prioritizes the entry screen, then warms shared bytes and Next routes; the open Thesis route can prime remaining videos after its entry scene is ready or the five-second deadline expires
+- `PageEntry` prioritizes the entry screen, then warms shared bytes and Next routes; warmup never starts a video decoder
 - `CrossingRoot` writes fill values only to `.crossing-mark` and `.crossing-meter__fill`, keeping per-frame style changes off the full story root
 - `/resource/*` and `/fonts/*` cached with `Cache-Control: immutable, 1 year`
 - Image optimization: webp + avif formats via Next.js
@@ -219,7 +234,7 @@ import './globals.css';
 - All functional components (no class components)
 - Prefer `interface` for props, destructured in function signature
 - State via `useState`; refs via `useRef` for DOM elements and animation instances
-- Only context is `ThemeContext` — no global state library
+- Contexts: `ThemeContext`, and `ThesisSlideActive` for Thesis slides — no global state library
 
 ### Code Style
 

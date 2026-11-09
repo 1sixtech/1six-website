@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { cancelAssetWarmup, hasWarmedEntry, warmSharedAssets } from '@/lib/assetWarmup';
-import { hasSeenIntro, needsVisualReadiness, isRouteVisualReady } from '@/lib/introState';
-import { entryVisualTarget, HERO_VIDEO, THESIS_VIDEOS, THESIS_SLIDE_VIDEOS } from '@/lib/siteAssets';
-import { teardownVideoPool, warmupAll } from '@/lib/videoPool';
+import { hasSeenIntro, needsVisualReadiness } from '@/lib/introState';
+import { entryVisualTarget } from '@/lib/siteAssets';
+import { teardownVideoPool } from '@/lib/videoPool';
 import { IntroOverlay } from './IntroOverlay';
 import { IntroOrchestrator } from './IntroOrchestrator';
 
@@ -50,7 +50,7 @@ export function PageEntry() {
       delete html.dataset.entryTarget;
       main?.style.removeProperty('clip-path');
       main?.style.removeProperty('-webkit-clip-path');
-      if (pathname === '/thesis') teardownVideoPool();
+      teardownVideoPool();
     };
   }, [pathname]);
 
@@ -59,12 +59,7 @@ export function PageEntry() {
     const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
     if (document.hidden || connection?.saveData
       || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    // Prime only this route, after its entry scene is drawable. Shared warmup is byte-only.
-    if (pathname === '/thesis') {
-      const firstSlideLive = isRouteVisualReady('/thesis#thesis');
-      void warmupAll(THESIS_VIDEOS.filter((url) => url !== HERO_VIDEO
-        && !(firstSlideLive && url === THESIS_SLIDE_VIDEOS[0])));
-    }
+    // Byte-only. Decoders belong to mounted canvases, never to a warmup.
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     void warmSharedAssets(pathname, theme);
     for (const route of ['/', '/thesis', '/writing']) {

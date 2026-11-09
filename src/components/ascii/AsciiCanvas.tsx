@@ -101,11 +101,13 @@ interface AsciiCanvasProps {
   renderOnDemand?: boolean;
   /**
    * The moment (seconds) a video source holds when the mosaic is replaced by
-   * the source itself (reduced motion, or WebGL unavailable). Default: 0.1
+   * the source itself (reduced motion, no WebGL, or a source that would not load). Default: 0.1
    */
   fallbackFrameTime?: number;
   /** Skip IntersectionObserver and initialize immediately on mount. Default: false */
   eager?: boolean;
+  /** Keep the mosaic built but hold it still, for a canvas that is mounted but not shown. Default: false */
+  paused?: boolean;
   /** Called when a drawable mosaic or fallback media frame is ready. */
   onReady?: () => void;
 }
@@ -123,15 +125,47 @@ const MAX_ACTIVE_CONTEXTS = 14;
 const initQueue: Array<() => Promise<void>> = [];
 let isProcessingQueue = false;
 
-async function enqueueInit(fn: () => Promise<void>) {
-  initQueue.push(fn);
+/** How long one canvas may hold the queue before the canvases behind it go first. */
+const SOURCE_QUEUE_WAIT_MS = 1500;
+/** Pauses before retrying a source that failed. After the last, the canvas falls back. */
+const SOURCE_RETRY_DELAYS_MS = [1000, 3000];
+const IDLE_SLOT_TIMEOUT_MS = 250;
+const IDLE_SLOT_FALLBACK_MS = 64;
+
+/** A frame, then idle time, so scrolling and the first frames stay smooth between canvases. */
+function nextIdleSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => resolve(), { timeout: IDLE_SLOT_TIMEOUT_MS });
+      } else {
+        setTimeout(resolve, IDLE_SLOT_FALLBACK_MS);
+      }
+    });
+  });
+}
+
+/** Ends a queue turn at its allowance. Whatever the canvas is waiting for carries on without the queue. */
+function withinTurn(turn: Promise<void>): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(resolve, SOURCE_QUEUE_WAIT_MS);
+    turn.then(finish, finish);
+  });
+}
+
+async function enqueueInit(fn: () => Promise<void>, front = false) {
+  if (front) initQueue.unshift(fn);
+  else initQueue.push(fn);
   if (isProcessingQueue) return;
   isProcessingQueue = true;
   while (initQueue.length > 0) {
     const next = initQueue.shift()!;
-    await next();
-    // Yield to main thread between initializations to prevent frame drops
-    await new Promise(r => requestAnimationFrame(r));
+    await withinTurn(next());
+    await nextIdleSlot();
   }
   isProcessingQueue = false;
 }
@@ -173,6 +207,7 @@ export function AsciiCanvas({
   fallbackFrameTime = 0.1,
   cameraOffsetX = 0,
   eager = false,
+  paused = false,
   onReady,
 }: AsciiCanvasProps) {
   const fallbackSource = useMemo(() => warmedAssetSource(textureUrl), [textureUrl]);
@@ -192,11 +227,18 @@ export function AsciiCanvas({
   // AscMosaic.setVideoPlaying for why leaving every homepage video decoding
   // at once breaks ASCII rendering on memory-constrained iOS devices.
   const [isOnScreen, setIsOnScreen] = useState(true);
-  // WebGL could not start (no context, a failed init): show the source still,
-  // for the rest of this mount. The ref keeps later inits (a theme or pixel
+  // Show the source still instead of a mosaic. WebGL could not start, which
+  // lasts for this mount, or a source ran out of retries, which is revived when
+  // the visitor returns to the tab. The ref keeps later inits (a theme or pixel
   // ratio change) from building a canvas inside the fallback.
   const [failed, setFailed] = useState(false);
   const failedRef = useRef(false);
+  // A source that would not load is worth trying again; a browser without
+  // WebGL is not. Bumping the attempt re-runs the init effect below.
+  const [sourceAttempt, setSourceAttempt] = useState(0);
+  const retriesUsedRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourceFailedRef = useRef(false);
   // The latest init request. A queued init that a newer one superseded (a
   // prop change while it waited its turn) skips, so the newest props build.
   const initTokenRef = useRef(0);
@@ -235,7 +277,10 @@ export function AsciiCanvas({
 
     const observer = new IntersectionObserver(
       ([entry]) => setIsOnScreen(entry.isIntersecting),
-      { rootMargin: '200px' } // resume slightly before visible to avoid a blank frame
+      // Negative so a canvas that only touches the viewport edge (the Hero above
+      // a pinned Thesis) counts as gone. A stopped mosaic keeps its last frame,
+      // and animate() draws at once on the way back.
+      { rootMargin: '-2px' }
     );
 
     observer.observe(el);
@@ -243,23 +288,55 @@ export function AsciiCanvas({
   }, [eager]);
 
   // Apply on-screen state to the live mosaic: pause the video decoder and
-  // stop the render loop when off-screen, resume when back on-screen. Guarded
-  // on isInitialized so it only acts once the mosaic exists. The init path
-  // marks the canvas ready before this can pause it, so the intro is unaffected.
+  // stop the render loop when off-screen or held by the page, resume when
+  // back. Guarded on isInitialized so it only acts once the mosaic exists. The
+  // init path marks the canvas ready before this can pause it, so the intro is
+  // unaffected.
+  const shouldRun = isOnScreen && !paused;
   useEffect(() => {
     const mosaic = mosaicRef.current;
     if (!mosaic || !isInitialized) return;
-    if (isOnScreen) {
+    if (shouldRun) {
       mosaic.animate();
       mosaic.setVideoPlaying(true);
     } else {
       mosaic.stopAnimate();
       mosaic.setVideoPlaying(false);
     }
-  }, [isOnScreen, isInitialized]);
+  }, [shouldRun, isInitialized]);
+
+  const retrySource = useCallback(() => {
+    if (!mountedRef.current) return;
+    const delay = SOURCE_RETRY_DELAYS_MS[retriesUsedRef.current];
+    if (delay === undefined) {
+      sourceFailedRef.current = true;
+      failedRef.current = true;
+      setFailed(true);
+      return;
+    }
+    retriesUsedRef.current += 1;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = setTimeout(() => setSourceAttempt((attempt) => attempt + 1), delay);
+  }, []);
+
+  // Sources tried while the phone was busy or the tab hidden get a fresh start
+  // when the visitor comes back, instead of staying blank for the whole visit.
+  useEffect(() => {
+    if (!failed) return;
+    const revive = () => {
+      if (document.hidden || !sourceFailedRef.current) return;
+      sourceFailedRef.current = false;
+      failedRef.current = false;
+      retriesUsedRef.current = 0;
+      setFailed(false);
+      setSourceAttempt((attempt) => attempt + 1);
+    };
+    document.addEventListener('visibilitychange', revive);
+    return () => document.removeEventListener('visibilitychange', revive);
+  }, [failed]);
 
   // Initialize/destroy AscMosaic based on visibility
-  const initMosaic = useCallback(async (token: number) => {
+  const initMosaic = useCallback(async (token: number, existingVideo?: HTMLVideoElement) => {
     // Superseded while it waited in the queue: the newer request builds.
     if (token !== initTokenRef.current || failedRef.current) return;
     const container = containerRef.current;
@@ -268,6 +345,7 @@ export function AsciiCanvas({
 
     // Check WebGL context budget
     if (activeContextCount >= MAX_ACTIVE_CONTEXTS) {
+      videoPool.abandon(textureUrl);
       return; // Skip, too many active contexts
     }
 
@@ -278,10 +356,6 @@ export function AsciiCanvas({
     let mosaic: AscMosaic | null = null;
 
     try {
-      const pendingVideo = resolvedTextureType === 'video' ? videoPool.getWarmup(textureUrl) : undefined;
-      const existingVideo = pendingVideo ? await pendingVideo.catch(() => undefined) : undefined;
-      if (!mountedRef.current || token !== initTokenRef.current) return;
-
       // Remove any leftover canvases from previous instances
       container.querySelectorAll('canvas').forEach(c => c.remove());
 
@@ -326,9 +400,8 @@ export function AsciiCanvas({
         mosaic.setRenderScale(outputScale);
       }
 
-      // Add model with texture (supports both image and video).
-      // For video textures, try the videoPool first — if a warmed element
-      // exists, AscMosaic reuses it and skips the network fetch path.
+      // Add model with texture (supports both image and video). A video
+      // arrives already loaded (runInit), so this does no network waiting.
       await mosaic.addModel({
         shape,
         textureUrl: warmedAssetSource(textureUrl),
@@ -408,6 +481,7 @@ export function AsciiCanvas({
 
       // Start animation
       mosaic.animate();
+      retriesUsedRef.current = 0;
       setIsInitialized(true);
       onReady?.();
     } catch (err) {
@@ -442,13 +516,48 @@ export function AsciiCanvas({
         }
       }
       if (!superseded) {
-        // WebGL could not start here. Mount the source still; its load/seek
-        // event reports readiness only once a frame can actually be shown.
-        failedRef.current = true;
-        setFailed(true);
+        if (mosaic) {
+          // WebGL started; a source or glyph sheet did not arrive.
+          retrySource();
+        } else {
+          // WebGL could not start here. Mount the source still; its load/seek
+          // event reports readiness only once a frame can actually be shown.
+          videoPool.abandon(textureUrl);
+          failedRef.current = true;
+          setFailed(true);
+        }
       }
     }
-  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, pixelRatio, smoothCells, cellGain, renderOnDemand, cameraOffsetX]);
+  }, [textureUrl, resolvedTextureType, mosaicSize, mosaicCellUrl, shape, mouseInteraction, setSelectionMode, orthographic, minBrightness, maxBrightness, noiseIntensity, setCount, avoidRadius, avoidStrength, planeWidth, planeHeight, scale, noiseFPS, noiseFPSRandom, prefersReducedMotion, resolvedAutoRotate, cellCount, offsetRowRadius, renderWidth, renderHeight, renderScale, pixelRatio, smoothCells, cellGain, renderOnDemand, cameraOffsetX, retrySource]);
+
+  // One queue turn: load this canvas's video, then build its mosaic. Videos
+  // load one at a time so decoders do not all start at once, but a slow or
+  // failing source gives up its turn rather than holding the canvases behind it.
+  const runInit = useCallback(async (token: number) => {
+    if (token !== initTokenRef.current || failedRef.current || prefersReducedMotion || !mountedRef.current) return;
+    if (resolvedTextureType !== 'video') {
+      await initMosaic(token);
+      return;
+    }
+    const source = videoPool.load(textureUrl);
+    const outcome = await Promise.race([
+      source.then(() => 'ready' as const, () => 'failed' as const),
+      new Promise<'slow'>((resolve) => setTimeout(() => resolve('slow'), SOURCE_QUEUE_WAIT_MS)),
+    ]);
+    if (token !== initTokenRef.current) return;
+    if (outcome === 'ready') {
+      await initMosaic(token, await source);
+    } else if (outcome === 'failed') {
+      retrySource();
+    } else {
+      // Once it arrives only the cheap build is left, so it goes ahead of
+      // canvases that have not started loading.
+      source.then(
+        (video) => { if (token === initTokenRef.current) void enqueueInit(() => initMosaic(token, video), true); },
+        () => { if (token === initTokenRef.current) retrySource(); },
+      );
+    }
+  }, [initMosaic, prefersReducedMotion, resolvedTextureType, retrySource, textureUrl]);
 
   const destroyMosaic = useCallback(() => {
     const mosaic = mosaicRef.current;
@@ -469,26 +578,36 @@ export function AsciiCanvas({
   // Also reinit when initMosaic changes (e.g. theme-driven cell atlas swap)
   // Uses global queue to stagger WebGL initialization and prevent jank.
   useEffect(() => {
-    // Every request supersedes the ones before it, queued or in flight.
+    // Every request supersedes the ones before it, queued or in flight, and
+    // any retry they scheduled.
     const token = ++initTokenRef.current;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     if (isVisible) {
       if (mosaicRef.current) {
         destroyMosaic();
       }
-      enqueueInit(() => initMosaic(token));
+      void enqueueInit(() => runInit(token));
     } else if (mosaicRef.current) {
       destroyMosaic();
     }
-  }, [isVisible, initMosaic, destroyMosaic]);
+  }, [isVisible, runInit, destroyMosaic, sourceAttempt]);
 
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       destroyMosaic();
     };
   }, [destroyMosaic]);
+
+  // Leaving before the mosaic took its video would strand it in the pool, paused
+  // but still holding a decoder.
+  useEffect(() => {
+    if (resolvedTextureType !== 'video') return;
+    return () => videoPool.abandon(textureUrl);
+  }, [resolvedTextureType, textureUrl]);
 
   // Set canvas size when dimensions change
   useEffect(() => {
@@ -502,7 +621,7 @@ export function AsciiCanvas({
     if (video.readyState >= 2 && !video.seeking) onReady?.();
   };
 
-  // Reduced motion (or WebGL unavailable): show the source media directly,
+  // Reduced motion, no WebGL, or a source out of retries: show the source media directly,
   // still. Video sources render a single frame (the #t media fragment makes
   // Safari paint it without playback) instead of an autoplaying loop, which
   // is motion.
