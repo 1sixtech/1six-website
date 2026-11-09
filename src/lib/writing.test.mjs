@@ -383,6 +383,35 @@ test('a date line padded to the end of the file fails at once', () => {
   }
 });
 
+test('a title or author line padded to the end of the file fails at once', () => {
+  const padding = ' '.repeat(80000);
+  for (const [slug, markdown] of [['002-padded-title', `#${padding}`], ['002-padded-author', `# T\n\nAuthor:${padding}`]]) {
+    try {
+      write(`content/writing/${slug}/README.md`, markdown);
+      const started = Date.now();
+      assert.throws(() => getArticle(slug), new RegExp(`${slug} needs a date`));
+      assert.ok(Date.now() - started < 1000, `${slug}: parsing stays linear in the line length`);
+    } finally {
+      removeArticle(slug);
+    }
+  }
+});
+
+test('a heading and byline are read without their padding, and an empty byline leaves the date alone', () => {
+  try {
+    write('content/writing/002-byline/README.md', '#   A title  \n\nAuthor:   Dean N.  \nDate: 2026-11-08\n\nThe body.\n');
+    const padded = getArticle('002-byline');
+    assert.equal(padded.title, 'A title');
+    assert.equal(padded.author, 'Dean N.');
+    write('content/writing/002-byline/README.md', '# T\n\nAuthor:\nDate: 2026-11-08\n\nThe body.\n');
+    const empty = getArticle('002-byline');
+    assert.equal(empty.author, '1SIX');
+    assert.equal(empty.date, '2026-11-08');
+  } finally {
+    removeArticle('002-byline');
+  }
+});
+
 test('a padded value is read without its padding', () => {
   try {
     write('content/writing/002-roomy/README.md', '# Roomy\n\nDate:   2026-11-08   \n\nThe body.\n');
@@ -413,6 +442,8 @@ test('only the date line of an article can mark it as a draft', () => {
     '# Title\n\nDate: 2026-11-01\n\n```\nDate: 2026-12-01 (draft)\n```\n',
     '---\ntitle: T\ndate: 2026-11-01\n---\n\nThe body.\n\ndate: 2026-12-01 (draft)\n',
     '---\nThe body never closes its fence.\n\nDate: 2026-12-01 (draft)\n',
+    '# Title\n\nDate: 2026-11-01\n\n# Proposed schedule\nDate: 2026-12-01 (draft)\n',
+    '---\ntitle: T\ndate: 2026-11-01\n---\n\nDate: 2026-12-01 (draft)\n\nBody',
     '---\r\ntitle: T\r\ndate: 2026-11-01\r\n---\r\n\r\nBody\r\n\r\nDate: 2026-12-01 (draft)\r\n',
   ]) assert.equal(isDraftArticle(markdown), false, markdown);
 });

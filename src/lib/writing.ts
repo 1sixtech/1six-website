@@ -67,10 +67,12 @@ function extractArticle(markdown: string): {
   const { data, body: rawBody } = splitFrontmatter(normalized);
   let body = rawBody.replace(/^\n+/, '');
 
-  const titleLine = body.match(/^#\s+(.+)\n+/);
+  // One character class per line: synced Markdown is untrusted, and a pattern that
+  // can split padding two ways backtracks for minutes on a long line.
+  const titleLine = body.match(/^#[ \t]([^\n]*)\n+/);
   if (titleLine) body = body.slice(titleLine[0].length);
 
-  const authorLine = body.match(/^Author:\s*(.+)\n/);
+  const authorLine = body.match(/^Author:([^\n]*)\n/);
   if (authorLine) body = body.slice(authorLine[0].length);
 
   // Frontmatter already dates the article, so only a plain date here is a byline:
