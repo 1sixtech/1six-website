@@ -27,7 +27,7 @@ web
 
 ## Capabilities and Constraints
 
-- Static marketing site on Next.js 16 / Vercel; copy lives in components; no CMS. Writing syncs at build time from the public `1sixtech/noctis-articles` repo through `scripts/sync-writing.mjs`; `WRITING_GIT_REF` optionally selects a reviewed commit or tag (default `main`).
+- Static marketing site on Next.js 16 / Vercel; copy lives in components; no CMS. Writing syncs at build time from the public `1sixtech/1six-researchs` repo through `scripts/sync-writing.mjs`, and a push to that repo's `main` that changes an article deploys the site. `WRITING_GIT_REF` optionally selects a reviewed commit or tag (default `main`); a fixed commit or tag stops new articles from appearing.
 - The thesis scroll, intro sequence, and hero scramble logic carry a long bug history ([scroll history](THESIS_SCROLL_HISTORY.md), [grid plan](docs/PHASE5_GRID_PLAN.md)). The November 2026 feedback authorized the route move, fifth-slide wording, lint fixes, and intro lifecycle fixes. Keep changes to `ThesisSection.tsx`, `ThesisSectionMobile.tsx`, `thesisData.tsx`, `IntroOrchestrator.tsx`, `HeroSection.tsx`, and `hashScroll.ts` focused and verify desktop/mobile capture, direct/client entry, repeat visits, and route-leave cleanup.
 - Contact: investors and candidates reach 1SIX at contact@1six.tech (confirmed 2026-11-04).
 - About is the homepage at `/`: "we don't dream. we build.", products, origins, backers, and "work with us", in that order. Each section has its own screen on phones and desktop (owner request, 2026-11-09). The ASCII "16" fills continuously from 16% to 100%, with a desktop percentage and compact mobile header progress; reduced motion shows the complete state and scrolls freely.

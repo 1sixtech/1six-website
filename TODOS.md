@@ -20,17 +20,7 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 ## Writing
 
-### Pin the writing sync to a reviewed commit
-
-**What:** Set `WRITING_GIT_REF` in the Vercel project's environment to a reviewed commit SHA or tag of `1sixtech/noctis-articles`, and keep branch protection on that repository.
-
-**Why:** Every build pulls the articles from that repository's `main`, so an unreviewed push there reaches the site at the next deploy. v0.2.0.0 escapes raw HTML in articles and sandboxes the synced assets, which limits the damage; pinning removes the path.
-
-**Context:** `scripts/sync-writing.mjs` reads `WRITING_GIT_REF` (default `main`). This is a Vercel setting, not a code change.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
+The article repository's publishing gate is recorded under Completed.
 
 ## Site-wide
 
@@ -49,6 +39,16 @@ The crossing performance and reduced-motion items are recorded under Completed.
 ## Completed
 
 The original problem statements below describe the earlier release; each resolution records the current behavior.
+
+### Pin the writing sync to a reviewed commit
+
+**What:** Set `WRITING_GIT_REF` in the Vercel project's environment to a reviewed commit SHA or tag of the article repository, and keep branch protection on that repository.
+
+**Why:** Every build pulls the articles from that repository's `main`, so an unreviewed push there reaches the site at the next deploy.
+
+**Resolution:** Not pinned: a fixed commit would stop new articles from appearing, and articles now publish automatically. `main` in `1sixtech/1six-researchs` requires a pull request but no approval, so one account can publish alone, and repository admins can bypass the pull request. The owner accepted that risk on 2026-11-09. Requiring one approval, re-approval after new pushes, and enforcing the rule for admins would close it.
+
+**Completed:** v0.3.5.0 (2026-11-09)
 
 ### Release pooled videos when a mosaic is disposed
 
