@@ -10,6 +10,13 @@ export const NAV_ITEMS = [
   { label: 'Writing', href: '/writing' },
 ] as const;
 
+/** A plain left click. Any other click on a link belongs to the browser. */
+export function isPlainLeftClick(
+  event: Pick<MouseEvent, 'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 /**
  * Whether a nav href names the page the visitor is on. Hash links such as
  * `/#thesis` point at a section, not a page, so they are never current.
