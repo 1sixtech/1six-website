@@ -133,7 +133,6 @@ function mosaicHarness({ model = imageModel(), autoRotate = false } = {}) {
     renderOnDemand: false,
     renderPending: true,
     sceneTexturesSettled: false,
-    videolessFrames: 0,
     tiltResetAnimationId: null,
     tiltAnimationId: null,
     disposed: false,
@@ -237,14 +236,14 @@ test('video frames: a paused video with decoded data still draws its frame (Low 
   mosaic.stopAnimate();
 });
 
-test('video frames: a playing video that never presents a frame draws the one it decoded after a moment', { skip }, () => {
+test('video frames: a playing video that reports data but no frame never uploads, however long it waits', { skip }, () => {
   const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
-  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  const model = videoModel(video);
+  const { mosaic, drawn } = mosaicHarness({ model });
   mosaic.animate();
-  runFrames(30);
-  assert.equal(drawn(), 0, 'it gets a moment to present its own frame');
-  runFrames(40);
-  assert.ok(drawn() > 0, 'a starved decoder does not leave the canvas blank for the visit');
+  runFrames(600);
+  assert.equal(drawn(), 0, 'an upload here would read an empty texture and tile one glyph');
+  assert.equal(model.material.map.version, 0);
   mosaic.stopAnimate();
 });
 
@@ -508,6 +507,50 @@ test('source readiness: disposal releases a pending image so navigation is not h
 test('source readiness: a missing image has a bounded deadline', { skip }, async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { mosaic } = mosaicHarness({ model: imageModel(null) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
+  t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});
+
+test('source readiness: a playing video waits for its first presented frame, not for readyState', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let present;
+  const video = {
+    paused: false,
+    readyState: 4,
+    requestVideoFrameCallback(callback) { present = callback; return 1; },
+    cancelVideoFrameCallback() {},
+  };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
+  let ready = false;
+  const pending = mosaic.waitForSceneTextures().then(() => { ready = true; });
+  t.mock.timers.tick(1000); await Promise.resolve(); assert.equal(ready, false, 'readyState 4 is not a frame');
+  present();
+  t.mock.timers.tick(16); await pending; assert.equal(ready, true);
+  mosaic.dispose();
+});
+
+test('source readiness: a video that never presents a frame fails at the deadline, so the canvas can retry', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
+  const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
+  t.mock.timers.tick(5001); await pending; mosaic.dispose();
+});
+
+test('source readiness: a paused video with data and a browser without frame callbacks are ready at once', { skip }, async () => {
+  const lowPower = { paused: true, readyState: 2, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const older = { paused: false, readyState: 2 };
+  for (const video of [lowPower, older]) {
+    const { mosaic } = mosaicHarness({ model: videoModel(video) });
+    await mosaic.waitForSceneTextures();
+    mosaic.dispose();
+  }
+});
+
+test('source readiness: a paused video with no data is not ready', { skip }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const video = { paused: true, readyState: 1, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const { mosaic } = mosaicHarness({ model: videoModel(video) });
   const pending = assert.rejects(mosaic.waitForSceneTextures(), /timed out/);
   t.mock.timers.tick(5001); await pending; mosaic.dispose();
 });

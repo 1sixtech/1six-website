@@ -15,9 +15,6 @@ import * as THREE from 'three';
 // `acquireVideo`, `releaseVideo`) instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
-/** Render attempts (about a second) a playing video gets to present its first frame. */
-const FIRST_FRAME_PATIENCE = 60;
-
 /** AscMosaic 생성 옵션 */
 export interface AscMosaicOptions {
   /** true면 오소(Orthographic) 카메라 사용, 기본값: false (원근 카메라) */
@@ -75,8 +72,6 @@ export class AscMosaic {
   private disposed: boolean = false;
   /** Whether the page wants the loop running; losing the context does not change this. */
   private wantsLoop: boolean = false;
-  /** Consecutive render attempts that had no video frame to read. */
-  private videolessFrames: number = 0;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -462,11 +457,10 @@ export class AscMosaic {
       ) {
         const map = obj.material.map;
         const video = map.image as HTMLVideoElement;
-        // HAVE_CURRENT_DATA (2) means a frame exists to upload. A playing video
-        // reports its own frames, but one starved of a decoder never does, so
-        // after a moment it draws the frame it has rather than staying blank.
-        const stalled = this.videolessFrames > FIRST_FRAME_PATIENCE;
-        if (video && (video.paused || stalled) && video.readyState >= 2) {
+        // A paused video reports no frames of its own, so the frame it decoded
+        // is uploaded here. A playing one reports them: never upload for it on
+        // readyState alone (see awaitsVideoFrame).
+        if (video && video.paused && video.readyState >= 2) {
           map.needsUpdate = true;
         }
         // Without requestVideoFrameCallback the renderer's own update() is
@@ -475,7 +469,6 @@ export class AscMosaic {
         if (map.version === 0) hasFrame = false;
       }
     });
-    this.videolessFrames = hasFrame ? 0 : this.videolessFrames + 1;
     return hasFrame;
   }
 
@@ -573,13 +566,41 @@ export class AscMosaic {
     return state;
   }
 
-  /** A texture handle is not image readiness. Disposal releases a waiting init. */
+  /**
+   * Whether a video still has nothing to draw. WebKit can report
+   * HAVE_ENOUGH_DATA before any frame exists, and uploading then reads back an
+   * empty texture, which tiles one glyph across the canvas and can block the
+   * main thread for a second. So a playing video waits for its own first frame
+   * report. A paused one never reports, so its decoded frame is taken on trust.
+   */
+  private awaitsVideoFrame(): boolean {
+    let waiting = false;
+    this.model?.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        obj.material instanceof THREE.MeshBasicMaterial &&
+        obj.material.map instanceof THREE.VideoTexture
+      ) {
+        const map = obj.material.map;
+        const video = map.image as HTMLVideoElement;
+        const reportsFrames = !video.paused && 'requestVideoFrameCallback' in video;
+        if (map.version === 0 && (reportsFrames || video.readyState < 2)) waiting = true;
+      }
+    });
+    return waiting;
+  }
+
+  /**
+   * A texture handle is not readiness: an image needs its pixels and a video its
+   * first frame. A source that never delivers rejects at the deadline, so the
+   * caller can retry or show the source still. Disposal releases a waiting init.
+   */
   waitForSceneTextures(): Promise<void> {
     return new Promise((resolve, reject) => {
       const deadline = Date.now() + 5000;
       const check = () => {
         if (this.disposed) reject(new Error('Mosaic disposed before source was ready'));
-        else if (this.sceneTextureState() !== 'loading') resolve();
+        else if (this.sceneTextureState() !== 'loading' && !this.awaitsVideoFrame()) resolve();
         else if (Date.now() >= deadline) reject(new Error('Mosaic source readiness timed out'));
         else setTimeout(check, 16);
       };
