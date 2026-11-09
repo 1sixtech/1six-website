@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 /**
- * Returns true after the user's first scroll event.
+ * Returns true after the user's first scroll event that moves the page. The
+ * route's own reset to the top also fires a scroll event, when the visitor
+ * arrives from further down another page, and that must not count.
  * Used for the header slide-down reveal.
  * Removes the listener after first trigger (one-shot).
  *
@@ -39,6 +41,7 @@ export function useScrollReveal(): boolean {
     if (isVisible) return; // already triggered
 
     const reveal = () => {
+      if (window.scrollY <= 0) return;
       setIsVisible(true);
       window.removeEventListener('scroll', reveal);
     };

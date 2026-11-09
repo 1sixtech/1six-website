@@ -3,6 +3,21 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.7.0] - 2026-11-10
+
+### Fixed
+
+- Thesis opens on its first screen when you arrive from the phone menu on a scrolled About. About's position used to carry over to the next page and skip that screen, and Writing opened partway down the same way.
+- Clicking the Thesis link twice on desktop stays on the first screen. After a mouse click the header no longer waits on screen for a second click. Keyboard users still bring it down.
+- Pressing a Thesis link while on Thesis goes to the first screen and leaves no section in the address, so a reload or Back cannot skip it. The slides start over from the first, and you can scroll straight back into them.
+- The footer's Thesis link works on Thesis. It used to do nothing, or land a phone on the last slide. Keyboard users continue from the top of the page.
+- Pressing Back with the phone menu open no longer restores the previous page's position when the menu closes.
+- The Thesis header stays hidden until your first scroll when you arrive from further down another page.
+
+### Documentation
+
+- `docs/QA_CHECKLIST.md` lists what must pass before a release: Thesis sections, the desktop pin, mobile capture, scroll locks, About's sections, page entry, and the Thesis art, each tied to the fix it protects.
+
 ## [0.3.5.0] - 2026-11-09
 
 ### Changed

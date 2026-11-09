@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import { LogoFooter } from '@/components/ui/Logo';
 import { CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS } from '@/lib/site';
+import { FooterLink } from './FooterLink';
 
 interface FooterLinkItem {
   label: string;
@@ -47,9 +47,9 @@ function FooterColumn({
                 {link.label}
               </a>
             ) : (
-              <Link href={link.href} className={linkClass}>
+              <FooterLink href={link.href} className={linkClass}>
                 {link.label}
-              </Link>
+              </FooterLink>
             )}
           </li>
         ))}
