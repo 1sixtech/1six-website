@@ -3,6 +3,18 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.5.0] - 2026-11-09
+
+### Changed
+
+- A merged article now reaches the site on its own, without a website deploy.
+
+### Fixed
+
+- A build that starts right after an article merges reads that exact commit, not a copy GitHub may have cached for five minutes. Every file in a build comes from the same commit.
+- The article sync uses the repository's current name instead of relying on GitHub's redirect from the old one.
+- A blank `WRITING_GIT_REF` now means `main`, and a ref containing `#` or `/` resolves exactly.
+
 ## [0.3.4.0] - 2026-11-09
 
 ### Changed
