@@ -15,6 +15,9 @@ import * as THREE from 'three';
 // `acquireVideo`, `releaseVideo`) instead of importing the pool directly.
 import * as videoPool from '@/lib/videoPool';
 
+/** Render attempts (about a second) a playing video gets to present its first frame. */
+const FIRST_FRAME_PATIENCE = 60;
+
 /** AscMosaic 생성 옵션 */
 export interface AscMosaicOptions {
   /** true면 오소(Orthographic) 카메라 사용, 기본값: false (원근 카메라) */
@@ -70,6 +73,10 @@ export class AscMosaic {
   private sceneTexturesSettled: boolean = false;
   /** Set by the first dispose(); a repeat call has nothing left to free. */
   private disposed: boolean = false;
+  /** Whether the page wants the loop running; losing the context does not change this. */
+  private wantsLoop: boolean = false;
+  /** Consecutive render attempts that had no video frame to read. */
+  private videolessFrames: number = 0;
 
   constructor(container: HTMLElement, options?: AscMosaicOptions) {
     this.container = container;
@@ -106,16 +113,8 @@ export class AscMosaic {
     // WebGL context loss recovery. Mobile browsers evict contexts on tab switch
     // or memory pressure. Three.js re-uploads textures/shaders internally on
     // restore, but we must pause/resume the animation loop.
-    this.contextLostHandler = (e: Event) => { e.preventDefault(); this.stopAnimate(); };
-    this.contextRestoredHandler = () => {
-      if (this.asciiMosaicFilter) {
-        const w = this.renderer.domElement.width;
-        const h = this.renderer.domElement.height;
-        this.asciiMosaicFilter.setSize(w, h);
-      }
-      this.renderPending = true;
-      this.animate();
-    };
+    this.contextLostHandler = (e: Event) => { e.preventDefault(); this.haltLoop(); };
+    this.contextRestoredHandler = () => this.restoreContext();
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLostHandler);
     this.renderer.domElement.addEventListener('webglcontextrestored', this.contextRestoredHandler);
 
@@ -463,8 +462,11 @@ export class AscMosaic {
       ) {
         const map = obj.material.map;
         const video = map.image as HTMLVideoElement;
-        // HAVE_CURRENT_DATA (2) means a frame exists to upload.
-        if (video && video.paused && video.readyState >= 2) {
+        // HAVE_CURRENT_DATA (2) means a frame exists to upload. A playing video
+        // reports its own frames, but one starved of a decoder never does, so
+        // after a moment it draws the frame it has rather than staying blank.
+        const stalled = this.videolessFrames > FIRST_FRAME_PATIENCE;
+        if (video && (video.paused || stalled) && video.readyState >= 2) {
           map.needsUpdate = true;
         }
         // Without requestVideoFrameCallback the renderer's own update() is
@@ -473,6 +475,7 @@ export class AscMosaic {
         if (map.version === 0) hasFrame = false;
       }
     });
+    this.videolessFrames = hasFrame ? 0 : this.videolessFrames + 1;
     return hasFrame;
   }
 
@@ -487,6 +490,7 @@ export class AscMosaic {
   }
 
   animate(): void {
+    this.wantsLoop = true;
     if (this.isAnimating) return;
 
     this.isAnimating = true;
@@ -584,11 +588,27 @@ export class AscMosaic {
   }
 
   stopAnimate(): void {
+    this.wantsLoop = false;
+    this.haltLoop();
+  }
+
+  private haltLoop(): void {
     this.isAnimating = false;
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+  }
+
+  private restoreContext(): void {
+    if (this.asciiMosaicFilter) {
+      const w = this.renderer.domElement.width;
+      const h = this.renderer.domElement.height;
+      this.asciiMosaicFilter.setSize(w, h);
+    }
+    this.renderPending = true;
+    // A canvas held still (off screen, or in a hidden slide) stays still.
+    if (this.wantsLoop) this.animate();
   }
 
   /**

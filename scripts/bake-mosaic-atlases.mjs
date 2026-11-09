@@ -8,7 +8,8 @@
 //
 // Each output texel copies the exact source texel the shader samples for that
 // fragment (see FRAGMENT_SHADER in asciiMosaicFilter.ts), so what reaches the
-// screen does not change. Re-run after replacing a source sheet:
+// screen does not change. Re-run after replacing a source sheet, and give the
+// output a new name, since /resource/* is cached as immutable for a year:
 //   node scripts/bake-mosaic-atlases.mjs
 
 import path from 'node:path';

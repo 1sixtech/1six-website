@@ -133,6 +133,7 @@ function mosaicHarness({ model = imageModel(), autoRotate = false } = {}) {
     renderOnDemand: false,
     renderPending: true,
     sceneTexturesSettled: false,
+    videolessFrames: 0,
     tiltResetAnimationId: null,
     tiltAnimationId: null,
     disposed: false,
@@ -233,6 +234,33 @@ test('video frames: a paused video with decoded data still draws its frame (Low 
   const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
   mosaic.animate();
   assert.equal(drawn(), 1);
+  mosaic.stopAnimate();
+});
+
+test('video frames: a playing video that never presents a frame draws the one it decoded after a moment', { skip }, () => {
+  const video = { paused: false, readyState: 4, requestVideoFrameCallback: () => 1, cancelVideoFrameCallback() {} };
+  const { mosaic, drawn } = mosaicHarness({ model: videoModel(video) });
+  mosaic.animate();
+  runFrames(30);
+  assert.equal(drawn(), 0, 'it gets a moment to present its own frame');
+  runFrames(40);
+  assert.ok(drawn() > 0, 'a starved decoder does not leave the canvas blank for the visit');
+  mosaic.stopAnimate();
+});
+
+test('context loss: a restored canvas resumes only if the page still wants it running', { skip }, () => {
+  const { mosaic } = mosaicHarness();
+  mosaic.animate();
+  mosaic.stopAnimate(); // a hidden slide
+  mosaic.haltLoop(); // its context is lost
+  mosaic.restoreContext();
+  assert.equal(mosaic.isAnimating, false, 'a hidden slide stays still');
+
+  mosaic.animate();
+  mosaic.haltLoop();
+  assert.equal(mosaic.isAnimating, false, 'a lost context stops the loop');
+  mosaic.restoreContext();
+  assert.equal(mosaic.isAnimating, true, 'a running canvas resumes');
   mosaic.stopAnimate();
 });
 

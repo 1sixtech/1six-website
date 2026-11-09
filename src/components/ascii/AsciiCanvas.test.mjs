@@ -639,3 +639,10 @@ test('a canvas gives up its video when it leaves or changes source; an image has
   page.unmount(picture);
   assert.deepEqual(page.abandoned, ['/first.mp4', '/second.mp4'], 'an image has no video');
 });
+
+test('a canvas that cannot start WebGL gives up the video it loaded', async () => {
+  const page = canvasPage({ webgl: false });
+  page.mount();
+  await page.settle();
+  assert.deepEqual(page.abandoned, ['/mark.mp4']);
+});

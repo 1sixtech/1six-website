@@ -265,7 +265,10 @@ export function AsciiCanvas({
 
     const observer = new IntersectionObserver(
       ([entry]) => setIsOnScreen(entry.isIntersecting),
-      { rootMargin: '200px' } // resume slightly before visible to avoid a blank frame
+      // Negative so a canvas that only touches the viewport edge (the Hero above
+      // a pinned Thesis) counts as gone. A stopped mosaic keeps its last frame,
+      // and animate() draws at once on the way back.
+      { rootMargin: '-2px' }
     );
 
     observer.observe(el);
@@ -330,6 +333,7 @@ export function AsciiCanvas({
 
     // Check WebGL context budget
     if (activeContextCount >= MAX_ACTIVE_CONTEXTS) {
+      videoPool.abandon(textureUrl);
       return; // Skip, too many active contexts
     }
 
@@ -506,6 +510,7 @@ export function AsciiCanvas({
         } else {
           // WebGL could not start here. Mount the source still; its load/seek
           // event reports readiness only once a frame can actually be shown.
+          videoPool.abandon(textureUrl);
           failedRef.current = true;
           setFailed(true);
         }
