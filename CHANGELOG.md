@@ -3,6 +3,22 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.4.0] - 2026-11-09
+
+### Changed
+
+- About shows one section per screen on phones and desktop. The page settles on each section, and a section grows with its content instead of clipping it. Short screens and reduced motion scroll freely.
+- Entering Thesis no longer hitches on desktop, and the slides keep their frame rate. Glyph sheets are a few hundred bytes instead of 16 megapixels, canvases build one at a time in idle moments, and only the art on screen plays.
+- Phones no longer download a Thesis video twice or decode video for slides that are not mounted.
+
+### Fixed
+
+- Thesis on a phone no longer shows one character repeated across the canvas. The mosaic waits for a real video frame. A video that will not load is retried and then replaced by its still source, and returning to the tab tries again.
+- Leaving a page before its video arrives no longer starts that video or holds its decoder.
+- A draft article, marked `(draft)` on its date line, stays off the site with its figures instead of failing the build. A missing or impossible date fails the build and names the article.
+- A failed article download keeps the last good sync in place, and a long padded line in an article can no longer stall a build.
+- The 16 on About completes at every display scale.
+
 ## [0.3.3.0] - 2026-11-09
 
 ### Changed

@@ -56,7 +56,7 @@ The original problem statements below describe the earlier release; each resolut
 
 **Resolution:** Every dispose path releases, and the last release destroys the element so its decoder is freed.
 
-**Completed:** 2026-11-09
+**Completed:** v0.3.4.0 (2026-11-09)
 
 ### Prepare the About mark during the company-logo loader
 
