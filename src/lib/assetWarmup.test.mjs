@@ -312,3 +312,33 @@ test('entry warmth is a byte-cache hint only; it neither marks a visual ready no
   }
   assert.deepEqual(warmup.events, [], 'background bytes cannot dispatch visual readiness');
 });
+
+test('an expired request does not count as fetched, so the next warmup asks for it again', async () => {
+  const warmup = warmupHarness();
+  const run = warmup.warmSharedAssets('/writing', 'light');
+  const expired = warmup.calls[0];
+  expired.respond();
+  await flush();
+  warmup.expire(expired);
+  expired.finish();
+  await flush();
+  await warmup.drain();
+  await run;
+  const before = warmup.calls.length;
+  const again = warmup.warmSharedAssets('/writing', 'light');
+  await warmup.drain();
+  await again;
+  assert.deepEqual(warmup.calls.slice(before).map((call) => call.url), [expired.url]);
+});
+
+test('a cancelled image body is never retained', async () => {
+  const warmup = warmupHarness({ coarsePointer: true }); // only images queue, so the guard is observable
+  const run = warmup.warmSharedAssets('/writing', 'light');
+  warmup.calls.forEach((call) => call.respond());
+  await flush();
+  warmup.cancelAssetWarmup();
+  warmup.calls.forEach((call) => call.finish());
+  await run;
+  assert.equal(warmup.blobs.length, 0);
+  for (const call of warmup.calls) assert.equal(warmup.warmedAssetSource(call.url), call.url);
+});

@@ -4,7 +4,7 @@
 
 ### Swap the thesis atlas in place on a theme switch
 
-**What:** Change a mounted canvas's glyph atlas without re-initializing it, and give the thesis canvases a coverage atlas.
+**What:** Change a mounted canvas's glyph atlas without re-initializing it.
 
 **Why:** The thesis atlas now depends on the theme, so a theme switch tears down and rebuilds every mounted thesis canvas (eager ones too), reloading its video and recreating its context. The glyph sheets themselves are now 108x27, so this is no longer a memory problem.
 
@@ -62,7 +62,7 @@ The original problem statements below describe the earlier release; each resolut
 
 **What:** Cover the first About visit while its rotating 16 loads, instead of waiting on Thesis assets after entering the site.
 
-**Resolution:** Originally the logo loader moved to About; its eager mark reports readiness from a rendered mosaic with loaded glyph data or a decoded fallback. The loader removes its own mask and lock. Thesis retains its independent text scramble and video warmup. Route cleanup and repeat/reduced-motion behavior have effect regression tests.
+**Resolution:** Originally the logo loader moved to About; its eager mark reports readiness from a rendered mosaic with loaded glyph data or a decoded fallback. The loader removes its own mask and lock. Thesis retains its independent text scramble. Route cleanup and repeat/reduced-motion behavior have effect regression tests.
 
 **Completed:** v0.3.2.0 (2026-11-08)
 

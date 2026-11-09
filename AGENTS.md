@@ -183,7 +183,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 - Dark mode: CSS variable aliasing via `data-theme` attribute
 - Responsive: mobile-first with `md:` breakpoint (768px)
 - About shows one section per screen on phones and desktop: bands are `100lvh` tall and the root snaps to them
-  (`mandatory`, viewports 640px and taller, no reduced motion). Bands grow with their content rather than clip it.
+  (`mandatory`, viewports 640px and taller, 760px at tablet widths, no reduced motion). Bands grow with their content rather than clip it.
 - Path alias: `@/*` maps to `./src/*`
 
 ### Performance
@@ -229,7 +229,7 @@ import './globals.css';
 - All functional components (no class components)
 - Prefer `interface` for props, destructured in function signature
 - State via `useState`; refs via `useRef` for DOM elements and animation instances
-- Only context is `ThemeContext` — no global state library
+- Contexts: `ThemeContext`, and `ThesisSlideActive` for Thesis slides — no global state library
 
 ### Code Style
 

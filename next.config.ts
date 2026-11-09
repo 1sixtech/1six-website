@@ -16,7 +16,7 @@ const cspHeader = [
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
-  "media-src 'self' blob:",
+  "media-src 'self'",
   "font-src 'self' data:",
   "connect-src 'self'",
   "manifest-src 'self'",
