@@ -3,6 +3,16 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.9.0] - 2026-11-10
+
+### Changed
+
+- The site has one red, the logo's #FF3700. Writing's category labels, the 16% beside the About mark, and every hover and press state now use it instead of a darker red. On the light theme, small red text is below AA contrast; the owner accepted this, and it is recorded in the product notes.
+- On phones, each About section title stands apart from its content. Titles are larger (34px) and sit close under their rule with clear space before the content. They also land at the same height on every screen.
+- predict.everywhere.trade's name is red, and hovering it underlines the name.
+- The whole ASCII 16 on About reads in the light theme, not only its filled part.
+- The phone menu underlines the current page as well as coloring it, as the desktop navigation does.
+
 ## [0.3.8.0] - 2026-11-10
 
 ### Added
