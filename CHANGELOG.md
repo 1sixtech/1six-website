@@ -3,6 +3,16 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.10.1] - 2026-11-10
+
+### Fixed
+
+- Moving between pages no longer leaves the previous page's loading screen behind. Every client navigation used to add one more hidden, full-screen logo layer to the page, and leaving a page while its logo showed turned the next page's logo fade into a hard cut. The development console no longer reports two children with the same key on every page.
+
+### Documentation
+
+- The release QA checklist has a page-entry check that counts loading screens across client navigation (LOAD-7), and changes to the loading screen itself now route to the page-entry checks.
+
 ## [0.3.10.0] - 2026-11-10
 
 ### Changed

@@ -27,6 +27,12 @@ client navigation, captures a section hash before ScrollToTop strips it, and giv
 every entry an ownership ID. Old timers and asynchronous callbacks cannot unlock
 a newer entry. Navigation removes masks and entry locks.
 
+Each route mounts its own `IntroOverlay` and `IntroOrchestrator`. Both keys follow
+the pathname and must differ from each other: with one shared key, React removed
+only the old orchestrator, and every client navigation left the previous route's
+full-screen overlay in the page (fixed in v0.3.10.1). A section hash on the same
+route keeps both mounted.
+
 `IntroOrchestrator` controls only `intro-lock` and the site logo. Writing does not
 consume the first visual entrance. `siteIntroSeen` records brand frequency, not
 cache availability; an in-memory flag also handles blocked storage within an SPA
@@ -109,7 +115,8 @@ Run `pnpm test`, `pnpm lint`, and `pnpm build`. Check first entry/reload/client
 navigation for About, Thesis, Writing, article, and author; delayed fonts/media;
 missing or blocked chunks; reduced motion; Save-Data; hidden/visible transitions;
 leaving mid-load; and direct section hashes. Confirm Writing has no visible logo
-at first paint and completed visits do not replay it. Fail or stall every `.mp4`
+at first paint and completed visits do not replay it. After each client navigation
+the page holds one `.intro-overlay`, not one per route visited. Fail or stall every `.mp4`
 and confirm the page shows no repeated-glyph tile, and that a source failing once
 recovers on its own. Hold back a playing video's first frame and confirm that canvas
 does not report ready, the canvases behind it still build after its 1.5-second turn,

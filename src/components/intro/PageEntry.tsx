@@ -76,11 +76,13 @@ export function PageEntry() {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [pathname, startWarmup]);
 
+  // A new key per route remounts both. The keys must differ: with one shared key, a
+  // route change removed only the old orchestrator and left the old overlay in the page.
   return (
     <>
-      <IntroOverlay key={pathname} ref={overlayRef} fillRectRef={fillRectRef} />
+      <IntroOverlay key={`overlay:${pathname}`} ref={overlayRef} fillRectRef={fillRectRef} />
       <IntroOrchestrator
-        key={pathname}
+        key={`orchestrator:${pathname}`}
         pathname={pathname}
         onWarmup={startWarmup}
         fillRectRef={fillRectRef}
