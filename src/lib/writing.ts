@@ -307,7 +307,7 @@ function siteLink(slug: string, href: string): string {
   const target = path.posix.join(slug, file).replace(/\/$/, '');
   if (target === 'README.md') return `/writing${suffix}`;
   const [article, ...rest] = target.split('/');
-  if (!SLUG.test(article)) return href;
+  if (!isArticleSlug(article)) return href;
   const inside = rest.join('/');
   return inside === '' || inside === 'README.md'
     ? `/writing/${article}${suffix}`
