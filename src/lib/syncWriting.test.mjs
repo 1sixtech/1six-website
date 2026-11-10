@@ -122,6 +122,8 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
     let open = 0;
     let waiting = 0;
     const clock = { now: now ?? Date.now() };
+    // Like Node's, performance.now() counts from the process start, not from the wall clock's epoch.
+    const processStart = clock.now - 1000;
     const timers = new Map();
     let timersSet = 0;
     // Anything sent, answered, read, or set. The clock moves only after a stretch of turns with none.
@@ -283,7 +285,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       AbortController,
       DOMException,
       Date: class extends Date { static now() { return wallClock(clock.now); } },
-      performance: { now: () => clock.now },
+      performance: { now: () => clock.now - processStart },
       // The script's watchdogs and deadline, on the run's clock.
       setTimeout(callback, delay) {
         const id = addTimer(delay, callback);
@@ -1127,7 +1129,7 @@ test('a shorter rate limit does not cut short a longer one already running', asy
 
 test('eight downloads that each fail once still finish and give their slots on, so the files queued behind them follow', async () => {
   const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 8 }, () => dropped()) } });
-  assert.equal(run.exit, undefined, 'a slot never given on would leave the sync pending until Node exits 0 with nothing printed');
+  assert.equal(run.exit, undefined, 'a slot never given on would leave the sync waiting until its 10-minute limit failed the build');
   assert.equal(run.peak, 8);
   assertAllFigures(run);
 });
@@ -1171,7 +1173,7 @@ test('a sync that failed requests hold past its limit says how many retries they
   assert.equal(silent.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 49 of 57 files downloaded:',
     '  - Server errors and network failures cost 144 retries, and waiting to retry took 42 s.',
-    '  - GitHub answered slowly for the other 9 min 18 s.',
+    '  - GitHub answered slowly, or not at all, for the other 9 min 18 s.',
     stillWaitingOn(figureRange(48, 8)),
   ].join('\n'));
   assert.deepEqual(silent.operations, []);
@@ -1185,7 +1187,7 @@ test('a sync that failed requests hold past its limit says how many retries they
     'The article sync stopped at its 10-minute limit while downloading assets, with 57 of 65 files downloaded:',
     "  - GitHub's rate limit refused 64 requests and held every request for 6 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
     '  - Server errors and network failures cost 56 retries, and waiting to retry took 14 s more.',
-    '  - GitHub answered slowly for the other 3 min 46 s.',
+    '  - GitHub answered slowly, or not at all, for the other 3 min 46 s.',
     stillWaitingOn(figureRange(56, 8)),
   ].join('\n'));
 });
@@ -1369,6 +1371,65 @@ test('a step in the wall clock does not bend the late report, which times holds 
     'The article sync stopped at its 10-minute limit while reading the file listing:',
     "  - GitHub's rate limit refused 2 requests and held every request for 1 min 7 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
     '  - GitHub answered slowly for the other 8 min 53 s.',
+    '  - No request was waiting for an answer when time ran out.',
+  ].join('\n'));
+});
+
+test('retry waits inside a rate-limit hold count once, as the hold, and retries with no wait of their own say so', async () => {
+  // f0 is held for a minute at once; f1's 1-second backoff and f2's 30-second silence and backoff all fall
+  // inside that hold, and from 60 s all three crawl past the limit.
+  const run = await runSync({ ...LIVE, ...figures(3) }, {
+    now: START,
+    deferWaits: true,
+    replies: { '/f0.svg': [[429, { 'retry-after': '60' }], pastTheLimit()], '/f1.svg': [[503], pastTheLimit()], '/f2.svg': [silence, pastTheLimit()] },
+  });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 1 of 4 files downloaded:',
+    "  - GitHub's rate limit refused 1 request and held every request for 1 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - Server errors and network failures cost 2 retries.',
+    '  - GitHub answered slowly, or not at all, for the other 9 min.',
+    stillWaitingOn(figureRange(0, 3)),
+  ].join('\n'));
+});
+
+test('a step in the wall clock during a rate-limit hold neither cuts it short nor lets a shorter one replace it', async () => {
+  // f0 is held for a minute at once; the wall clock jumps 100 s ahead at 5 s; f1 is refused for 5 s at 10 s,
+  // inside the hold, and f2 gets a 503 at 12 s. Both wait out the minute.
+  const after = (delay, response) => async ({ wait }) => {
+    await wait(delay);
+    return response();
+  };
+  const run = await runSync({ ...LIVE, ...figures(4) }, {
+    now: START,
+    deferWaits: true,
+    wallClock: (time) => (time >= START + 5_000 ? time + 100_000 : time),
+    replies: {
+      '/f0.svg': [[429, { 'retry-after': '60' }]],
+      '/f1.svg': [after(10_000, () => new Response('busy', { status: 429, headers: { 'retry-after': '5' } }))],
+      '/f2.svg': [after(12_000, () => new Response('down', { status: 503 }))],
+    },
+  });
+  assert.equal(run.exit, undefined);
+  assert.equal(run.sentWhileWaiting, 0, 'nothing is sent while the minute runs');
+  for (const name of ['f1.svg', 'f2.svg']) assert.deepEqual(sendsOf(run, figureAt(name)), [0, 60_000], name);
+  for (const [file, text] of Object.entries(figures(4))) assert.equal(run.written.get(`/repo/public/writing-assets/${file}`), text, file);
+});
+
+test('a late report says when no request was waiting for an answer, rather than naming none', async () => {
+  // The commit arrives a character every 8 s, done at 328 s; then every eight figures are refused three
+  // times for 50 s, and the second eight are being held at the limit.
+  const run = await runSync({ ...LIVE, ...figures(16) }, {
+    now: START,
+    deferWaits: true,
+    replies: { '/commits/': [trickle([...`${COMMIT}\n`], 8_000)], ...eachFigure(16, 3, () => [429, { 'retry-after': '50' }]) },
+  });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 9 of 17 files downloaded:',
+    "  - GitHub's rate limit refused 48 requests and held every request for 4 min 32 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - GitHub answered slowly for the other 5 min 28 s.',
+    '  - No request was waiting for an answer when time ran out.',
   ].join('\n'));
 });
 

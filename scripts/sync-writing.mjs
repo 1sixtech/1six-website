@@ -4,6 +4,8 @@
 
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+// Every wait goes through sleep; the global setTimeout is only for the watchdog and the deadline. The tests
+// tell the two apart by that.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { ASSET_EXTENSIONS } from '../src/lib/writingAssets.mjs';
@@ -46,9 +48,10 @@ const RESET_MARGIN_MS = 1000;
 // A download that keeps arriving runs on however slowly, and the sync's deadline bounds it. Every request
 // is a GET, so one abandoned is safe to send again.
 const REQUEST_IDLE_MS = 30_000;
-// Vercel stops a build at 45 minutes and prints nothing about why. A healthy sync takes seconds; even the
-// most the checks allow, 200 MB of READMEs and 200 MB of assets, arrives in about five minutes at 11 Mbit/s.
-// Past this, GitHub is refusing, failing, or crawling, and the build stops saying so.
+// Vercel stops a build at 45 minutes and prints nothing about why. A healthy sync takes seconds. The most the
+// checks allow, MAX_TOTAL_MB of READMEs and as much again of assets, arrives in about five minutes at 11 Mbit/s,
+// the rate eight 5 MB files needed to beat the 30-second request limit this replaced; raise MAX_TOTAL_MB and this
+// grows with it. Past this, GitHub is refusing, failing, or crawling, and the build stops saying so.
 const SYNC_DEADLINE_MS = 10 * 60_000;
 // GitHub allows 100 concurrent REST requests, and a token build reads every file there. A fetch keeps
 // its slot through its retries and waits, so this bounds open requests too.
@@ -82,10 +85,10 @@ let runningFetches = 0;
 const waitingForSlot = [];
 
 // What the sync has done so far, for the report a missed deadline prints. `held` and `waiting` are spans
-// [start, end) of the time a rate limit held every request and of the time a request waited to be retried,
-// on the monotonic clock, so a step in the wall clock cannot bend them. `asking` holds the requests
-// waiting for an answer.
-const progress = { step: 'looking up the commit', files: 0, downloaded: 0, refusals: 0, otherRetries: 0, held: [], waiting: [], asking: new Set() };
+// [start, end) of the time a rate limit held every request and of each wait to retry after a server error
+// or a network failure, on the monotonic clock, so a step in the wall clock cannot bend them. `silences`
+// counts the requests the watchdog gave up on, and `asking` holds the requests waiting for an answer.
+const progress = { step: 'looking up the commit', files: 0, downloaded: 0, refusals: 0, held: [], waiting: [], silences: 0, asking: new Set() };
 
 /** The span of the next `length` ms, on the monotonic clock. */
 function spanFromNow(length) {
@@ -102,11 +105,13 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 
 function pauseRequests(delay) {
   const wait = Math.min(delay, MAX_TIMER_MS);
-  const until = Date.now() + wait;
-  if (until <= resumeAt) return;
-  resumeAt = until;
+  // On the monotonic clock, as the pause's timer is, so a step in the wall clock cannot cut a hold short
+  // or let a shorter one replace it.
+  const span = spanFromNow(wait);
+  if (span[1] <= resumeAt) return;
+  resumeAt = span[1];
   resumed = sleep(wait);
-  progress.held.push(spanFromNow(wait));
+  progress.held.push(span);
 }
 
 /** Runs `task` once fewer than MAX_CONCURRENT_FETCHES tasks hold a slot. */
@@ -154,10 +159,10 @@ async function attempt(url, headers, retriesUsed) {
   // A fresh watchdog each time, so a retry does not start on a spent one. The answer starts its wait
   // again, and so does each part of its body, unless it is a refusal (see readAnswer).
   const abandon = new AbortController();
-  const watchdog = setTimeout(
-    () => abandon.abort(new DOMException(`Nothing arrived for ${REQUEST_IDLE_MS / 1000} s`, 'TimeoutError')),
-    REQUEST_IDLE_MS,
-  );
+  const watchdog = setTimeout(() => {
+    progress.silences += 1;
+    abandon.abort(new DOMException(`Nothing arrived for ${REQUEST_IDLE_MS / 1000} s`, 'TimeoutError'));
+  }, REQUEST_IDLE_MS);
   const arrived = () => watchdog.refresh();
   progress.asking.add(url);
   try {
@@ -213,7 +218,6 @@ function githubFetch(url, headers) {
       console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
       // A rate limit's wait is the shared pause, which the next attempt waits out first.
       if (!outcome.paused) {
-        progress.otherRetries += 1;
         progress.waiting.push(spanFromNow(outcome.delay));
         await sleep(outcome.delay);
       }
@@ -366,7 +370,7 @@ function covered(spans, until) {
  * at all. Then the requests still waiting for an answer, so a slow one is named.
  */
 function lateReport() {
-  const { step, files, downloaded, refusals, otherRetries, held: holds, waiting, asking } = progress;
+  const { step, files, downloaded, refusals, held: holds, waiting, silences, asking } = progress;
   const now = performance.now();
   // Whole seconds, so the lines add up as printed. A hold or a wait still running counts only as far as now.
   const seconds = (spans) => Math.round(covered(spans, now) / 1000) * 1000;
@@ -378,12 +382,17 @@ function lateReport() {
     const advice = held >= NOTABLE_SHARE_MS ? RATE_LIMIT_ADVICE : '';
     lines.push(`GitHub's rate limit refused ${plural(refusals, 'request')} and held every request for ${duration(held)} in all.${advice}`);
   }
-  if (otherRetries > 0) {
+  if (waiting.length > 0) {
     const wait = waited > 0 ? `, and waiting to retry took ${duration(waited)}${held > 0 ? ' more' : ''}` : '';
-    lines.push(`Server errors and network failures cost ${plural(otherRetries, 'retry', 'retries')}${wait}.`);
+    lines.push(`Server errors and network failures cost ${plural(waiting.length, 'retry', 'retries')}${wait}.`);
   }
-  if (rest >= NOTABLE_SHARE_MS) lines.push(`GitHub answered slowly for ${held + waited > 0 ? 'the other' : 'all'} ${duration(rest)}.`);
+  if (rest >= NOTABLE_SHARE_MS) {
+    const how = silences > 0 ? 'slowly, or not at all,' : 'slowly';
+    lines.push(`GitHub answered ${how} for ${held + waited > 0 ? 'the other' : 'all'} ${duration(rest)}.`);
+  }
+  // With no request out, time put down to slow answers may have gone somewhere else, such as the sync itself.
   if (asking.size > 0) lines.push(`Still waiting on ${plural(asking.size, 'answer')}, from ${[...asking].join(', ')}.`);
+  else if (rest >= NOTABLE_SHARE_MS) lines.push('No request was waiting for an answer when time ran out.');
   const done = files > 0 ? `, with ${downloaded} of ${files} files downloaded` : '';
   return `The article sync stopped at its ${SYNC_DEADLINE_MS / 60_000}-minute limit while ${step}${done}:\n${lines.map((line) => `  - ${line}`).join('\n')}`;
 }
