@@ -336,7 +336,8 @@ function walkPublic(
  * The src is rebuilt from the file's own names, each encoded in full: the
  * form Next's static server matches (it misses, for one, "R&D's%20chart.svg"),
  * and one that decodes back to exactly those names. So the page asks for the
- * file that was checked, whatever form the source took.
+ * file that was checked, whatever form the source took. The query is dropped;
+ * the fragment is kept, because an SVG can show a view it names (#svgView).
  */
 function articleImage(slug: string, written: string, local: string): { file: string; src: string } {
   const failure = (reason: string) =>
@@ -354,9 +355,14 @@ function articleImage(slug: string, written: string, local: string): { file: str
       " from a web address; an article image must be one of the site's own files, normally in its article's folder (the site's content security policy blocks other sites)",
     );
   }
-  // A browser would decode it, but here its "#" would start a fragment and cut the path short.
+  // A browser would decode it into a name the lookup would not search for, and a
+  // numeric one's "#" would start a fragment here and cut the path short.
   const reference = written.match(CHARACTER_REFERENCE)?.[0];
-  if (reference) throw failure(`, which spells a character as ${excerpt(reference)}: type the character itself`);
+  if (reference) {
+    throw failure(
+      `, which a browser reads as the character reference ${excerpt(reference)}: type the character itself, or write a literal & as %26`,
+    );
+  }
   // Next's static server collapses "//" and drops a trailing "/", so an empty segment names nothing.
   let segments: string[];
   try {
@@ -381,7 +387,9 @@ function articleImage(slug: string, written: string, local: string): { file: str
   if (!ASSET_EXTENSIONS.has(path.extname(name).toLowerCase())) {
     throw failure(`, but ${shown} is not an allowed type (${[...ASSET_EXTENSIONS].join(', ')})`);
   }
-  return { file: path.join(PUBLIC_DIR, ...names), src: `/${names.map(encodeURIComponent).join('/')}` };
+  // The URL parser has encoded the fragment's quotes and angle brackets; an "&" in an attribute is escaped.
+  const fragment = url.hash.replace(/&/g, '&amp;');
+  return { file: path.join(PUBLIC_DIR, ...names), src: `/${names.map(encodeURIComponent).join('/')}${fragment}` };
 }
 
 /** The intrinsic size of an SVG file, read from its root element. */

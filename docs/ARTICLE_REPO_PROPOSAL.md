@@ -92,9 +92,9 @@ What to expect:
   later article merges, update the pull request's branch. If article pull requests start to overlap,
   also turn on **Require branches to be up to date before merging**.
 - **It catches a figure path with a typo.** An image that is not a file in the article's folder, or under
-  the website's `public/`, fails the check, and so does an `http(s)` image, which the site's security policy
-  blocks. Names must match exactly, including case. Only a difference in how Unicode composes a name, which
-  cannot be seen (as when a Korean name is copied from Finder), is accepted.
+  the website's `public/`, fails the check, and so does an `http(s)` image, even one on 1six.tech: an article
+  image must be a file the site holds. Names must match exactly, including case. Only a difference in how
+  Unicode composes a name, which cannot be seen (as when a Korean name is copied from Finder), is accepted.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
 

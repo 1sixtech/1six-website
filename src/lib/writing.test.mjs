@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -26,6 +27,8 @@ mkdirSync(path.join(root, `public/writing-assets/${SLUG}/assets/folder.svg`), { 
 // Files under public/ that no page can show as an article image.
 write(`public/writing-assets/${SLUG}/assets/.hidden.svg`, svg('width="1" height="1"'));
 write(`public/writing-assets/${SLUG}/assets/a\\b.svg`, svg('width="1" height="1"'));
+write(`public/writing-assets/${SLUG}/a\\b/c.svg`, svg('width="1" height="1"'));
+write(`public/writing-assets/${SLUG}/assets/${'café'.normalize('NFC')}.svg`, svg('width="1" height="1"'));
 write('public/clip.mp4', 'not an image');
 write(
   `content/writing/${SLUG}/README.md`,
@@ -174,6 +177,8 @@ test('an image source names its file as the server reads it', () => {
           '![Upper](assets/Chart.SVG)',
           '![Doubled](<assets//지연 차트.svg>)',
           `![Trailing](/writing-assets/${SLUG}/top.svg/)`,
+          '![Viewed](<assets/지연 차트.svg#svgView(viewBox(0,0,10,10))>)',
+          `![Joined](../${SLUG}/assets/chart.svg#a&b)`,
         ].join('\n\n'),
     );
     const tags = imgTags(getArticle(slug).html);
@@ -192,6 +197,8 @@ test('an image source names its file as the server reads it', () => {
       Upper: ['80', '20'],
       Doubled: ['30', '40'],
       Trailing: ['10', '20'],
+      Viewed: ['30', '40'],
+      Joined: ['760', '330'],
     });
     // The src names the file by its own name on disk, each segment encoded in full, whatever form the
     // source took: Next's static server matches only that form for a name such as R&D's chart.svg.
@@ -201,7 +208,7 @@ test('an image source names its file as the server reads it', () => {
     assert.deepEqual(srcs, {
       Spaced: korean,
       Encoded: korean,
-      Query: korean,
+      Query: `${korean}#top`,
       Dotted: korean,
       Decomposed: korean,
       Sibling: `/writing-assets/${SLUG}/assets/chart.svg`,
@@ -213,6 +220,9 @@ test('an image source names its file as the server reads it', () => {
       // Next's static server collapses "//" and drops a trailing "/"; the src ships without them.
       Doubled: korean,
       Trailing: `/writing-assets/${SLUG}/top.svg`,
+      // The query is dropped and the fragment kept: an SVG can show the view it names. Its "&" is escaped.
+      Viewed: `${korean}#svgView(viewBox(0,0,10,10))`,
+      Joined: `/writing-assets/${SLUG}/assets/chart.svg#a&amp;b`,
     });
   } finally {
     removeArticle(slug);
@@ -241,6 +251,10 @@ test('an image with no file under public/, or from a web address, fails the buil
     'HTTPS://EXAMPLE.COM/CHART.PNG',
     '//example.com/chart.png',
     `https://1six.tech${fixture}/assets/chart.svg`,
+    // The same scheme as the site: a URL parser reads these as relative, so only the scheme check refuses them.
+    `https:${fixture}/assets/chart.svg`,
+    'https:assets/chart.svg',
+    'HTTPS:assets/chart.svg',
   ];
   const fails = (markdown, expected, label) => {
     try {
@@ -265,10 +279,13 @@ test('an image with no file under public/, or from a web address, fails the buil
   fails(`![Figure](${fixture}/assets/.hidden.svg)`, `but the site does not serve public${fixture}/assets/.hidden.svg: its name starts with "."`, 'a dotfile');
   fails('![Figure](/clip.mp4)', 'but public/clip.mp4 is not an allowed type (.avif, .gif, .jpeg, .jpg, .png, .svg, .webp)', 'a file that is not an image');
   fails(`![Figure](${fixture}/assets/a%5Cb.svg)`, `but the site does not serve public${fixture}/assets/a\\b.svg: a name in it holds "\\"`, 'a backslash, which Next reads as a slash');
+  fails(`![Figure](${fixture}/a%5Cb/c.svg)`, `but the site does not serve public${fixture}/a\\b/c.svg: a name in it holds "\\"`, 'a backslash in a folder name');
   fails(`![Figure](<${fixture}/100%.png>)`, 'but a "%" in its path starts no valid escape (write a literal % as %25)', 'a malformed escape');
-  // marked leaves these for the browser to decode; the check would read a cut-short path instead.
+  fails('![Figure](assets/%FF.svg)', '"assets/%FF.svg", but a "%" in its path starts no valid escape', 'an escape that is not UTF-8');
+  fails(`![Figure](<${fixture}/assets/${'Café'.normalize('NFD')}.svg>)`, `did you mean public${fixture}/assets/${'café'.normalize('NFC')}.svg?`, 'case and normalization both differ');
+  // marked leaves these for the browser to decode into a name the check would not look up.
   for (const [source, reference] of [['assets/a&#x20;b.svg', '&#x20;'], ['assets/a&nbsp;b.svg', '&nbsp;'], ['/&#47;example.com/x.png', '&#47;']]) {
-    fails(`![Figure](${source})`, `"${source}", which spells a character as ${reference}: type the character itself`, reference);
+    fails(`![Figure](${source})`, `"${source}", which a browser reads as the character reference ${reference}: type the character itself, or write a literal & as %26`, reference);
   }
   for (const source of external) {
     fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be one of the site's own files`, source);
@@ -286,6 +303,8 @@ test('a build error quotes an article with its control characters still encoded'
   const cases = [
     // Decoded raw, %0A would start a line the Actions log reads as a command, and %1B a terminal escape.
     ['Date: 2026-11-08\n\n![Figure](<assets/a%0A::error title=x::y%1B[2K.svg>)', '"assets/a%0A::error title=x::y%1B[2K.svg"'],
+    // C1 controls (NEL, an 8-bit CSI) and the line separator, too.
+    ['Date: 2026-11-08\n\n![Figure](<assets/a%C2%85b%C2%9B[2K%E2%80%A8.svg>)', '"assets/a%C2%85b%C2%9B[2K%E2%80%A8.svg"'],
     ['Date: 2026-11-08\u001b]0;title\u0007', 'needs a date like 2026-11-08, found "2026-11-08%1B]0;title%07"'],
   ];
   for (const [line, quoted] of cases) {
@@ -323,6 +342,29 @@ test('a file added between getArticles() calls is seen, because each call lists 
     write(`public/writing-assets/${slug}/assets/late.svg`, svg('width="1" height="2"'));
     assert.match(getArticle(slug).html, /src="\/writing-assets\/002-late\/assets\/late\.svg"/);
   } finally {
+    removeArticle(slug);
+  }
+});
+
+test('an SVG is sized from the file under its name on disk', (t) => {
+  // A Mac's disk opens a name in either normalization, so only the path actually read shows which one was used.
+  const slug = '002-nfd-read';
+  const decomposed = '지연'.normalize('NFD');
+  const read = [];
+  const original = fs.readFileSync;
+  t.mock.method(fs, 'readFileSync', function (file, ...rest) {
+    read.push(String(file));
+    return original.call(this, file, ...rest);
+  });
+  syncBuiltinESMExports();
+  try {
+    write(`public/writing-assets/${slug}/assets/${decomposed}.svg`, svg('width="3" height="4"'));
+    write(`content/writing/${slug}/README.md`, `---\ntitle: NFD\ndate: 2026-11-08\n---\n\n![C](<assets/${'지연'.normalize('NFC')}.svg>)\n`);
+    getArticle(slug);
+    assert.ok(read.some((file) => file.endsWith(path.join(slug, 'assets', `${decomposed}.svg`))), JSON.stringify(read));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
     removeArticle(slug);
   }
 });
