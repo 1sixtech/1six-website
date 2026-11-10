@@ -37,8 +37,9 @@ const MAX_ASSET_MB = 5;
 const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a
 // repeated file once, so many small entries in the listing can still be many gigabytes.
-// Each download is held to its listed size as it arrives, so this caps what arrives too.
-// SYNC_DEADLINE_MS is sized for this cap.
+// Each download is held to its listed size as it arrives, so this caps what is held too; a body of the wrong
+// size is dropped and retried (see readBody), so a misbehaving host can send up to four times as much.
+// SYNC_DEADLINE_MS is sized for this cap, with no such retries.
 const MAX_TOTAL_MB = 200;
 const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 // The lookup answers with a commit SHA, 40 characters (64 in a SHA-256 repository). A listing is cut off at
