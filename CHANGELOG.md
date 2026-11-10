@@ -3,6 +3,39 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.8.0] - 2026-11-10
+
+### Added
+
+- `WRITING_GITHUB_TOKEN`, an optional read-only token, lifts builds off GitHub's shared limit of 60 anonymous requests an hour.
+- A written proposal, awaiting the owner's approval, for a required pull-request check in the article repository and an alert when a publish build fails.
+
+### Changed
+
+- The article sync names and refuses a numbered folder it cannot publish: a name the site cannot load, no README or one over 5 MB, a symbolic link, or a submodule in an article's place. A misnamed folder used to publish its figures without its article.
+- A published article may carry only image files, up to 5 MB each and 200 MB in total. Anything else fails the sync and is named, instead of being copied to a public URL.
+- The site and the sync use one rule for article folder names.
+
+### Fixed
+
+- A partial file listing from GitHub fails the sync instead of silently dropping articles.
+- A brief GitHub outage or rate limit no longer fails a build at the first answer. Requests retry up to three times, follow GitHub's requested wait, and fail at once when the wait would exceed a minute.
+
+## [0.3.7.0] - 2026-11-10
+
+### Fixed
+
+- Thesis opens on its first screen when you arrive from the phone menu on a scrolled About. About's position used to carry over to the next page and skip that screen, and Writing opened partway down the same way.
+- Clicking the Thesis link twice on desktop stays on the first screen. After a mouse click the header no longer waits on screen for a second click. Keyboard users still bring it down.
+- Pressing a Thesis link while on Thesis goes to the first screen and leaves no section in the address, so a reload or Back cannot skip it. The slides start over from the first, and you can scroll straight back into them.
+- The footer's Thesis link works on Thesis. It used to do nothing, or land a phone on the last slide. Keyboard users continue from the top of the page.
+- Pressing Back with the phone menu open no longer restores the previous page's position when the menu closes.
+- The Thesis header stays hidden until your first scroll when you arrive from further down another page.
+
+### Documentation
+
+- `docs/QA_CHECKLIST.md` lists what must pass before a release: Thesis sections, the desktop pin, mobile capture, scroll locks, About's sections, page entry, and the Thesis art, each tied to the fix it protects.
+
 ## [0.3.5.0] - 2026-11-09
 
 ### Changed

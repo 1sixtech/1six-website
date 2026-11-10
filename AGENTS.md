@@ -29,6 +29,7 @@ On a fresh checkout, run `pnpm install`, then `node scripts/sync-writing.mjs` be
 `pnpm dev`. Writing content and assets are downloaded from GitHub and ignored by git;
 `pnpm build` runs that sync automatically. No environment variables are required.
 `WRITING_GIT_REF` optionally selects a reviewed article commit or tag instead of `main`.
+`WRITING_GITHUB_TOKEN` optionally gives the sync a read-only GitHub token (see Writing).
 
 ## Project Structure
 
@@ -61,7 +62,7 @@ src/
     intro/                    # PageEntry, IntroOrchestrator, IntroOverlay
     writing/                  # WritingIndex filters, ArticleList, full-size FigureViewer
     team/                     # CareersSection.tsx (parked, not rendered)
-    layout/                   # Header.tsx, Footer.tsx
+    layout/                   # Header.tsx, Footer.tsx, FooterLink.tsx
     ui/                       # Reusable: ScrollRevealWrapper, RollingNumber, ThemeToggle, Logo
     providers/                # ThemeProvider.tsx
   hooks/
@@ -69,9 +70,11 @@ src/
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
-    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute()
+    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
+    writingDraft.mjs          # Draft marker rule, shared by the site and the sync script
+    writingSlug.mjs           # Article folder-name rule, shared by the site and the sync script
     themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
     ascmosaic/                # Custom Three.js ASCII mosaic library
       index.ts                # AscMosaic class (WebGL renderer)
@@ -111,6 +114,13 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   sync skips it. A missing or impossible date fails the build and names the article.
 - `/writing?category=op-ed` and the other category URLs survive browser Back. Missing or unknown URL
   filters show all articles. Empty categories show an explanation and a link back to all writing.
+- The sync fails and leaves the last good sync in place on a truncated GitHub listing, or on a numbered folder that has no
+  README or one over 5 MB, holds a symbolic link, or has a name the site would not load (one rule: `writingSlug.mjs`); every
+  such folder is named at once. After drafts are known, published articles may carry only AVIF, GIF, JPEG, PNG, SVG, and WebP
+  files of at most 5 MB each and 200 MB in total, again naming every problem. A draft's other files are not checked.
+- GitHub 403, 429, and 5xx answers are retried three times, honoring `Retry-After` and the rate-limit reset. A wait longer
+  than a minute is not attempted: the sync fails at once. With `WRITING_GITHUB_TOKEN` every request uses the REST API;
+  without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails the build.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
   omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
   Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
@@ -193,6 +203,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 - Responsive: mobile-first with `md:` breakpoint (768px)
 - About shows one section per screen on phones and desktop: bands are `100lvh` tall and the root snaps to them
   (`mandatory`, viewports 640px and taller, 760px at tablet widths, no reduced motion). Bands grow with their content rather than clip it.
+  A menu link turns the snap off until the next route commits (`data-nav-leaving`): iOS re-applies the old section after the menu lock lifts, onto the next page.
 - Path alias: `@/*` maps to `./src/*`
 
 ### Performance
@@ -260,7 +271,7 @@ Navigation order is About, Thesis, Writing. `/about`, `/research`, and `/team` a
 redirects. Unknown article and author slugs return 404.
 
 Home anchors: `/#products`, `/#origins`, `/#investors`, `/#contact`.
-Thesis anchors: `/thesis#thesis`, `/thesis#products`.
+Thesis anchors: `/thesis#thesis`, `/thesis#products`. The header and footer Thesis links, pressed on Thesis, go to Hero and drop any hash.
 
 SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
 and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
@@ -272,8 +283,9 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Tests cover pure logic, article safety, writer profile output, and actual
-  crossing, intro, mobile capture, and header navigation effects with controlled dependencies.
+  stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
+  writer profile output, and actual crossing, intro, mobile capture, and header navigation effects
+  with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 
@@ -306,8 +318,10 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - [PRODUCT.md](PRODUCT.md): current audience, content decisions, and confirmed claims.
 - [TODOS.md](TODOS.md): remaining work and completed release items.
 - [CHANGELOG.md](CHANGELOG.md): release history; [VERSION](VERSION) uses four parts while package.json uses the first three.
+- [docs/QA_CHECKLIST.md](docs/QA_CHECKLIST.md): what must pass before a release, for Thesis sections, capture, scroll locks, and page entry.
 - [docs/ABOUT_MOBILE_DESIGN.md](docs/ABOUT_MOBILE_DESIGN.md): mobile About composition, type roles, spacing, and review evidence.
 - [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
+- [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md): proposed required check and build-result alert for the article repository, awaiting the owner's approval.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
 - [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.

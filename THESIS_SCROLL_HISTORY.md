@@ -829,3 +829,93 @@ first frame report, and a video that never sends one goes through the normal ret
 still fallback. That wait first ran inside the serialized init turn, where one silent
 video held every canvas behind it for five seconds per attempt, so a turn now ends at
 1.5 seconds and the canvas keeps waiting on its own.
+
+---
+
+## 15. Thesis starting below Hero (2026-11-09)
+
+Feedback said Thesis opened from the bottom, on desktop and on phones. The two
+platforms had different causes, and a third path turned up while fixing them.
+
+### iPhone: About's snap followed the visitor to the next page
+
+v0.3.4.0 put `scroll-snap-type: y mandatory` on the root while About is mounted. The
+menu lock (`position: fixed` on body) collapses the document. Lifting it for a menu
+link regrows About under that snap, and iOS re-applies the section the visitor left,
+asynchronously. Traced in the iOS 26.5 simulator against production, About at y=1508:
+
+| Time | Event | scrollY |
+|---|---|---:|
+| 22771 ms | Tap on Thesis, lock lifted | 0 |
+| 22825 ms | `ScrollToTop`'s one reset | 0 |
+| 22849 ms | A scroll with no JavaScript call, on the new page | 1508 |
+| 22851 ms | Forward crossing captures slide one | 714 |
+
+Writing started at y=754 the same way. About at its top, the footer link, and a reload
+were not affected, and turning the snap off from page load removed it.
+
+A menu link now sets `data-nav-leaving` before it lifts the lock, `about.css` drops
+the snap while that is set, and Header clears it when the pathname changes. Snap off
+only while the menu is mounted still reproduced the bug: the menu unmounts about 40 ms
+before the route commits. A link to the current page sets nothing: it is not leaving,
+and that press keeps its existing result, back on the same section. The flag also expires after five seconds, since a navigation replaced by another press
+on the same page never changes the route.
+
+Browser Back under an open menu reached the same symptom by another path: closing the
+menu restored About's offset on the new page. The menu lock is now taken again when the
+pathname changes, so closing restores the new page's position.
+
+### Desktop: a second click on the Thesis link
+
+Chrome leaves focus on a clicked link. `.site-header:focus-within` then held the hidden
+header over Hero on arrival, so a second click, from 80 ms apart up to a click a second
+later, landed on the Thesis link again. WebKit does not focus a clicked link and did
+not reproduce it. Removing only that rule made the same double-click stay on Hero. The
+reveal is now `.site-header:has(:focus-visible)`, so a keyboard user still sees it, with
+`:focus-within` as the fallback where `:has()` is missing. Arriving from further down
+another page, the route's own reset to the top also fired the header's reveal, so
+`useScrollReveal` now ignores a scroll event at 0.
+
+### Pressing Thesis while on Thesis
+
+Section 11 made this press align `#thesis`. It was the destination of that second click,
+and the hash it left made a reload and Back keep skipping Hero. The owner chose Hero
+with no hash. `scrollToPageTop` sends a `top` request, drops any hash with
+`replaceState`, and scrolls to 0. Direct `/thesis#thesis` and `/thesis#products` links
+still land on their sections.
+
+The request has to reset `prevScrollYRef`. Under the menu lock the phantom scroll to 0
+is filtered on purpose, so nothing else updates that baseline; from the footer, the
+jump's own scroll event would be the crossing. Left below the Thesis top, either way, it
+would capture the last slide. The request does not suspend capture, and it ends a suspend
+window already open: an instant jump has no frames to guard, crossings are one-shot, and
+section 11's immediate re-entry rule applies. It also returns the slider to page one on
+both layouts and stops a desktop crossfade in flight, whose completion could scroll back
+into Thesis. Upward exits used to leave only from page one, so nothing had needed to.
+
+The footer's Thesis link did the same job badly: nothing on plain `/thesis`, and from a
+section URL Next jumped to the top, kept the hash, and a phone captured the last slide
+at y=844. `FooterLink` routes it through the same `scrollToPageTop` and moves focus to
+`#main-content`, or the next Tab would scroll straight back down to the footer. The
+landmark is focusable only while it holds that focus: a permanent `tabIndex` made any
+click in a long article send the next Tab to the top of the page.
+
+### Verification and limits
+
+Reverting each fix made its regression test fail. Chromium and Playwright WebKit passed
+57 checks each across 1440x900, 1280x640, and phone emulation, covering double-click
+gaps from 0 to 1000 ms, keyboard reveal and footer focus, a pinned slide, a dot jump
+interrupted by a press, section URLs, modified clicks, Back under the open menu, a
+pending route replaced by a newer press, and a route that never commits.
+
+A local production build in the native iOS 26.5 simulator, with real touch paths:
+About y=1508 to Thesis and y=754 to Writing start at 0 with no late scroll; closing the
+menu restores the position and snap; arriving on About by menu still snaps; a captured
+slide, a section URL, and the footer reach Hero; the first scroll after that stays free;
+a swipe 1075 ms after the press captures slide one; Back under the open menu keeps Hero;
+a route that commits 24 seconds later, past the snap deadline, still starts at 0; and the
+full 1→7→Graph→7→1→Hero→1 sequence passes. A synthetic swipe with no intermediate moves
+does not advance Swiper, so use a touch path.
+
+iOS 27 was not run: simulator access was not granted during this work. Physical iPhone
+and Android devices and Firefox were not tested.

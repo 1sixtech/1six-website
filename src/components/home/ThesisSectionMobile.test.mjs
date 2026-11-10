@@ -80,7 +80,7 @@ function thesisHarness({ scrollY = 0 } = {}) {
     'swiper/modules': { EffectFade: Symbol('EffectFade') },
     'swiper/css': {},
     'swiper/css/effect-fade': {},
-    '@/lib/hashScroll': { HASH_SCROLL_REQUEST_EVENT: '1six:hash-scroll-request' },
+    '@/lib/hashScroll': { HASH_SCROLL_REQUEST_EVENT: '1six:hash-scroll-request', PAGE_TOP_REQUEST: 'top' },
     './thesisSlideActive': { ThesisSlideActive: Symbol('ThesisSlideActive') },
     './thesisData': {
       TOTAL,
@@ -155,6 +155,14 @@ function thesisHarness({ scrollY = 0 } = {}) {
       const end = new Event('touchend');
       end.changedTouches = [{ clientY: endY }];
       section.dispatchEvent(end);
+    },
+    requestHash(hash) {
+      window.dispatchEvent(new CustomEvent('1six:hash-scroll-request', { detail: { hash } }));
+    },
+    menuLock(y) {
+      document.documentElement.dataset.menuOpen = '1';
+      this.scroll(y);
+      delete document.documentElement.dataset.menuOpen;
     },
     pageTouchMove() {
       const event = new Event('touchmove', { cancelable: true });
@@ -354,4 +362,98 @@ test('mobile Thesis: downward release retains its cooldown and does not replay a
   assert.equal(thesis.captured, true);
   assert.equal(thesis.swiper.activeIndex, TOTAL - 1);
   assert.deepEqual(thesis.scrollRequests.at(-1), { top: THESIS_TOP, behavior: 'auto' });
+});
+
+test('mobile Thesis: a return to the top releases capture and leaves the next entry on slide one', (t) => {
+  const thesis = thesisHarness();
+  t.after(() => thesis.cleanup());
+  thesis.scroll(THESIS_TOP);
+  thesis.swiper.slideTo(3);
+  assert.equal(thesis.captured, true);
+  const requests = thesis.scrollRequests.length;
+
+  thesis.menuLock(0);
+  thesis.requestHash('top');
+  assert.equal(thesis.captured, false);
+  assert.equal(thesis.swiper.allowTouchMove, false);
+  assert.equal(thesis.pageTouchMove(), false);
+  assert.equal(thesis.swiper.activeIndex, 0, 'the section rises into view showing slide one, not the old slide');
+  thesis.scroll(0);
+  assert.equal(thesis.scrollRequests.length, requests, 'released capture must not pull the page back');
+
+  thesis.scroll(30);
+  assert.equal(thesis.captured, false, 'Hero scrolls freely');
+  thesis.scroll(780);
+  assert.equal(thesis.captured, true);
+  assert.equal(thesis.swiper.activeIndex, 0, 'a later entry starts from the first slide');
+});
+
+test('mobile Thesis: a return to the top refreshes a baseline left below Thesis by the menu lock', (t) => {
+  const thesis = thesisHarness({ scrollY: 1625 });
+  t.after(() => thesis.cleanup());
+  thesis.menuLock(0);
+  thesis.requestHash('top');
+  thesis.scroll(3);
+  assert.equal(thesis.captured, false,
+    'the first scroll from Hero must not look like coming back up from below Thesis');
+  assert.equal(thesis.swiper.activeIndex, 0);
+});
+
+test('mobile Thesis: a section request still leaves the scroll baseline alone', (t) => {
+  const thesis = thesisHarness({ scrollY: 1625 });
+  t.after(() => thesis.cleanup());
+  thesis.requestHash('products');
+  thesis.advance(1232);
+  thesis.scroll(700);
+  assert.equal(thesis.captured, true, 'only the top request resets the baseline');
+  assert.equal(thesis.swiper.activeIndex, TOTAL - 1);
+});
+
+test('mobile Thesis: a return to the top from below Thesis leaves forward re-entry available at once', (t) => {
+  // No menu lock here: the footer link sends this request from the page itself.
+  const thesis = thesisHarness({ scrollY: 2400 });
+  t.after(() => thesis.cleanup());
+  thesis.requestHash('top');
+  thesis.scroll(0);
+  assert.equal(thesis.captured, false, 'the jump itself is not the visitor entering Thesis');
+  assert.deepEqual(thesis.scrollRequests, [], 'nothing may pull the page back from Hero');
+
+  // Crossings are one-shot: a suspend window here would lose this one for good.
+  thesis.advance(100);
+  thesis.scroll(780);
+  assert.equal(thesis.captured, true);
+  assert.equal(thesis.swiper.activeIndex, 0, 'the next real entry starts from the first slide');
+});
+
+test('mobile Thesis: a return to the top cancels a section arrival still waiting to capture', (t) => {
+  const thesis = thesisHarness();
+  t.after(() => thesis.cleanup());
+  thesis.requestHash('thesis');
+  thesis.requestHash('top');
+  // Inside the alignment tolerance but short of the crossing: only the pending
+  // arrival could capture here.
+  thesis.scroll(THESIS_TOP - 3);
+  assert.equal(thesis.captured, false, 'the visitor asked for Hero, not the section that was pending');
+  assert.deepEqual(thesis.scrollRequests, []);
+});
+
+test('mobile Thesis: a return to the top ends a suspend window already open', (t) => {
+  for (const earlier of ['section link', 'downward exit']) {
+    const thesis = thesisHarness();
+    t.after(() => thesis.cleanup());
+    if (earlier === 'section link') {
+      thesis.requestHash('products');
+    } else {
+      thesis.scroll(THESIS_TOP);
+      thesis.swiper.slideTo(TOTAL - 1);
+      thesis.swipe(300, 200);
+      thesis.flushFrames();
+    }
+    thesis.requestHash('top');
+    thesis.scroll(0);
+    thesis.advance(100);
+    thesis.scroll(780);
+    assert.equal(thesis.captured, true, `${earlier}: its cooldown must not cost the next entry`);
+    assert.equal(thesis.swiper.activeIndex, 0, earlier);
+  }
 });

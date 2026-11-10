@@ -119,6 +119,15 @@ On native iOS, verify the complete Thesis slide/exit/re-entry flow, and check a
 physical iPhone: simulators do not reproduce device media failures. Desktop WebKit does not prove UIKit momentum behavior. Do not weaken the
 production CSP for local HTTP testing; use a loopback-only test transport or HTTPS.
 
+Every entry to plain `/thesis` from another page starts on Hero; section URLs still
+land on their sections. On native iOS, scroll About past its first section, open the
+menu, and follow Thesis and Writing: each must start at the top. Pressing a Thesis link
+while on Thesis, from a slide, from below Thesis, or from a section URL, goes to Hero,
+leaves no hash, and shows slide one on the next entry, even if the visitor scrolls back
+down at once. On desktop, click the Thesis link twice from another page: the header must
+not stay on screen for the second click. The release list is in
+[the QA checklist](QA_CHECKLIST.md).
+
 Partnerships and their links are hidden pending confirmation. Their former names
 are parked as pending data; the public About story goes from backers to contact.
 Historical capture decisions remain in [THESIS_SCROLL_HISTORY.md](../THESIS_SCROLL_HISTORY.md).

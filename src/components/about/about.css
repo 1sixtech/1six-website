@@ -407,11 +407,13 @@
 
 /* The page settles on a section. Only where every section fits a screen: a
    mandatory stop inside something taller would hide the rest of it. Backers
-   stay one column until 1024px, which takes 760px at tablet widths. */
+   stay one column until 1024px, which takes 760px at tablet widths. A menu
+   link turns it off until the next route commits (Header.tsx handleNavClick):
+   iOS would otherwise re-apply this page's section to the page after it. */
 @media (min-height: 760px) and (prefers-reduced-motion: no-preference),
   (min-height: 640px) and (max-width: 767px) and (prefers-reduced-motion: no-preference),
   (min-height: 640px) and (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
-  html:has(.crossing) {
+  html:has(.crossing):not([data-nav-leaving]) {
     scroll-snap-type: y mandatory;
   }
 

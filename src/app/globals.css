@@ -166,6 +166,12 @@ body {
   outline-offset: 2px;
 }
 
+/* The footer's return to Hero moves focus here so the next Tab continues from
+   the top. The landmark is not a control, so it draws no focus ring. */
+#main-content:focus {
+  outline: none;
+}
+
 /* ══════════════════════════════════════════════════════════
    Site header surface
    ══════════════════════════════════════════════════════════ */
@@ -188,11 +194,21 @@ body {
 
 /* On Thesis the header waits off-screen for the first scroll (GSAP owns its
    inline transform). A keyboard user tabbing into it must still see where
-   focus went, so focus inside the header brings it down; the !important
-   beats GSAP's inline style only while focus is inside. */
-.site-header:focus-within {
+   focus went, so keyboard focus inside the header brings it down; the
+   !important beats GSAP's inline style only while that focus is inside.
+   Not :focus-within: Chrome leaves focus on a clicked link, which held the
+   header over Hero on arrival and put a second click back on Thesis. */
+.site-header:has(:focus-visible) {
   transform: translateY(0) !important;
   transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+/* Without :has() the rule above is dropped whole, and a keyboard user would
+   lose the header. Clicked links holding it there is the smaller problem. */
+@supports not selector(:has(*)) {
+  .site-header:focus-within {
+    transform: translateY(0) !important;
+    transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
 }
 
 /* Current page: a short accent rule under the label, drawn from the left
