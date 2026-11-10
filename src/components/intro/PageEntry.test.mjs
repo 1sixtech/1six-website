@@ -10,6 +10,8 @@ const code = ts.transpileModule(readFileSync(file, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   fileName: file.pathname,
 }).outputText;
+const OVERLAY = Symbol('overlay');
+const ORCHESTRATOR = Symbol('orchestrator');
 
 function entryHarness({ seen = false, reduced = false, warmed = false, saveData = false, hash = '', expired = false } = {}) {
   let pathname;
@@ -38,10 +40,11 @@ function entryHarness({ seen = false, reduced = false, warmed = false, saveData 
       useCallback: (fn) => fn,
       useRef: (value) => { const i = cursor++; refs[i] ??= { current: value }; return refs[i]; },
     },
-    'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+    // The automatic runtime passes an element's key as the third argument, not as a prop.
+    'react/jsx-runtime': { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) },
     'next/navigation': { usePathname: () => pathname, useRouter: () => router },
-    './IntroOverlay': { IntroOverlay: Symbol('overlay') },
-    './IntroOrchestrator': { IntroOrchestrator: Symbol('orchestrator') },
+    './IntroOverlay': { IntroOverlay: OVERLAY },
+    './IntroOrchestrator': { IntroOrchestrator: ORCHESTRATOR },
     '@/lib/introState': { hasSeenIntro: () => seen || expired, needsVisualReadiness: (target) => target === '/' || target.startsWith('/thesis') },
     '@/lib/siteAssets': { entryVisualTarget },
     '@/lib/assetWarmup': {
@@ -72,6 +75,12 @@ function entryHarness({ seen = false, reduced = false, warmed = false, saveData 
       pathname = path; layouts = []; effects = []; cursor = 0;
       rendered = exports.PageEntry();
       cleanups = [...layouts, ...effects].map((setup) => setup());
+      return rendered;
+    },
+    // A re-render on the same route: React does not rerun effects whose dependencies are unchanged.
+    rerender() {
+      layouts = []; effects = []; cursor = 0;
+      rendered = exports.PageEntry();
       return rendered;
     },
     signalReady() { find(rendered).props.onWarmup(); },
@@ -162,4 +171,47 @@ test('page entry: late hydration after the watchdog does not relock the screen',
   const entry = entryHarness({ expired: true }); t.after(() => entry.cleanup()); entry.enter('/thesis');
   assert.equal(entry.locked, false);
   assert.equal(entry.textLocked, false);
+});
+
+function introParts(rendered) {
+  const [overlay, orchestrator, ...rest] = rendered.props.children;
+  assert.equal(rest.length, 0);
+  assert.equal(overlay.type, OVERLAY);
+  assert.equal(orchestrator.type, ORCHESTRATOR);
+  return { overlay, orchestrator };
+}
+
+test('page entry: every route change replaces both the overlay and its orchestrator, never one alone', (t) => {
+  // React matches siblings by key. With one shared key it deleted only the last match,
+  // the orchestrator, and left the previous route's overlay in the page.
+  const entry = entryHarness(); t.after(() => entry.cleanup());
+  let previous;
+  for (const path of ['/', '/thesis', '/writing', '/writing/article', '/writing/other-article', '/']) {
+    const { overlay, orchestrator } = introParts(entry.enter(path));
+    assert.equal(typeof overlay.key, 'string', `${path}: a keyless overlay would survive the route`);
+    assert.equal(typeof orchestrator.key, 'string', `${path}: a keyless orchestrator would survive the route`);
+    assert.notEqual(overlay.key, orchestrator.key, `${path}: siblings need distinct keys`);
+    if (previous) {
+      const old = [previous.overlay.key, previous.orchestrator.key];
+      assert.ok(!old.includes(overlay.key), `${path}: the overlay must remount`);
+      assert.ok(!old.includes(orchestrator.key), `${path}: the orchestrator must remount`);
+    }
+    // The orchestrator animates this overlay's logo and reveals this route's main content.
+    assert.equal(orchestrator.props.pathname, path);
+    assert.equal(orchestrator.props.overlayRef, overlay.props.ref);
+    assert.equal(orchestrator.props.fillRectRef, overlay.props.fillRectRef);
+    assert.equal(orchestrator.props.mainContentRef.current, entry.main);
+    previous = { overlay, orchestrator };
+  }
+});
+
+test('page entry: a re-render on the same route keeps the overlay and orchestrator mounted', (t) => {
+  // A section hash or a Writing category filter re-renders without changing the pathname.
+  for (const path of ['/thesis', '/writing']) {
+    const entry = entryHarness(); t.after(() => entry.cleanup());
+    const first = introParts(entry.enter(path));
+    const again = introParts(entry.rerender());
+    assert.equal(again.overlay.key, first.overlay.key, path);
+    assert.equal(again.orchestrator.key, first.orchestrator.key, path);
+  }
 });
