@@ -4,6 +4,13 @@ export const CONTACT_EMAIL = 'contact@1six.tech';
 /** The copyright line, shared by the footer and the phone menu. */
 export const COPYRIGHT = '© 2026 - 2027 1SIX Technologies Inc.';
 
+/**
+ * The favicon files' version, added to their URLs as `?v=`. Browsers and search
+ * engines keep an icon by its URL, so bump it whenever an icon file changes;
+ * src/app/icons.test.mjs pins each version's file digests.
+ */
+export const ICON_VERSION = '2';
+
 export const NAV_ITEMS = [
   { label: 'About', href: '/' },
   { label: 'Thesis', href: '/thesis' },

@@ -18,11 +18,10 @@ export const dynamicParams = false;
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const article = getArticle(slug);
-  if (!article) return { title: 'Writing' };
+  if (!article) return {};
 
   const url = `https://1six.tech/writing/${article.slug}`;
   return {
-    title: article.title,
     description: article.summary,
     alternates: { canonical: url },
     openGraph: {

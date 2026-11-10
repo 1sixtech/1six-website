@@ -7,7 +7,6 @@ import { getArticles } from '@/lib/writing';
 const description = 'Research, perspectives, and news from 1six.';
 
 export const metadata: Metadata = {
-  title: 'Writing',
   description,
   alternates: { canonical: 'https://1six.tech/writing' },
   openGraph: {

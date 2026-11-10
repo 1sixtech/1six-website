@@ -5,9 +5,9 @@ import { setRouteVisualReady } from '@/lib/introState';
 import { AsciiMapCanvas } from '@/components/ascii/AsciiMap';
 
 /**
- * The world map closes the homepage: the ASCII map is the figure, and its
- * caption names who it is for — the next 84%, the line the page title
- * promises.
+ * The world map closes Thesis: the ASCII map is the figure, and its caption
+ * names who it is for — the next 84%, the line Thesis's description and the
+ * site's social cards promise.
  *
  * The canvas always shows the whole 3:2 source at its contained scale
  * (mapGeometry); only the box around it changes, so the framing never

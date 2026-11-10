@@ -94,6 +94,14 @@ const nextConfig: NextConfig = {
         },
       ],
     },
+    {
+      // The favicon opened as a document by its URL runs nothing, should a
+      // future export carry a script; as an icon it never runs one anyway.
+      source: '/favicon.svg',
+      headers: [
+        { key: 'Content-Security-Policy', value: "default-src 'none'; style-src 'unsafe-inline'; sandbox" },
+      ],
+    },
   ],
 };
 
