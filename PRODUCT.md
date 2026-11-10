@@ -41,7 +41,7 @@ web
 
 - Name: 1SIX (wordmark and titles), written "1six" in lowercase body copy; lowercase manifesto voice.
 - The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction; Henry P.'s profile by the owner (2026-11-09).
-- Accent #FF3700 on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes.
+- Accent #FF3700, the logo's red, on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes. It is the site's only red, at every text size and in both themes (owner, 2026-11-10); the darker small-text red is retired.
 - ASCII-mosaic WebGL imagery (desert, graph, "16" symbol, world map) is the visual signature.
 
 ## Evidence on Hand
@@ -64,3 +64,4 @@ web
 ## Accessibility & Inclusion
 
 - WCAG 2.2 AA for text contrast and keyboard access; motion must have a reduced-motion equivalent that still shows all content.
+- Accepted exception (owner, 2026-11-10): because the site uses one red, red text below 24px (19px bold) on the light ground is 3.2:1, under AA's 4.5:1 for small text; the dark ground passes at 4.7:1. Small red text at rest is limited to the Writing category label, the current page in the phone menu, the desktop 16% count beside the mark, the "16%" figure in About's opening paragraph, and the outlined "back to home" button on the 404 and error pages; elsewhere red marks hover and press states. Do not add more small red text at rest.

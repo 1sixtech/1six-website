@@ -184,7 +184,7 @@ The custom `AscMosaic` library (`src/lib/ascmosaic/`) renders video/image source
 ### Styling
 
 - **Tailwind CSS v4** with `@theme` syntax in `globals.css`
-- Accent color: `#FF3700`
+- Accent color: `#FF3700` (`--color-accent`), the logo red and the only red: links, labels, states and marks at every size
 - Font: **Pretendard Variable** 1.3.9, the official dynamic subset: 92 slices in
   `public/fonts/pretendard-1.3.9/`, `@font-face` + unicode-range in `src/app/fonts/pretendard-variable.css`
   (browsers fetch only the slices a page uses; the root layout preloads the slices every page needs).
