@@ -73,6 +73,7 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
+    writingAssets.mjs         # Article image types, shared by the site and the sync script
     writingDraft.mjs          # Draft marker rule, shared by the site and the sync script
     writingSlug.mjs           # Article folder-name rule, shared by the site and the sync script
     themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
@@ -133,6 +134,12 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 - Synced Markdown is untrusted: raw HTML is escaped, unsafe links lose their target, and unexpected
   rendered tags or attributes fail the build. Figures open at full size. `/writing-assets/:path*`
   has a sandboxed CSP for standalone assets; article and author pages keep the site's normal policy.
+- Every article image must be an image file under `public/` (the types in `writingAssets.mjs`, shared with the sync),
+  matched by exact name as 1six.tech serves it, and its src is rebuilt from that name, fragment kept. A missing,
+  miscased, hidden (`.name`), or non-image file fails the build and names the article, as does any image given by
+  URL (`http(s)`, `//`, or `data:`), even one the CSP (`img-src 'self' blob: data:`) would allow; a miscased name
+  gets a "did you mean". A name differing only in Unicode normalization (NFD from Finder) is accepted. A figure
+  marked cannot parse at all (a path with a space outside `<…>`) is not an image, and still publishes as text.
 
 ### Theme System
 

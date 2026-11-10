@@ -5,6 +5,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ASSET_EXTENSIONS } from '../src/lib/writingAssets.mjs';
 import { isDraftArticle } from '../src/lib/writingDraft.mjs';
 import { isArticleSlug } from '../src/lib/writingSlug.mjs';
 
@@ -29,8 +30,6 @@ const NUMBERED_FOLDER = /^[0-9]{3}-/;
 // hosts answer differently for one, so the type and size checks could not vouch for it.
 const SYMLINK_MODE = '120000';
 
-// Anything under public/ has a URL, and an article can only show images.
-const ASSET_EXTENSIONS = new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp']);
 const MAX_ASSET_MB = 5;
 const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a

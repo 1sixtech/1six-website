@@ -32,7 +32,7 @@ The article repository's publishing gate is recorded under Completed.
 
 **Effort:** S
 **Priority:** P1
-**Depends on:** The sync hardening merged to the website's `main`
+**Depends on:** The sync hardening (merged in v0.3.8.0) and the figure check merged to the website's `main`
 
 ## Site-wide
 

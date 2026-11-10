@@ -3,6 +3,19 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.12.0] - 2026-11-10
+
+### Changed
+
+- A figure that would show as a broken image now stops the build and names the article instead of publishing. That covers a mistyped path, a name in the wrong case (the error suggests the real one), a file that is not an allowed image type or is hidden, and an image from a web address, which the site's security policy blocks anyway.
+- An article image is requested under the name of the file that was checked. A name with `&` and a space, which `pnpm start` used to answer with a 404, now loads, and a Korean name copied from Finder finds its file. Today's figures are unchanged.
+- The proposed `Validate articles` check now catches a figure path with a typo. Until it is in place, one bad figure stops every website build, as a stray file already does.
+- The site and the article sync share one list of image types.
+
+### Fixed
+
+- Build errors quote an article's text with control characters encoded, so an article cannot forge a line or a terminal escape in the build log.
+
 ## [0.3.11.0] - 2026-11-10
 
 ### Changed

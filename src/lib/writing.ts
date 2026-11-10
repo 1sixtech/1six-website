@@ -1,11 +1,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Marked } from 'marked';
+import { ASSET_EXTENSIONS } from './writingAssets.mjs';
 import { getWriterByName, isWritingCategory, type WritingCategory } from './writingCatalog.ts';
 import { isDraftArticle } from './writingDraft.mjs';
 import { isArticleSlug } from './writingSlug.mjs';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content/writing');
+const PUBLIC_DIR = path.join(process.cwd(), 'public');
 
 export type WritingHeading = {
   id: string;
@@ -89,7 +91,7 @@ function extractArticle(markdown: string): {
   // validated so a typo cannot silently place an op-ed in the wrong section.
   const category = data.category?.toLowerCase() || 'research';
   if (!isWritingCategory(category)) {
-    throw new Error(`Unknown writing category: ${data.category}`);
+    throw new Error(`Unknown writing category: ${excerpt(data.category ?? '')}`);
   }
 
   return {
@@ -198,11 +200,11 @@ export function isSafeLinkTarget(href: string): boolean {
  * to anything but the web, mail, a #fragment or a relative path (a
  * javascript: link, an autolink to one, a reference to one) keeps its words
  * and loses its link. A script slipped into an article cannot run on the
- * site. Markdown itself renders as before. (Image sources need no check:
- * one that is not an http(s) URL or a site path is rewritten under the
- * article's own folder below, and a figure's link reuses it.) renderBody
- * then checks the result against what this renderer can emit
- * (unsafeArticleHtml), and refuses to publish anything else.
+ * site. Markdown itself renders as before. (Image sources need no scheme
+ * check: renderBody accepts only an image that is a file under public/,
+ * and a figure's link reuses it.) renderBody then checks the result
+ * against what this renderer can emit (unsafeArticleHtml), and refuses to
+ * publish anything else.
  */
 const markdown = new Marked({
   async: false,
@@ -227,14 +229,184 @@ const markdown = new Marked({
   },
 });
 
-/** The intrinsic size of a synced SVG under public/, read from its root element. */
-function svgSize(publicPath: string): { width: string; height: string } | null {
-  if (!publicPath.startsWith('/') || !publicPath.endsWith('.svg')) return null;
-  // The path comes from the synced markdown: resolve it and keep it inside public/.
-  const publicDir = path.join(process.cwd(), 'public');
-  const file = path.resolve(publicDir, `.${publicPath}`);
-  if (!file.startsWith(publicDir + path.sep)) return null;
-  if (!existsSync(file) || !statSync(file).isFile()) return null;
+/** How much of an article's own text an error message quotes. */
+const EXCERPT_LENGTH = 160;
+
+/**
+ * Article text for an error message, cut short. Control characters stay
+ * encoded: printed raw, an article's %0A or %1B could forge a line (such as
+ * an Actions "::error") or a terminal escape in the build log, and a bidi
+ * control (%E2%80%AE) could reorder what the line appears to say.
+ */
+function excerpt(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, encodeURIComponent)
+    .slice(0, EXCERPT_LENGTH);
+}
+
+/**
+ * A URL for an error message: each run of escapes decoded where it is well
+ * formed, so one stray "%" leaves the rest readable, and reserved ones such
+ * as %2F kept as written.
+ */
+function readable(url: string): string {
+  return excerpt(
+    url.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+      try {
+        return decodeURI(run);
+      } catch {
+        return run;
+      }
+    }),
+  );
+}
+
+/** A stand-in origin, to resolve an image path the way a browser does. */
+const ARTICLE_ORIGIN = 'https://article.invalid';
+
+/** A numeric character reference (&#x20;) that marked leaves in an image source and a browser would decode. */
+const NUMERIC_REFERENCE = /&#(?:[0-9]+|x[0-9a-f]+);?/i;
+
+/** What may be a named character reference (&nbsp;). A browser decodes only real names, so one is read as written. */
+const NAMED_REFERENCE = /&[a-z][a-z0-9]*;/i;
+
+/**
+ * Directory listings under public/ for one getArticles() call: every page
+ * of the build renders every article, and their images walk the same few
+ * directories. getArticles() starts each call with a fresh map, so a file
+ * added between calls is seen.
+ */
+let listings = new Map<string, Set<string>>();
+
+function directoryEntries(dir: string): Set<string> {
+  let entries = listings.get(dir);
+  if (!entries) {
+    try {
+      entries = new Set(readdirSync(dir));
+    } catch {
+      entries = new Set(); // Not a directory: a path through a file names nothing.
+    }
+    listings.set(dir, entries);
+  }
+  return entries;
+}
+
+/**
+ * The entry with this name, or with one that differs only in Unicode
+ * normalization, which looks identical: a name copied from a Mac's Finder
+ * is decomposed, while Git on a Mac stores it composed.
+ */
+function sameName(entries: Set<string>, name: string): string | undefined {
+  if (entries.has(name)) return name;
+  const composed = name.normalize('NFC');
+  return [...entries].find((entry) => entry.normalize('NFC') === composed);
+}
+
+/** On a miss, the entry whose name differs only in case: what the author most likely meant. */
+function caseVariant(entries: Set<string>, name: string): string | undefined {
+  const folded = name.normalize('NFC').toLowerCase();
+  return [...entries].find((entry) => entry.normalize('NFC').toLowerCase() === folded);
+}
+
+/**
+ * The names on disk of the file under public/ that decoded path segments
+ * lead to, with `pick` choosing the entry for each; or null. "." and ".."
+ * are never entries, so the walk cannot leave public/, and an encoded "/"
+ * names no single entry.
+ */
+function walkPublic(
+  segments: string[],
+  pick: (entries: Set<string>, name: string) => string | undefined,
+): string[] | null {
+  const names: string[] = [];
+  let dir = PUBLIC_DIR;
+  for (const segment of segments) {
+    const entry = pick(directoryEntries(dir), segment);
+    if (entry === undefined) return null;
+    names.push(entry);
+    dir = path.join(dir, entry);
+  }
+  return statSync(dir, { throwIfNoEntry: false })?.isFile() ? names : null;
+}
+
+/**
+ * The file under public/ that an article image shows, and the src that
+ * names it, given the source as written and as rewritten for the site.
+ * Anything else fails the build and names the article: a missing file would
+ * ship as a broken image, the site's CSP (img-src 'self') blocks an image
+ * from another site, and a page shows only an image file. Names must match
+ * exactly, case included, because 1six.tech answers 404 for a name that
+ * differs only in case, which a Mac's disk would still open; only a
+ * difference in Unicode normalization, invisible on screen, is let through.
+ *
+ * The src is rebuilt from the file's own names, each encoded in full: the
+ * form Next's static server matches (it misses, for one, "R&D's%20chart.svg"),
+ * and one that decodes back to exactly those names. So the page asks for the
+ * file that was checked, whatever form the source took. The query is dropped;
+ * the fragment is kept, because an SVG can show a view it names (#svgView).
+ */
+function articleImage(slug: string, written: string, local: string): { file: string; src: string } {
+  const failure = (reason: string) =>
+    new Error(`writing: ${slug} shows the image "${readable(written)}"${reason}; refusing to publish it.`);
+  // Read the path as a browser requests it: dot segments resolved, no query or fragment.
+  let url: URL | undefined;
+  try {
+    url = new URL(local, ARTICLE_ORIGIN);
+  } catch {
+    // Only a source that names a host can fail to parse.
+  }
+  // The origin check still holds if marked stops encoding "\", which a browser reads as "/".
+  if (/^(?:https?:|\/\/)/i.test(local) || url?.origin !== ARTICLE_ORIGIN) {
+    throw failure(
+      " from a web address; an article image must be one of the site's own files, normally in its article's folder (the site's content security policy blocks other sites)",
+    );
+  }
+  // A browser would decode it into a name the lookup would not search for, and its
+  // "#" would start a fragment here and cut the path short.
+  const reference = written.match(NUMERIC_REFERENCE)?.[0];
+  if (reference) {
+    throw failure(
+      `, which a browser reads as the character reference ${excerpt(reference)}: type the character itself, or write a literal & as %26 and # as %23`,
+    );
+  }
+  // Next's static server collapses "//" and drops a trailing "/", so an empty segment names nothing.
+  let segments: string[];
+  try {
+    segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    throw failure(', but a "%" in its path starts no valid escape (write a literal % as %25)');
+  }
+  const shown = `public${readable(url.pathname)}`;
+  const names = walkPublic(segments, sameName);
+  if (!names) {
+    const variant = walkPublic(segments, caseVariant);
+    // A real named reference (&nbsp;) names no file as written: the author meant the character.
+    const named = written.match(NAMED_REFERENCE)?.[0];
+    const hint = variant
+      ? ` (names are case-sensitive: did you mean public/${excerpt(variant.join('/'))}?)`
+      : named
+        ? ` (if ${excerpt(named)} is meant as a character, type the character itself)`
+        : '';
+    throw failure(`, but ${shown} is not a file${hint}`);
+  }
+  const name = names[names.length - 1];
+  // Next's static server ignores a dotfile, as its send module does by default,
+  // and indexes public/ with "\" in a name read as "/".
+  if (name.startsWith('.')) throw failure(`, but the site does not serve ${shown}: its name starts with "."`);
+  if (names.some((part) => part.includes('\\'))) {
+    throw failure(`, but the site does not serve ${shown}: a name in it holds "\\"`);
+  }
+  if (!ASSET_EXTENSIONS.has(path.extname(name).toLowerCase())) {
+    throw failure(`, but ${shown} is not an allowed type (${[...ASSET_EXTENSIONS].join(', ')})`);
+  }
+  // The URL parser has encoded the fragment's quotes and angle brackets; an "&" in an attribute is escaped.
+  const fragment = url.hash.replace(/&/g, '&amp;');
+  return { file: path.join(PUBLIC_DIR, ...names), src: `/${names.map(encodeURIComponent).join('/')}${fragment}` };
+}
+
+/** The intrinsic size of an SVG file, read from its root element. */
+function svgSize(file: string): { width: string; height: string } | null {
+  if (path.extname(file).toLowerCase() !== '.svg') return null;
   const root = readFileSync(file, 'utf8').match(/<svg\b[^>]*>/)?.[0];
   const width = root?.match(/\swidth="(\d+(?:\.\d+)?)"/)?.[1];
   const height = root?.match(/\sheight="(\d+(?:\.\d+)?)"/)?.[1];
@@ -338,16 +510,19 @@ function renderBody(slug: string, body: string): { html: string; headings: Writi
     '<h2 id="key-takeaways">$1</h2><ul class="takeaways">',
   );
   html = html.replace(/<p><em>(Figure [\s\S]*?)<\/em><\/p>/g, '<p class="caption">$1</p>');
-  html = html.replace(/<img\b([^>]*?)src="([^"]+)"([^>]*)>/g, (match, before: string, src: string, after: string) => {
-    const local = /^(https?:|\/)/.test(src) ? src : `/writing-assets/${slug}/${src.replace(/^\.\//, '')}`;
-    let tag = `<img${before}src="${local}"${after}>`;
+  // An empty source is matched too: it shows no file either.
+  html = html.replace(/<img\b([^>]*?)src="([^"]*)"([^>]*)>/g, (match, before: string, src: string, after: string) => {
+    const local = /^(?:https?:|\/)/i.test(src) ? src : `/writing-assets/${slug}/${src.replace(/^\.\//, '')}`;
+    // marked escapes the attribute (& as &amp;): undo that to read the source as written.
+    const image = articleImage(slug, decodeEntities(src), decodeEntities(local));
+    let tag = `<img${before}src="${image.src}"${after}>`;
     // A lazy image with no size takes no space until it loads, and the text
     // below jumps when it does; the SVG's own size reserves its box.
     // An author-given width or height stands: the SVG's own size would add a
     // second height (or width) attribute, and the first one would win.
-    const size = !/\b(?:width|height)=/.test(tag) ? svgSize(local) : null;
+    const size = !/\s(?:width|height)="/.test(tag) ? svgSize(image.file) : null;
     if (size) tag = tag.replace('<img', `<img width="${size.width}" height="${size.height}"`);
-    if (tag.includes('loading=')) return tag;
+    if (/\sloading="/.test(tag)) return tag;
     return tag.replace('<img', '<img loading="lazy" decoding="async"');
   });
   // A figure (an image alone in its paragraph) links to its own file, so a
@@ -372,7 +547,7 @@ function renderBody(slug: string, body: string): { html: string; headings: Writi
   // Fail the build rather than publish markup this renderer cannot produce.
   const unsafe = unsafeArticleHtml(html);
   if (unsafe) {
-    throw new Error(`writing: ${slug} rendered ${unsafe.slice(0, 160)}, which the article renderer never emits; refusing to publish it.`);
+    throw new Error(`writing: ${slug} rendered ${excerpt(unsafe)}, which the article renderer never emits; refusing to publish it.`);
   }
   return { html, headings };
 }
@@ -383,7 +558,7 @@ function loadArticle(slug: string): WritingArticle | null {
   if (isDraftArticle(markdown)) return null;
   const extracted = extractArticle(markdown);
   if (!isWritingDate(extracted.date)) {
-    const found = extracted.date ? `"${extracted.date}"` : 'none';
+    const found = extracted.date ? `"${excerpt(extracted.date)}"` : 'none';
     throw new Error(`writing: ${slug} needs a date like 2026-11-08, found ${found}; refusing to publish it.`);
   }
   const rendered = renderBody(slug, extracted.body);
@@ -406,6 +581,7 @@ export function getArticles(): WritingArticle[] {
   if (!existsSync(CONTENT_DIR)) {
     throw new Error('Missing content/writing. Run node scripts/sync-writing.mjs before building.');
   }
+  listings = new Map();
   const slugs = readdirSync(CONTENT_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && isArticleSlug(entry.name))
     .map((entry) => entry.name)

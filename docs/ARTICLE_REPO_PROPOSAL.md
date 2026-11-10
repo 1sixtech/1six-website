@@ -15,20 +15,21 @@ hears nothing. Three changes close that gap:
 
 Apply them in this order:
 
-1. Merge the website pull request that adds the sync checks.
+1. Merge the website pull requests that add the sync checks and the figure check.
 2. Open a pull request in the article repository adding `validate.yml` and `.gitignore`, and replacing
    `publish.yml`.
 3. After `Validate articles` passes once on that pull request, make it required on `main`.
 4. Set the token in Vercel. This can happen at any point.
 
-Do steps 1 and 2 together. Until step 2 lands, a stray file in a published folder fails the website
-build and only the Vercel dashboard shows it.
+Do steps 1 and 2 together. Until step 2 lands, a stray file in a published folder, or a figure with a
+mistyped path, fails every website build, website-code deploys included, and only the Vercel dashboard
+shows it. A figure path that used to ship as a broken image now stops the build.
 
 ## 1. Required check: `Validate articles`
 
 The check builds the website's `main` with the pull request's articles. It is the production build
 itself, so the rules cannot drift apart: folder names, allowed files, size limits, dates, categories,
-and the HTML safety check are all the ones the site enforces.
+figure paths, and the HTML safety check are all the ones the site enforces.
 
 Add `.github/workflows/validate.yml`:
 
@@ -91,7 +92,12 @@ What to expect:
 - **It checks the merge as of the last push.** A re-run uses the same merge commit, so to include
   later article merges, update the pull request's branch. If article pull requests start to overlap,
   also turn on **Require branches to be up to date before merging**.
-- **It does not catch a figure path with a typo.** The site renders a broken image instead of failing.
+- **It catches a figure path with a typo.** An image that is not a file in the article's folder, or under
+  the website's `public/`, fails the check, and so does an `http(s)` image, even one on 1six.tech: an article
+  image must be a file the site holds. Names must match exactly, including case. Only a difference in how
+  Unicode composes a name, which cannot be seen (as when a Korean name is copied from Finder), is accepted.
+  It does not catch a figure Markdown cannot read at all (a path with a space outside `<angle brackets>`, or a
+  reference label with no definition): that still publishes as its own text, as it did before.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
 
@@ -205,6 +211,7 @@ at the token's expiry. Removing the variable returns the build to anonymous acce
 | Claim | Evidence |
 |-------|----------|
 | The check goes red on the original bad article | A real `next build` with `Date: 2026-11-8 (draft)` exited 1 and named the article |
+| The check goes red on a figure path with a typo | A real `next build` with `assets/Fig3-who-first.svg` for `fig3-who-first.svg` exited 1 on macOS and named the article; 1six.tech answers 404 for that name |
 | The check's commands work from nothing | `pnpm install --frozen-lockfile` and `pnpm build` at the head of article PR 2, from a clean copy on Node 22, took 10 seconds on a laptop with a warm pnpm store |
 | The check can read a merge commit | Commit lookup, listing, contents API, and raw host all answered for a fork pull request's merge commit on `actions/checkout` |
 | A token works for every request | A real authenticated sync used 14 API calls and matched the anonymous sync byte for byte |
