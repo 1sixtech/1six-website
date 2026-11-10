@@ -53,6 +53,17 @@ function brokenBody(reason) {
 /** An answer whose connection dropped before its body could be read or released. */
 const unreadableBody = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
 
+/** An answer whose body arrives only after `turns` event-loop turns. */
+function slowBody(text, turns, init) {
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      for (let left = turns; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  }), init);
+}
+
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
  * `replies` maps part of a URL to what GitHub gives it before answering normally: a refusal
@@ -60,15 +71,32 @@ const unreadableBody = (status, headers) => new Response(new ReadableStream({ st
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
  * whole answer. Waits are recorded and not slept, unless `deferWaits` lets each run a few event
  * loop turns so other requests can go on meanwhile; `now` fixes the clock the script reads.
+ * With `sameTurn`, every request sent in one turn is answered together in the next, each after
+ * the number of microtasks `delays` gives the first URL fragment it contains.
  * `signals` lists each request's signal; `peak` is the most requests open at once, from the call
  * until the body is read or released; `sentWhileWaiting` and `peakWhileWaiting` count requests
  * sent, and the most open, while a deferred wait is pending; `warnings` holds the retry lines.
  */
-function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, now } = {}) {
+function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, sameTurn = false, delays = {}, now } = {}) {
   return new Promise((resolve) => {
     const result = { requests: [], headers: new Map(), signals: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
     let open = 0;
     let waiting = 0;
+    let turn;
+    const nextTurn = () => {
+      turn ??= new Promise((resolve) => setImmediate(() => {
+        turn = undefined;
+        resolve();
+      }));
+      return turn;
+    };
+    // Each request is answered after its own turn, or with sameTurn after one turn shared by all.
+    const answeredLater = async (url) => {
+      if (!sameTurn) return new Promise((resolve) => setImmediate(resolve));
+      await nextTurn();
+      const fragment = Object.keys(delays).find((part) => url.includes(part));
+      for (let left = fragment === undefined ? 0 : delays[fragment]; left > 0; left -= 1) await null;
+    };
     // A request stays open until its body is read to the end or released, as on a real connection.
     const held = (response) => {
       const reader = response.body?.getReader();
@@ -169,7 +197,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
           result.sentWhileWaiting += 1;
           result.peakWhileWaiting = Math.max(result.peakWhileWaiting, open);
         }
-        await new Promise((resolve) => setImmediate(resolve));
+        await answeredLater(url);
         try {
           return held(answer(url));
         } catch (error) {
@@ -595,7 +623,8 @@ test('a limit that resets beyond the wait budget fails now and names the token',
   assert.equal(run.exit, 1);
   assert.match(run.errors[0].message, /GitHub commit lookup failed for main: 403 busy Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit\./);
   assert.equal(run.requests.length, 1);
-  assert.deepEqual(run.waits, []);
+  assert.deepEqual(run.warnings, [], 'nothing is retried');
+  assert.equal(run.waits.length, 1, 'only the hold on every other request, which this sync fails without waiting for');
 
   const tooLong = await runSync({ ...LIVE }, { replies: { '/commits/': [[429, { 'retry-after': '3600' }]] } });
   assert.equal(tooLong.exit, 1);
@@ -760,7 +789,8 @@ test('a refusal whose body is missing or cannot be read keeps the wait GitHub na
   const pastBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(429, { 'retry-after': '3600' })] } });
   assert.equal(pastBudget.exit, 1);
   assert.equal(pastBudget.requests.length, 1, 'a wait past the budget is not attempted');
-  assert.deepEqual(pastBudget.waits, []);
+  assert.deepEqual(pastBudget.waits, [3_600_000], 'every other request is held; this one fails rather than wait');
+  assert.deepEqual(pastBudget.warnings, []);
   assert.equal(pastBudget.errors[0].message, 'GitHub commit lookup failed for main: 429 (body unreadable) Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
 
   const missing = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(404)] } });
@@ -862,6 +892,29 @@ test('a request whose own backoff ends during a rate limit waits the limit out b
   assert.deepEqual(run.waits, [1000, 30_000]);
   assert.equal(run.sentWhileWaiting, 0, 'the server error\'s retry is held by the pause too');
   assertAllFigures(run);
+});
+
+test('a rate limit this sync fails on still holds every other request while its body is read', async () => {
+  const refusal = slowBody('busy', 10, { status: 429, headers: { 'retry-after': '3600' } });
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [refusal] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, 'Failed to download 001-live/assets/f0.svg: 429 Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
+  assert.equal(run.requests.includes(figureAt('f8.svg')), false, 'no queued file starts during the cooldown GitHub named');
+  assert.equal(run.sentWhileWaiting, 0);
+});
+
+test('a rate limit that lands just as a queued request takes its slot still holds that request', async () => {
+  for (let microtasks = 0; microtasks <= 40; microtasks += 1) {
+    const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, {
+      deferWaits: true,
+      sameTurn: true,
+      delays: { '/f1.svg': microtasks },
+      replies: { '/f1.svg': [[429, { 'retry-after': '30' }]] },
+    });
+    assert.equal(run.exit, undefined, `the 429 ${microtasks} microtasks in`);
+    assert.equal(run.sentWhileWaiting, 0, `a request went out during the pause when the 429 landed ${microtasks} microtasks in`);
+    assertAllFigures(run);
+  }
 });
 
 test('a shorter rate limit does not cut short a longer one already running', async () => {
@@ -1084,7 +1137,9 @@ test('a Retry-After of exactly a minute is waited out, and one second more is no
 
   const overBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [[429, { 'retry-after': '61' }]] } });
   assert.equal(overBudget.exit, 1);
-  assert.deepEqual(overBudget.waits, []);
+  assert.equal(overBudget.requests.length, 1);
+  assert.deepEqual(overBudget.warnings, [], 'not retried');
+  assert.deepEqual(overBudget.waits, [61_000], 'every other request is held; this one fails rather than wait');
 });
 
 const TOKEN_ADVICE = /Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit\./;

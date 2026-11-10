@@ -58,7 +58,8 @@ const isRateLimit = (status) => status === 403 || status === 429;
 
 // Node's fetch gives a network failure or a cut-off body the socket or DNS error as its cause,
 // and a request past its deadline its signal's TimeoutError. A header that fetch rejects outright
-// has neither, and would fail the same way every time.
+// has neither, and would fail the same way every time. A few lasting failures, such as a redirect
+// loop or a bad certificate, carry a cause too, and cost three quick retries before they fail.
 const isNetworkFailure = (error) => error?.name === 'TimeoutError' || error?.cause !== undefined;
 
 /** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
@@ -86,14 +87,6 @@ function pauseRequests(delay) {
   if (until <= resumeAt) return;
   resumeAt = until;
   resumed = new Promise((resolve) => setTimeout(resolve, delay));
-}
-
-/** Waits out the rate-limit pause, including one that grows longer meanwhile. */
-async function pauseOver() {
-  for (let pause; pause !== resumed; ) {
-    pause = resumed;
-    await pause;
-  }
 }
 
 /** Runs `task` once fewer than MAX_CONCURRENT_FETCHES tasks hold a slot. */
@@ -131,11 +124,13 @@ async function attempt(url, headers, retriesUsed) {
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   const limited = isRateLimit(response.status);
   const transient = limited || response.status >= 500;
-  const delay = transient && retriesUsed < MAX_RETRIES ? retryDelay(response, retriesUsed) : undefined;
+  const wait = transient ? retryDelay(response, retriesUsed) : undefined;
+  // Every request waits a rate limit out, even when this one is about to fail on it instead, so
+  // nothing more is sent while its body is read; a server error is this request's own.
+  if (limited) pauseRequests(wait);
+  const delay = retriesUsed < MAX_RETRIES ? wait : undefined;
   // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
   if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
-  // Every request waits a rate limit out, not only this one; a server error is this request's own.
-  if (limited) pauseRequests(delay);
   // Released so it does not hold a connection; a body that already broke keeps the wait above.
   await response.body?.cancel().catch(() => {});
   return { delay, reason: response.status, paused: limited };
@@ -150,7 +145,12 @@ async function attempt(url, headers, retriesUsed) {
 function githubFetch(url, headers) {
   return inSlot(async () => {
     for (let retriesUsed = 0; ; retriesUsed += 1) {
-      await pauseOver();
+      // Waits out the rate-limit pause, including one that grows longer meanwhile. The last check
+      // runs in the same step that sends the request, so no pause can begin in between.
+      for (let pause; pause !== resumed; ) {
+        pause = resumed;
+        await pause;
+      }
       let outcome;
       try {
         outcome = await attempt(url, headers, retriesUsed);
