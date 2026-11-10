@@ -11,11 +11,11 @@
 
    Hierarchy does not rely on size alone. Each type role differs from
    its neighbour in at least two of size, weight, tone and space, and
-   each section opens with a head: a rule in the text's own ink with the
-   title close beneath it, then the list, whose rows are divided by
-   quieter hairlines. On a phone, where the desktop's columns no longer
-   separate the roles, that is what keeps a title from reading as the
-   first row of its list.
+   each section opens with its title, underlined by a rule in the text's
+   own ink that divides it from what follows; the lists below divide their
+   rows with quieter hairlines. A section has a screen of its own, so a rule
+   above the title would separate nothing; under it, the rule is what keeps
+   a title from reading as the first row of its list.
 
    Colors come only from the theme tokens in globals.css. The one red is
    --color-accent, the logo's, at every size. */
@@ -31,18 +31,22 @@
   --crossing-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --crossing-header: var(--site-header-h);
   /* Ink strength of the mark above the fill level: enough for the whole 16
-     to read on the light ground (2.6:1) while the filled share stays darker. */
-  --crossing-dim: 0.5;
+     to read on the light ground (about 2.1:1), faint enough that the filled
+     share (about 8.8:1) still reads as the fill. 0.26 lost the 16; 0.5 lost
+     the difference. */
+  --crossing-dim: 0.4;
   --crossing-fill: 16;
   /* Mobile meter strip under the header (no strip on desktop). */
   --crossing-meter-h: 30px;
 
-  /* Spacing roles, on a 4px grid and far apart in value: section rule to
-     title, title to its first content, and either side of a hairline inside
-     a list. */
-  --crossing-rule-gap: 16px;
-  --crossing-head-gap: 24px;
+  /* Spacing roles: a title to the rule beneath it (close, so the rule reads
+     as the title's own), that rule to the first content, either side of a
+     hairline inside a list, and the statement's h1 to its lead. Phone values
+     here, desktop below. */
+  --crossing-rule-gap: 14px;
+  --crossing-head-gap: 32px;
   --crossing-row-pad: 16px;
+  --crossing-lead-gap: 20px;
   /* The browser toolbar's share of the large viewport. A band fills the
      screen with the toolbar hidden and keeps its content clear of it shown. */
   --crossing-toolbar: calc(100lvh - 100svh);
@@ -58,9 +62,12 @@
 @media (min-width: 768px) {
   .crossing {
     --crossing-meter-h: 0px;
-    --crossing-rule-gap: 24px;
-    --crossing-head-gap: 32px;
+    /* 16 + 40 keeps a section's height where it was with the rule above
+       (24 + 32): one-column Backers at 1023 x 760 has 2px to spare. */
+    --crossing-rule-gap: 16px;
+    --crossing-head-gap: 40px;
     --crossing-row-pad: 24px;
+    --crossing-lead-gap: 32px;
   }
 }
 
@@ -252,7 +259,7 @@
 /* The product is a typographic entry in the same ledger as the team. */
 .crossing-product {
   margin-top: var(--crossing-head-gap);
-  padding-block: 8px 28px;
+  padding-block: 0 28px;
 }
 
 .crossing-product__name {
@@ -386,9 +393,10 @@
 }
 
 /* ── Bands ──
-   One screen each, content centred on the same axis as the desktop mark.
-   Each section opens with its head: the rule, in the title's own ink, a
-   tier above the hairlines inside the lists, then the title close beneath it. */
+   One screen each. On desktop the content is centred on the same axis as the
+   mark; on a phone the sections after the statement start from the top
+   (below). The rule belongs to each title (.crossing-heading), a tier above
+   the hairlines inside the lists. */
 
 .crossing-bands {
   min-width: 0;
@@ -404,20 +412,10 @@
   scroll-snap-stop: always;
 }
 
-.crossing-band__body {
-  padding-top: var(--crossing-rule-gap);
-  border-top: 1px solid var(--color-text);
-}
-
 /* Bands take focus after an in-page link so the reading position follows;
    they are not controls, so they draw no focus ring. */
 .crossing-band:focus {
   outline: none;
-}
-
-.crossing-band--statement .crossing-band__body {
-  padding-top: 0;
-  border-top: 0;
 }
 
 @media (min-width: 768px) {
@@ -445,7 +443,7 @@
 
 /* ── Type roles ──
    display       the statement (h1)
-   heading       a section's title, close under its rule
+   heading       a section's title, its rule close beneath it
    display-link  the address: larger than its title, regular weight, underlined
    statement     the closing line: smaller and lighter than a title
    entry, lead   names in the lists; the opening paragraph
@@ -466,6 +464,8 @@
 }
 
 .crossing-heading {
+  padding-bottom: var(--crossing-rule-gap);
+  border-bottom: 1px solid var(--color-text);
   font-size: 32px;
   font-weight: 500;
   line-height: 1.1;
@@ -475,7 +475,7 @@
 }
 
 .crossing-lead {
-  margin-top: var(--crossing-head-gap);
+  margin-top: var(--crossing-lead-gap);
   max-width: 27em;
   font-size: 20px;
   line-height: 1.32;
@@ -586,7 +586,7 @@
   border-top: 1px solid var(--color-divider);
 }
 
-/* The section's rule and title head the list, so its first row carries no
+/* The title and its rule head the list, so its first row carries no
    rule of its own, and its last row ends without one. */
 .crossing-ledger__row:first-child {
   padding-top: 0;
@@ -815,27 +815,16 @@
 /* Phone composition: preserve the mark, but put the message and product cue
    inside a real Safari content viewport. Desktop remains the paired-column story. */
 @media (max-width: 767px) {
-  /* Without the desktop's columns, space alone has to tie a title to its
-     rule and set it apart from what follows: 12px under the rule, 36px to
-     the first entry, wider than the 33px between list rows. */
   .crossing {
     --crossing-meter-h: 0px;
-    --crossing-rule-gap: 12px;
-    --crossing-head-gap: 36px;
     --crossing-aside-gap: 20px;
     --crossing-mark-m: clamp(184px, 48vw, 208px);
   }
 
-  /* The statement's lead is the h1's own continuation, not a section's
-     content, so it keeps the closer step. */
-  .crossing-band--statement {
-    --crossing-head-gap: 20px;
-  }
-
-  /* Every section's rule and title land at the same height on its screen,
+  /* Every section's title and rule land at the same height on its screen,
      so the title is a landmark rather than wherever centring puts it. The
      offset tracks the screen's height: 26px on a 640px screen, the shortest
-     that snaps, where Backers is tallest (529px at 320px wide, its role lines
+     that snaps, where Backers is tallest (527px at 320px wide, its role lines
      wrapped) and still fits; 75px at 844px; 112px from 1000px. */
   .crossing-band:not(.crossing-band--statement) {
     justify-content: flex-start;
