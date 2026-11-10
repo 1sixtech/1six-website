@@ -854,6 +854,14 @@ test('a refusal whose body trickles in or stops is answered by its status 30 sec
   assert.deepEqual(stalled.operations, []);
 });
 
+test('a refusal that answers late still has 30 seconds from its answer to send its body', async () => {
+  const late = trickle(['Not', ' Found'], 10_000, { after: 25_000, status: 404 });
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [late] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, 'GitHub commit lookup failed for main: 404 Not Found', 'its whole body, which ended 20 s after the answer');
+  assert.equal(run.endedAt - START, 45_000);
+});
+
 test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
   const run = await runSync(
     { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
@@ -1431,6 +1439,23 @@ test('a late report says when no request was waiting for an answer, rather than 
     '  - GitHub answered slowly for the other 5 min 28 s.',
     '  - No request was waiting for an answer when time ran out.',
   ].join('\n'));
+});
+
+test('a dropped connection costs a retry in the late report, but is not an answer that never came', async () => {
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [dropped(), pastTheLimit()] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    '  - Server errors and network failures cost 1 retry, and waiting to retry took 1 s.',
+    '  - GitHub answered slowly for the other 9 min 59 s.',
+    stillWaitingOn([LOOKUP]),
+  ].join('\n'));
+});
+
+test('a late report counts the files asked for even before any has arrived', async () => {
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '001-live/README.md': [pastTheLimit()] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message.split('\n')[0], 'The article sync stopped at its 10-minute limit while downloading READMEs, with 0 of 1 files downloaded:');
 });
 
 test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {

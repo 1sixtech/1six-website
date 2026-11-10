@@ -37,6 +37,7 @@ const MAX_ASSET_MB = 5;
 const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a
 // repeated file once, so many small entries in the listing can still be many gigabytes.
+// SYNC_DEADLINE_MS is sized for this cap.
 const MAX_TOTAL_MB = 200;
 const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 
@@ -50,8 +51,8 @@ const RESET_MARGIN_MS = 1000;
 const REQUEST_IDLE_MS = 30_000;
 // Vercel stops a build at 45 minutes and prints nothing about why. A healthy sync takes seconds. The most the
 // checks allow, MAX_TOTAL_MB of READMEs and as much again of assets, arrives in about five minutes at 11 Mbit/s,
-// the rate eight 5 MB files needed to beat the 30-second request limit this replaced; raise MAX_TOTAL_MB and this
-// grows with it. Past this, GitHub is refusing, failing, or crawling, and the build stops saying so.
+// the rate eight 5 MB files needed to beat the 30-second request limit this replaced; raise MAX_TOTAL_MB and raise
+// this with it. Past this, GitHub is refusing, failing, or crawling, and the build stops saying so.
 const SYNC_DEADLINE_MS = 10 * 60_000;
 // GitHub allows 100 concurrent REST requests, and a token build reads every file there. A fetch keeps
 // its slot through its retries and waits, so this bounds open requests too.
