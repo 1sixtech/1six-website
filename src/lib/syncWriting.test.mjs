@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { inspect } from 'node:util';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { getArticle } from './writing.ts';
@@ -27,18 +28,108 @@ const code = ts.transpileModule(
 const COMMIT = 'a1b2c3d'.padEnd(40, '0');
 const REPO = '1sixtech/1six-researchs';
 
-// A real Response, so a body released too early cannot be read, as in production.
+// Every answer is a real Response, so a body released too early cannot be read, as in production.
 const refusal = (status, text = '', headers = {}) => new Response(text, { status, headers });
+
+// How Node's fetch rejects when a request never gets an answer: a TypeError whose cause names the reason.
+const networkError = (code, message) => new TypeError('fetch failed', { cause: Object.assign(new Error(message), { code }) });
+const dropped = () => networkError('ECONNRESET', 'read ECONNRESET');
+// What AbortSignal.timeout rejects with, in fetch() or, once the headers are in, in the body read.
+const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+// What a body read rejects with when the connection closes mid-transfer.
+const terminated = () => new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
+
+/** A 200 whose body breaks after its first bytes. */
+function brokenBody(reason) {
+  let pulls = 0;
+  return new Response(new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      if (pulls === 1) controller.enqueue(new TextEncoder().encode('<svg>par'));
+      else controller.error(reason);
+    },
+  }));
+}
+
+/** An answer whose connection dropped before its body could be read or released. */
+const unreadableBody = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
+
+/** An answer whose body arrives only after `turns` event-loop turns. */
+function slowBody(text, turns, init) {
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      for (let left = turns; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  }), init);
+}
 
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
- * `replies` maps part of a URL to the refusals [status, headers] GitHub gives it before answering;
+ * `replies` maps part of a URL to what GitHub gives it before answering normally: a refusal
+ * [status, headers], an error the request rejects with, or a Response to return as is;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
- * whole answer. Waits are recorded and not slept; `now` fixes the clock the script reads.
+ * whole answer. Waits are recorded and not slept, unless `deferWaits` lets each run a few event
+ * loop turns so other requests can go on meanwhile; `now` fixes the clock the script reads.
+ * With `sameTurn`, every request sent in one turn is answered together in the next, each after
+ * the number of microtasks `delays` gives the first URL fragment it contains.
+ * `signals` lists each request's signal; `peak` is the most requests open at once, from the call
+ * until the body is read or released; `sentWhileWaiting` and `peakWhileWaiting` count requests
+ * sent, and the most open, while a deferred wait is pending; `warnings` holds the retry lines.
  */
-function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, now } = {}) {
+function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, sameTurn = false, delays = {}, now } = {}) {
   return new Promise((resolve) => {
-    const result = { requests: [], headers: new Map(), refusals: [], waits: [], operations: [], written: new Map(), logged: [], errors: [], exit: undefined };
+    const result = { requests: [], headers: new Map(), signals: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
+    let open = 0;
+    let waiting = 0;
+    let turn;
+    const nextTurn = () => {
+      turn ??= new Promise((resolve) => setImmediate(() => {
+        turn = undefined;
+        resolve();
+      }));
+      return turn;
+    };
+    // Each request is answered after its own turn, or with sameTurn after one turn shared by all.
+    const answeredLater = async (url) => {
+      if (!sameTurn) return new Promise((resolve) => setImmediate(resolve));
+      await nextTurn();
+      const fragment = Object.keys(delays).find((part) => url.includes(part));
+      for (let left = fragment === undefined ? 0 : delays[fragment]; left > 0; left -= 1) await null;
+    };
+    // A request stays open until its body is read to the end or released, as on a real connection.
+    const held = (response) => {
+      const reader = response.body?.getReader();
+      if (!reader) {
+        open -= 1;
+        return response;
+      }
+      let closed = false;
+      const close = () => {
+        if (!closed) open -= 1;
+        closed = true;
+      };
+      return new Response(new ReadableStream({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              close();
+              controller.close();
+            } else controller.enqueue(value);
+          } catch (error) {
+            close();
+            controller.error(error);
+          }
+        },
+        cancel(reason) {
+          close();
+          return reader.cancel(reason);
+        },
+      // Read only on demand, so an answer nobody touches stays unread.
+      }, { highWaterMark: 0 }), { status: response.status, headers: response.headers });
+    };
     const fileAt = (url) => {
       const { pathname } = new URL(url);
       return decodeURIComponent(pathname.split('/').slice(url.includes('/contents/') ? 5 : 4).join('/'));
@@ -66,9 +157,24 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       exports: {},
       Buffer,
       ...(now === undefined ? {} : { Date: class extends Date { static now() { return now; } } }),
+      // Never fires: a request past its deadline is scripted as the error the real signal would raise.
+      AbortSignal: { timeout: (delay) => ({ timeout: delay }) },
       setTimeout(callback, delay) {
         result.waits.push(delay);
-        callback();
+        if (!deferWaits) return callback();
+        waiting += 1;
+        // Like Node, a delay past the 32-bit limit, or no number at all, fires almost at once.
+        let turns = delay > 2 ** 31 - 1 || !Number.isFinite(delay) ? 1 : 20;
+        const tick = () => {
+          if (turns > 0) {
+            turns -= 1;
+            setImmediate(tick);
+            return;
+          }
+          waiting -= 1;
+          callback();
+        };
+        tick();
       },
       require(name) {
         assert.ok(Object.hasOwn(dependencies, name), `unmocked dependency: ${name}`);
@@ -80,34 +186,55 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       },
       console: {
         log(line) { result.logged.push(line); resolve(result); },
+        warn(line) { result.warnings.push(line); },
         error(error) { result.errors.push(error); },
       },
       async fetch(url, init) {
         result.requests.push(url);
         result.headers.set(url, { ...init.headers });
-        if (offline) throw new Error('getaddrinfo ENOTFOUND api.github.com');
-        const refused = scripted(url);
-        if (refused) {
-          result.refusals.push(refusal(refused[0], 'busy', refused[1]));
-          return result.refusals.at(-1);
+        result.signals.push(init.signal);
+        // A real request is answered later, never at once; the gap shows how many are open together.
+        open += 1;
+        result.peak = Math.max(result.peak, open);
+        if (waiting > 0) {
+          result.sentWhileWaiting += 1;
+          result.peakWhileWaiting = Math.max(result.peakWhileWaiting, open);
         }
-        if (url.includes('/commits/')) {
-          if (commitStatus !== 200) return refusal(commitStatus, 'Not Found');
-          return { ok: true, status: 200, text: async () => commitBody };
+        await answeredLater(url);
+        try {
+          return held(answer(url));
+        } catch (error) {
+          open -= 1;
+          throw error;
         }
-        if (url.includes('/git/trees/')) {
-          // Like GitHub, the tree exists only at a real commit.
-          const status = url.includes(`/git/trees/${COMMIT}?`) ? treeStatus : 404;
-          if (status !== 200) return refusal(status, 'tree unavailable');
-          const size = (file) => (Object.hasOwn(sizes, file) ? sizes[file] : new TextEncoder().encode(files[file]).length);
-          const tree = [{ type: 'tree', path: 'a-folder' }, ...Object.keys(files).map((file) => ({ type: 'blob', mode: '100644', path: file, size: size(file) }))];
-          return { ok: true, status: 200, json: async () => listing({ tree, truncated }) };
-        }
-        const file = fileAt(url);
-        if (failing.includes(file)) return refusal(500);
-        return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(files[file]).buffer };
       },
     }));
+
+    function answer(url) {
+      if (offline) throw networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com');
+      const reply = scripted(url);
+      if (reply instanceof Error) throw reply;
+      if (reply instanceof Response) return reply;
+      if (reply) {
+        result.refusals.push(refusal(reply[0], 'busy', reply[1]));
+        return result.refusals.at(-1);
+      }
+      if (url.includes('/commits/')) {
+        if (commitStatus !== 200) return refusal(commitStatus, 'Not Found');
+        return new Response(commitBody);
+      }
+      if (url.includes('/git/trees/')) {
+        // Like GitHub, the tree exists only at a real commit.
+        const status = url.includes(`/git/trees/${COMMIT}?`) ? treeStatus : 404;
+        if (status !== 200) return refusal(status, 'tree unavailable');
+        const size = (file) => (Object.hasOwn(sizes, file) ? sizes[file] : new TextEncoder().encode(files[file]).length);
+        const tree = [{ type: 'tree', path: 'a-folder' }, ...Object.keys(files).map((file) => ({ type: 'blob', mode: '100644', path: file, size: size(file) }))];
+        return Response.json(listing({ tree, truncated }));
+      }
+      const file = fileAt(url);
+      if (failing.includes(file)) return refusal(500);
+      return new Response(files[file]);
+    }
   });
 }
 
@@ -211,11 +338,14 @@ test('a commit that cannot be resolved fails the sync before anything is listed 
   assert.deepEqual(run.operations, [], 'the last good sync stays in place');
 });
 
-test('a network failure fails the sync before anything is listed or touched', async () => {
+test('a network failure that persists is retried three times, then fails the sync before anything is listed or touched', async () => {
   const run = await runSync({ '001-live/README.md': PUBLISHED }, { offline: true });
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
   assert.equal(run.exit, 1);
-  assert.match(run.errors[0].message, /ENOTFOUND/);
-  assert.equal(run.requests.length, 1, 'no listing and no download follow a failed lookup');
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${lookup}`);
+  assert.equal(run.errors[0].cause.cause.code, 'ENOTFOUND', "Node's own reason stays attached for the build log");
+  assert.deepEqual(run.requests, [lookup, lookup, lookup, lookup], 'no listing and no download follow a failed lookup');
+  assert.deepEqual(run.waits, [1000, 2000, 4000], 'the server-error backoff');
   assert.deepEqual(run.operations, [], 'the last good sync stays in place');
 });
 
@@ -496,7 +626,8 @@ test('a limit that resets beyond the wait budget fails now and names the token',
   assert.equal(run.exit, 1);
   assert.match(run.errors[0].message, /GitHub commit lookup failed for main: 403 busy Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit\./);
   assert.equal(run.requests.length, 1);
-  assert.deepEqual(run.waits, []);
+  assert.deepEqual(run.warnings, [], 'nothing is retried');
+  assert.equal(run.waits.length, 1, 'only the hold on every other request, which this sync fails without waiting for');
 
   const tooLong = await runSync({ ...LIVE }, { replies: { '/commits/': [[429, { 'retry-after': '3600' }]] } });
   assert.equal(tooLong.exit, 1);
@@ -513,6 +644,319 @@ test('anything else is an answer, not an outage, and is not retried', async () =
     assert.equal(run.requests.length, 1, `${status} is final`);
     assert.deepEqual(run.waits, []);
   }
+});
+
+test('a request that fails on the way is retried with the server-error backoff, on the API and on file downloads', async () => {
+  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [dropped(), networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com')] } });
+  assert.equal(lookup.exit, undefined);
+  assert.deepEqual(lookup.waits, [1000, 2000]);
+  assert.equal(lookup.requests.filter((url) => url.includes('/commits/')).length, 3);
+
+  const listing = await runSync({ ...LIVE }, { replies: { '/git/trees/': [dropped()] } });
+  assert.equal(listing.exit, undefined);
+  assert.deepEqual(listing.waits, [1000]);
+
+  const download = await runSync({ ...LIVE }, { replies: { 'raw.githubusercontent.com': [dropped()] } });
+  assert.equal(download.exit, undefined);
+  assert.deepEqual(download.waits, [1000]);
+  assert.equal(download.written.get('/repo/content/writing/001-live/README.md'), PUBLISHED);
+
+  const authenticated = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'tok' }, replies: { '/contents/': [dropped()] } });
+  assert.equal(authenticated.exit, undefined);
+  assert.deepEqual(authenticated.waits, [1000]);
+});
+
+test('a request still unanswered or unread at its 30-second deadline is abandoned and sent again', async () => {
+  const beforeAnswer = await runSync({ ...LIVE }, { replies: { '/commits/': [timedOut()] } });
+  assert.equal(beforeAnswer.exit, undefined);
+  assert.deepEqual(beforeAnswer.waits, [1000]);
+
+  const inBody = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
+    { replies: { 'chart.svg': [brokenBody(timedOut())] } },
+  );
+  assert.equal(inBody.exit, undefined);
+  assert.deepEqual(inBody.waits, [1000]);
+  assert.equal(inBody.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
+});
+
+test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
+  const run = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
+    { replies: { 'chart.svg': [brokenBody(terminated()), brokenBody(terminated())] } },
+  );
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [1000, 2000]);
+  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
+});
+
+test('every attempt has its own 30-second timeout, so a retry does not start on a spent one', async () => {
+  for (const env of [{}, { WRITING_GITHUB_TOKEN: 'tok' }]) {
+    const run = await runSync(
+      { ...LIVE, '001-live/assets/chart.svg': '<svg/>' },
+      { env, replies: { '/commits/': [[503]], 'chart.svg': [dropped()] } },
+    );
+    assert.equal(run.exit, undefined);
+    assert.equal(run.requests.length, 6, 'two lookups, the listing, the README, and the figure twice');
+    assert.equal(run.signals.length, run.requests.length);
+    for (const signal of run.signals) assert.deepEqual(signal, { timeout: 30_000 });
+    assert.equal(new Set(run.signals).size, run.signals.length);
+  }
+});
+
+const TWENTY_FIGURES = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const figureAt = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
+
+/** Asserts every one of the twenty figures was saved whole. */
+function assertAllFigures(run) {
+  for (const [file, text] of Object.entries(TWENTY_FIGURES)) assert.equal(run.written.get(`/repo/public/writing-assets/${file}`), text, file);
+}
+
+test('a download that keeps failing on the way fails the sync, names the request, and leaves the last good sync in place', async () => {
+  const always = () => [dropped(), dropped(), dropped(), dropped()];
+  const figure = figureAt('chart.svg');
+  const run = await runSync({ ...LIVE, '001-live/assets/chart.svg': '<svg/>' }, { replies: { 'chart.svg': always() } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${figure}`);
+  assert.equal(run.requests.filter((url) => url === figure).length, 4);
+  assert.deepEqual(run.waits, [1000, 2000, 4000]);
+  assert.deepEqual(run.operations, [], 'nothing is deleted until every file has arrived');
+
+  const cutOff = await runSync({ ...LIVE }, { replies: { 'raw.githubusercontent.com': Array.from({ length: 4 }, () => brokenBody(timedOut())) } });
+  assert.equal(cutOff.exit, 1);
+  assert.equal(cutOff.errors[0].cause.name, 'TimeoutError');
+  assert.deepEqual(cutOff.operations, []);
+
+  const authenticated = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'secret-token' }, replies: { '/contents/': always() } });
+  assert.equal(authenticated.exit, 1);
+  assert.match(authenticated.errors[0].message, /contents\/001-live\/README\.md\?ref=/);
+  assert.doesNotMatch(authenticated.errors[0].message, /secret-token/, 'the token travels in a header, never in the message');
+});
+
+test('downloads run eight at a time, READMEs and figures alike, and every file still arrives', async () => {
+  const folders = Array.from({ length: 20 }, (_, index) => `0${String(index).padStart(2, '0')}-article`);
+  const readmes = await runSync(Object.fromEntries(folders.map((folder) => [`${folder}/README.md`, `# ${folder}\n\nDate: 2026-11-01\n`])));
+  assert.equal(readmes.exit, undefined);
+  assert.equal(readmes.peak, 8);
+  assert.equal(readmes.written.size, 20);
+  for (const folder of folders) assert.equal(readmes.written.get(`/repo/content/writing/${folder}/README.md`), `# ${folder}\n\nDate: 2026-11-01\n`);
+
+  const assets = await runSync({ ...LIVE, ...TWENTY_FIGURES });
+  assert.equal(assets.exit, undefined);
+  assert.equal(assets.peak, 8);
+  assertAllFigures(assets);
+
+  const few = await runSync({ ...LIVE, '001-live/assets/a.svg': '<svg/>', '001-live/assets/b.svg': '<svg/>' });
+  assert.equal(few.peak, 2, 'fewer files than the limit still download together');
+});
+
+test('a download that fails after the first eight have started still stops the sync before anything is removed', async () => {
+  const late = figureAt('f15.svg');
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { failing: ['001-live/assets/f15.svg'] });
+  assert.equal(run.exit, 1);
+  assert.match(run.errors[0].message, /Failed to download 001-live\/assets\/f15\.svg: 500/);
+  assert.ok(run.requests.filter((url) => url.includes('/assets/')).indexOf(late) >= 8, 'the file waited for a free slot');
+  assert.equal(run.peak, 8);
+  assert.deepEqual(run.operations, [], 'nothing is deleted until every file has arrived');
+});
+
+test('a lookup or a listing whose body breaks partway is read again, so part of a commit or a listing is never used', async () => {
+  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [brokenBody(terminated())] } });
+  assert.equal(lookup.exit, undefined);
+  assert.deepEqual(lookup.waits, [1000]);
+  assert.equal(lookup.requests[2], `https://api.github.com/repos/${REPO}/git/trees/${COMMIT}?recursive=1`, 'the listing reads the whole commit');
+
+  const listing = await runSync({ ...LIVE }, { replies: { '/git/trees/': [brokenBody(timedOut())] } });
+  assert.equal(listing.exit, undefined);
+  assert.deepEqual(listing.waits, [1000]);
+  assert.equal(listing.written.get('/repo/content/writing/001-live/README.md'), PUBLISHED);
+});
+
+test('a listing that answers with something other than JSON fails the sync, unretried, before anything is downloaded or touched', async () => {
+  const run = await runSync({ ...LIVE }, { replies: { '/git/trees/': [new Response('<html>Unicorn!</html>')] } });
+  assertRefusedAtListing(run, []);
+  assert.equal(run.errors[0].name, 'SyntaxError');
+  assert.deepEqual(run.waits, [], 'a complete answer is not an outage');
+});
+
+test('a refusal whose body is missing or cannot be read keeps the wait GitHub named, and one past the budget still fails at once', async () => {
+  const empty = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(null, { status: 429, headers: { 'retry-after': '30' } })] } });
+  assert.equal(empty.exit, undefined);
+  assert.deepEqual(empty.waits, [30_000], 'nothing to release, so the wait GitHub named still holds');
+
+  const broken = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(429, { 'retry-after': '30' })] } });
+  assert.equal(broken.exit, undefined);
+  assert.equal(broken.requests.filter((url) => url.includes('/commits/')).length, 2);
+  assert.deepEqual(broken.waits, [30_000], 'a body that will not release does not shorten the wait');
+
+  const pastBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(429, { 'retry-after': '3600' })] } });
+  assert.equal(pastBudget.exit, 1);
+  assert.equal(pastBudget.requests.length, 1, 'a wait past the budget is not attempted');
+  assert.deepEqual(pastBudget.waits, [3_600_000], 'every other request is held; this one fails rather than wait');
+  assert.deepEqual(pastBudget.warnings, []);
+  assert.equal(pastBudget.errors[0].message, 'GitHub commit lookup failed for main: 429 (body unreadable) Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
+
+  const missing = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(404)] } });
+  assert.equal(missing.exit, 1);
+  assert.equal(missing.requests.length, 1, 'a refusal is its own answer, body or not');
+  assert.equal(missing.errors[0].message, 'GitHub commit lookup failed for main: 404 (body unreadable)');
+});
+
+test('refusals and network failures share one budget of three retries', async () => {
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
+  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [[503], dropped(), [503], dropped()] } });
+  assert.equal(run.exit, 1);
+  assert.deepEqual(run.requests, [lookup, lookup, lookup, lookup]);
+  assert.deepEqual(run.waits, [1000, 2000, 4000]);
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${lookup}`);
+});
+
+test('a request the client cannot even build fails at once, not after three retries as if GitHub were down', async () => {
+  const invalid = new TypeError('Headers.append: "x" is an invalid header value.');
+  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [invalid] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.requests.length, 1);
+  assert.deepEqual(run.waits, []);
+  assert.equal(run.errors[0].message, 'Headers.append: "x" is an invalid header value.');
+});
+
+test('a token with a space, line break, or non-ASCII character fails before any request and is never printed', async () => {
+  for (const token of ['ghp_secret\nghp_more', 'ghp_secret…', 'ghp secret']) {
+    const run = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: token } });
+    assert.equal(run.exit, 1, JSON.stringify(token));
+    assert.deepEqual(run.requests, [], 'fetch would quote the whole header in its error');
+    assert.match(run.errors[0].message, /WRITING_GITHUB_TOKEN has a space, line break, or non-ASCII character in it/);
+    assert.doesNotMatch(inspect(run.errors[0]), /secret/);
+  }
+});
+
+test('a request keeps its slot through its retries, so it is tried again before the files queued behind it start', async () => {
+  const meanwhile = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]] } });
+  assert.equal(meanwhile.exit, undefined);
+  assert.equal(meanwhile.peakWhileWaiting, 7, 'the other seven slots keep working while it waits');
+  assertAllFigures(meanwhile);
+
+  const order = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/f0.svg': [[503]] } });
+  assert.ok(order.requests.lastIndexOf(figureAt('f0.svg')) < order.requests.indexOf(figureAt('f8.svg')), 'its retry comes before the ninth file');
+});
+
+const FORTY_FIGURES = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+
+test('a lasting outage fails once the first files use up their retries, without first trying every queued file', async () => {
+  const unreachable = await runSync({ ...LIVE, ...FORTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 200 }, () => dropped()) } });
+  assert.equal(unreachable.exit, 1);
+  assert.match(unreachable.errors[0].message, /^GitHub request failed after 3 retries: .*\/assets\/f[0-7]\.svg$/);
+  assert.equal(unreachable.requests.includes(figureAt('f39.svg')), false, 'the queue does not have to drain before the build fails');
+  assert.deepEqual(unreachable.operations, []);
+
+  const limited = await runSync({ ...LIVE, ...FORTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 200 }, () => [429, { 'retry-after': '30' }]) } });
+  assert.equal(limited.exit, 1);
+  assert.match(limited.errors[0].message, /^Failed to download 001-live\/assets\/f[0-7]\.svg: 429 Set WRITING_GITHUB_TOKEN/);
+  assert.equal(limited.requests.includes(figureAt('f39.svg')), false, 'a lasting limit is not asked once per file');
+  assert.deepEqual(limited.operations, []);
+});
+
+test('a rate limit holds every request until it resets, not only the one GitHub refused', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '30' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [30_000], 'one wait for the whole sync');
+  assert.equal(run.sentWhileWaiting, 0, 'nothing is sent while GitHub has asked to wait');
+  assert.deepEqual(run.warnings, [`Retry 1 of 3 in 30 s after 429: ${figureAt('f0.svg')}`]);
+  assertAllFigures(run);
+});
+
+test('a 403 rate limit holds every request too, whether GitHub names the wait or only the reset', async () => {
+  const named = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[403, { 'retry-after': '30' }]] } });
+  assert.equal(named.exit, undefined);
+  assert.deepEqual(named.waits, [30_000]);
+  assert.equal(named.sentWhileWaiting, 0);
+  assertAllFigures(named);
+
+  const now = 1_800_000_000_500;
+  const exhausted = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(now / 1000) + 20) };
+  const primary = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { now, deferWaits: true, replies: { '/f0.svg': [[403, exhausted]] } });
+  assert.equal(primary.exit, undefined);
+  assert.deepEqual(primary.waits, [20_500]);
+  assert.equal(primary.sentWhileWaiting, 0);
+  assertAllFigures(primary);
+});
+
+test('a longer rate limit that arrives during a shorter one holds every request to the longer wait', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '5' }]], '/f1.svg': [[429, { 'retry-after': '30' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [5000, 30_000]);
+  assert.equal(run.sentWhileWaiting, 0, 'a request that began waiting on the shorter pause waits out the longer one too');
+  assertAllFigures(run);
+});
+
+test('a request whose own backoff ends during a rate limit waits the limit out before it retries', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]], '/f1.svg': [[429, { 'retry-after': '30' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [1000, 30_000]);
+  assert.equal(run.sentWhileWaiting, 0, 'the server error\'s retry is held by the pause too');
+  assertAllFigures(run);
+});
+
+test('a rate limit this sync fails on still holds every other request while its body is read', async () => {
+  const refusal = slowBody('busy', 10, { status: 429, headers: { 'retry-after': '3600' } });
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [refusal] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, 'Failed to download 001-live/assets/f0.svg: 429 Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
+  assert.equal(run.requests.includes(figureAt('f8.svg')), false, 'no queued file starts during the cooldown GitHub named');
+  assert.equal(run.sentWhileWaiting, 0);
+});
+
+test('a cooldown longer than a timer can hold still holds every other request while the sync fails on it', async () => {
+  for (const retryAfter of ['2592000', 'Infinity']) {
+    const refusal = slowBody('busy', 10, { status: 429, headers: { 'retry-after': retryAfter } });
+    const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [refusal] } });
+    assert.equal(run.exit, 1, retryAfter);
+    assert.deepEqual(run.waits, [2 ** 31 - 1], `${retryAfter}: the hold is capped, not left to overflow to 1 ms`);
+    assert.equal(run.requests.includes(figureAt('f8.svg')), false, `${retryAfter}: no queued file starts`);
+  }
+});
+
+test('a rate limit that lands just as a queued request takes its slot still holds that request', async () => {
+  for (let microtasks = 0; microtasks <= 40; microtasks += 1) {
+    const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, {
+      deferWaits: true,
+      sameTurn: true,
+      delays: { '/f1.svg': microtasks },
+      replies: { '/f1.svg': [[429, { 'retry-after': '30' }]] },
+    });
+    assert.equal(run.exit, undefined, `the 429 ${microtasks} microtasks in`);
+    assert.equal(run.sentWhileWaiting, 0, `a request went out during the pause when the 429 landed ${microtasks} microtasks in`);
+    assertAllFigures(run);
+  }
+});
+
+test('a shorter rate limit does not cut short a longer one already running', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '30' }]], '/f1.svg': [[429, { 'retry-after': '5' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [30_000], 'one pause, the longer');
+  assert.equal(run.sentWhileWaiting, 0);
+  assertAllFigures(run);
+});
+
+test('eight downloads that each fail once still finish and give their slots on, so the files queued behind them follow', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 8 }, () => dropped()) } });
+  assert.equal(run.exit, undefined, 'a slot never given on would leave the sync pending until Node exits 0 with nothing printed');
+  assert.equal(run.peak, 8);
+  assertAllFigures(run);
+});
+
+test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
+  const run = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'secret-token' }, replies: { '/commits/': [[503], dropped(), timedOut()] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, [
+    `Retry 1 of 3 in 1 s after 503: ${lookup}`,
+    `Retry 2 of 3 in 2 s after ECONNRESET: ${lookup}`,
+    `Retry 3 of 3 in 4 s after TimeoutError: ${lookup}`,
+  ]);
+
+  const quiet = await runSync({ ...LIVE });
+  assert.deepEqual(quiet.warnings, [], 'a sync with nothing to retry prints only its summary');
 });
 
 test('a token GitHub rejects fails the sync at once and names the variable, because it would fail every build', async () => {
@@ -706,7 +1150,9 @@ test('a Retry-After of exactly a minute is waited out, and one second more is no
 
   const overBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [[429, { 'retry-after': '61' }]] } });
   assert.equal(overBudget.exit, 1);
-  assert.deepEqual(overBudget.waits, []);
+  assert.equal(overBudget.requests.length, 1);
+  assert.deepEqual(overBudget.warnings, [], 'not retried');
+  assert.deepEqual(overBudget.waits, [61_000], 'every other request is held; this one fails rather than wait');
 });
 
 const TOKEN_ADVICE = /Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit\./;

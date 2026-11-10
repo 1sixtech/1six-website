@@ -41,12 +41,31 @@ const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
 const BACKOFF_BASE_MS = 1000;
 const RESET_MARGIN_MS = 1000;
+// A deadline for the whole request, body included, not a stall detector. Every request is a GET,
+// so one abandoned at the deadline is safe to send again. Eight files at the 5 MB cap, arriving
+// together, need about 11 Mbit/s between them to finish in time.
+const REQUEST_TIMEOUT_MS = 30_000;
+// GitHub allows 100 concurrent REST requests, and a token build reads every file there. A fetch keeps
+// its slot through its retries and waits, so this bounds open requests too.
+const MAX_CONCURRENT_FETCHES = 8;
+// A GitHub token is printable ASCII, so a space or any other character inside one means a bad
+// copy. For a line break, fetch would also quote the whole header, token included, in its error.
+const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
+
+const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
+const isRateLimit = (status) => status === 403 || status === 429;
+
+// Node's fetch gives a network failure or a cut-off body the socket or DNS error as its cause,
+// and a request past its deadline its signal's TimeoutError. A header that fetch rejects outright
+// has neither, and would fail the same way every time. A few lasting failures, such as a redirect
+// loop or a bad certificate, carry a cause too, and cost three quick retries before they fail.
+const isNetworkFailure = (error) => error?.name === 'TimeoutError' || error?.cause !== undefined;
 
 /** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
 function retryDelay(response, retriesUsed) {
   const retryAfter = Number(response.headers.get('retry-after'));
   if (retryAfter > 0) return retryAfter * 1000;
-  if (response.status >= 500) return BACKOFF_BASE_MS * 2 ** retriesUsed;
+  if (response.status >= 500) return backoff(retriesUsed);
   const resetAt = Number(response.headers.get('x-ratelimit-reset'));
   if (response.headers.get('x-ratelimit-remaining') === '0' && resetAt > 0) {
     return Math.max(resetAt * 1000 - Date.now(), 0) + RESET_MARGIN_MS;
@@ -54,23 +73,107 @@ function retryDelay(response, retriesUsed) {
   return MAX_RETRY_WAIT_MS;
 }
 
-/** Fetches, retrying a refusal or server error; the caller reads the final answer. */
-async function githubFetch(url, headers) {
-  for (let retriesUsed = 0; ; retriesUsed += 1) {
-    const response = await fetch(url, { headers });
-    const transient = response.status === 403 || response.status === 429 || response.status >= 500;
-    if (!transient || retriesUsed === MAX_RETRIES) return response;
-    // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
-    const delay = retryDelay(response, retriesUsed);
-    if (delay > MAX_RETRY_WAIT_MS) return response;
-    await response.body?.cancel();
-    await new Promise((resolve) => setTimeout(resolve, delay));
+let runningFetches = 0;
+const waitingForSlot = [];
+
+// A rate limit holds every request, not only the one refused: GitHub may ban a client that keeps
+// asking while it is limited.
+let resumeAt = 0;
+let resumed = Promise.resolve();
+// Node fires a timer set for longer than this (about 24.8 days) after 1 ms instead.
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+function pauseRequests(delay) {
+  const wait = Math.min(delay, MAX_TIMER_MS);
+  const until = Date.now() + wait;
+  if (until <= resumeAt) return;
+  resumeAt = until;
+  resumed = new Promise((resolve) => setTimeout(resolve, wait));
+}
+
+/** Runs `task` once fewer than MAX_CONCURRENT_FETCHES tasks hold a slot. */
+async function inSlot(task) {
+  if (runningFetches < MAX_CONCURRENT_FETCHES) runningFetches += 1;
+  else await new Promise((resolve) => waitingForSlot.push(resolve));
+  try {
+    return await task();
+  } finally {
+    // Hand the slot straight to the next task, or give it back.
+    const next = waitingForSlot.shift();
+    if (next) next();
+    else runningFetches -= 1;
   }
 }
 
-function tokenHint(response) {
-  if (TOKEN) return response.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
-  return response.status === 403 || response.status === 429
+/**
+ * Reads a final answer within its attempt, so a connection that drops mid-body, or a body still
+ * arriving at the deadline, fails here and is retried. A refusal's status is its answer even when
+ * its body cannot be read.
+ */
+async function readAnswer(response) {
+  const { ok, status } = response;
+  try {
+    return { ok, status, body: Buffer.from(await response.arrayBuffer()) };
+  } catch (error) {
+    if (ok) throw error;
+    return { ok, status, body: Buffer.from('(body unreadable)') };
+  }
+}
+
+/** One request: its final answer, or how long to wait before the next try, and why. */
+async function attempt(url, headers, retriesUsed) {
+  // A fresh signal each time, so a retry does not inherit a spent timeout.
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const limited = isRateLimit(response.status);
+  const transient = limited || response.status >= 500;
+  const wait = transient ? retryDelay(response, retriesUsed) : undefined;
+  // Every request waits a rate limit out, even when this one is about to fail on it instead, so
+  // nothing more is sent while its body is read; a server error is this request's own.
+  if (limited) pauseRequests(wait);
+  const delay = retriesUsed < MAX_RETRIES ? wait : undefined;
+  // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
+  if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
+  // Released so it does not hold a connection; a body that already broke keeps the wait above.
+  await response.body?.cancel().catch(() => {});
+  return { delay, reason: response.status, paused: limited };
+}
+
+/**
+ * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
+ * on the way: no connection, a reset, or the deadline. The caller judges the final status.
+ * A request keeps its slot through its retries, so a failing one uses them up before the files
+ * queued behind it start, and a lasting outage fails as fast however many files are waiting.
+ */
+function githubFetch(url, headers) {
+  return inSlot(async () => {
+    for (let retriesUsed = 0; ; retriesUsed += 1) {
+      // Waits out the rate-limit pause, including one that grows longer meanwhile. The last check
+      // runs in the same step that sends the request, so no pause can begin in between.
+      for (let pause; pause !== resumed; ) {
+        pause = resumed;
+        await pause;
+      }
+      let outcome;
+      try {
+        outcome = await attempt(url, headers, retriesUsed);
+      } catch (error) {
+        if (!isNetworkFailure(error)) throw error;
+        if (retriesUsed === MAX_RETRIES) {
+          throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
+        }
+        outcome = { delay: backoff(retriesUsed), reason: error.cause?.code ?? error.name };
+      }
+      if (outcome.answer) return outcome.answer;
+      console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
+      // A rate limit's wait is the shared pause, which the next attempt waits out first.
+      if (!outcome.paused) await new Promise((resolve) => setTimeout(resolve, outcome.delay));
+    }
+  });
+}
+
+function tokenHint(answer) {
+  if (TOKEN) return answer.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
+  return isRateLimit(answer.status)
     ? ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.'
     : '';
 }
@@ -79,29 +182,25 @@ function tokenHint(response) {
 // Hook starts this build seconds after a push. Reading by commit SHA gets the
 // pushed files and keeps the listing and every download in one snapshot.
 async function resolveCommit() {
-  const response = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
+  const answer = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github.sha',
   });
-  if (!response.ok) {
-    throw new Error(
-      `GitHub commit lookup failed for ${REF}: ${response.status} ${await response.text()}${tokenHint(response)}`,
-    );
+  if (!answer.ok) {
+    throw new Error(`GitHub commit lookup failed for ${REF}: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
-  return (await response.text()).trim();
+  return answer.body.toString().trim();
 }
 
 async function listFiles(commit) {
-  const response = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
+  const answer = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github+json',
   });
-  if (!response.ok) {
-    throw new Error(
-      `GitHub tree fetch failed: ${response.status} ${await response.text()}${tokenHint(response)}`,
-    );
+  if (!answer.ok) {
+    throw new Error(`GitHub tree fetch failed: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
-  const tree = await response.json();
+  const tree = JSON.parse(answer.body.toString());
   // Past 100,000 entries or 7 MB GitHub returns part of the tree, and the missing
   // articles would leave the site without an error.
   if (tree.truncated) {
@@ -123,11 +222,11 @@ function fileRequest(commit, file) {
 }
 
 async function fetchFile(commit, file) {
-  const response = await githubFetch(...fileRequest(commit, file));
-  if (!response.ok) {
-    throw new Error(`Failed to download ${file}: ${response.status}${tokenHint(response)}`);
+  const answer = await githubFetch(...fileRequest(commit, file));
+  if (!answer.ok) {
+    throw new Error(`Failed to download ${file}: ${answer.status}${tokenHint(answer)}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  return answer.body;
 }
 
 async function save(bytes, destination) {
@@ -187,6 +286,9 @@ function refuse(commit, problems) {
 }
 
 async function main() {
+  if (TOKEN && !TOKEN_CHARACTERS.test(TOKEN)) {
+    throw new Error('WRITING_GITHUB_TOKEN has a space, line break, or non-ASCII character in it: copy the token again.');
+  }
   const commit = await resolveCommit();
   const listing = await listFiles(commit);
   const entries = listing.filter((entry) => entry.type === 'blob');

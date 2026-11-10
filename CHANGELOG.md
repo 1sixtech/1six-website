@@ -3,7 +3,7 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
-## [0.3.11.0] - 2026-11-10
+## [0.3.12.0] - 2026-11-10
 
 ### Changed
 
@@ -15,6 +15,29 @@ All notable changes to the 1SIX website are recorded here. Versions follow
 ### Fixed
 
 - Build errors quote an article's text with control characters encoded, so an article cannot forge a line or a terminal escape in the build log.
+
+## [0.3.11.0] - 2026-11-10
+
+### Changed
+
+- The article sync downloads at most eight files at a time, well inside GitHub's limit of 100 concurrent requests. A file keeps its place through its retries, so a lasting outage fails a build within a few minutes however many articles and figures there are.
+
+### Fixed
+
+- A brief network failure no longer fails a build. A refused or reset connection, a failed DNS lookup, or a download cut off partway is retried after 1, 2, and 4 seconds, and each retry prints a line to the build log.
+- A request that stalls is abandoned after 30 seconds, its body included, and sent again. It used to wait up to five minutes.
+- A GitHub rate limit holds every request until the time GitHub names, not only the one it refused, so a build stops asking while it is limited.
+- A `WRITING_GITHUB_TOKEN` with a space, line break, or non-ASCII character inside it fails the build before any request, without printing it. A line break used to make Node print the whole token in its error.
+
+## [0.3.10.1] - 2026-11-10
+
+### Fixed
+
+- Moving between pages no longer leaves the previous page's loading screen behind. Every client navigation used to add one more hidden, full-screen logo layer to the page, and leaving a page while its logo showed turned the next page's logo fade into a hard cut. The development console no longer reports two children with the same key on every page.
+
+### Documentation
+
+- The release QA checklist has a page-entry check that counts loading screens across client navigation (LOAD-7), and changes to the loading screen itself now route to the page-entry checks.
 
 ## [0.3.10.0] - 2026-11-10
 

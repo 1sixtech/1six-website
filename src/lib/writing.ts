@@ -467,6 +467,25 @@ export function unsafeArticleHtml(html: string): string | null {
   return html.slice(end).includes('<') ? 'a "<" that opens no tag' : null;
 }
 
+/**
+ * Where a relative link in an article leads on the site. Articles are written
+ * to work on GitHub, so they link by paths inside the article repository: an
+ * article's README becomes its page and any other file its synced copy. A path
+ * with nothing on the site to lead to stays as written.
+ */
+function siteLink(slug: string, href: string): string {
+  if (/^(?:[a-z][a-z0-9+.-]*:|[/#?])/i.test(href)) return href;
+  const [, file, suffix] = href.match(/^([^?#]*)([\s\S]*)$/)!;
+  const target = path.posix.join(slug, file).replace(/\/$/, '');
+  if (target === 'README.md') return `/writing${suffix}`;
+  const [article, ...rest] = target.split('/');
+  if (!isArticleSlug(article)) return href;
+  const inside = rest.join('/');
+  return inside === '' || inside === 'README.md'
+    ? `/writing/${article}${suffix}`
+    : `/writing-assets/${target}${suffix}`;
+}
+
 function renderBody(slug: string, body: string): { html: string; headings: WritingHeading[] } {
   const parsed = markdown.parse(body) as string;
   const headings: WritingHeading[] = [];
@@ -517,6 +536,7 @@ function renderBody(slug: string, body: string): { html: string; headings: Writi
     const label = alt ? `Enlarge figure: ${alt}` : 'Enlarge figure';
     return `<p class="figure"><a class="writing-figure" href="${src}" aria-label="${label}">${img}${ENLARGE_ICON}</a></p>`;
   });
+  html = html.replace(/<a href="([^"]+)"/g, (_, href: string) => `<a href="${siteLink(slug, href)}"`);
   html = html.replace(
     /<a href="(https?:[^"]+)"/g,
     '<a href="$1" target="_blank" rel="noreferrer noopener"',
