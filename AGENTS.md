@@ -125,7 +125,7 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   4 seconds, within the same three retries, and each retry prints a line to the build log; a slow download that keeps
   arriving is not cut off. At most eight files download at once, each keeping its place through its retries, so a lasting
   outage fails as fast however many files are queued. The sync has 10 minutes in all: past that the build fails before
-  anything is written, naming what the sync was doing and what held it up (rate-limit holds, retries, or slow answers),
+  anything is written, naming what the sync was doing and where the time went (rate-limit holds, retries, slow answers),
   instead of running into Vercel's 45-minute build limit. With `WRITING_GITHUB_TOKEN` every request uses the REST API;
   without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails the build, and so does one with a
   space, line break, or non-ASCII character inside it (surrounding whitespace is trimmed), before any request and without

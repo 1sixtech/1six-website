@@ -129,11 +129,13 @@ async function readBody(response, arrived) {
 /**
  * Reads a final answer within its attempt, so a connection that drops mid-body, or a body that stops
  * arriving, fails here and is retried. A refusal's status is its answer even when its body cannot be read.
+ * Its body only adds to the message, so it gets 30 seconds from the answer however it trickles in, and
+ * a slow one cannot hold the sync until its deadline and hide the refusal.
  */
 async function readAnswer(response, arrived) {
   const { ok, status } = response;
   try {
-    return { ok, status, body: await readBody(response, arrived) };
+    return { ok, status, body: await readBody(response, ok ? arrived : () => {}) };
   } catch (error) {
     if (ok) throw error;
     return { ok, status, body: Buffer.from('(body unreadable)') };
@@ -209,11 +211,12 @@ function githubFetch(url, headers) {
   });
 }
 
+// Only an anonymous build can raise its limit this way; a token is limited too.
+const RATE_LIMIT_ADVICE = TOKEN ? '' : ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.';
+
 function tokenHint(answer) {
   if (TOKEN) return answer.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
-  return isRateLimit(answer.status)
-    ? ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.'
-    : '';
+  return isRateLimit(answer.status) ? RATE_LIMIT_ADVICE : '';
 }
 
 // raw.githubusercontent.com caches a branch URL for five minutes, and a Deploy
@@ -333,18 +336,25 @@ function duration(ms) {
   return seconds % 60 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${seconds / 60} min`;
 }
 
-/** What the sync was doing when its time ran out, and what held it up. */
+// A cause that took less of the deadline than this is not the reason it ran out, so it sends no one to a fix.
+const NOTABLE_SHARE_MS = 60_000;
+
+/**
+ * What the sync was doing when its time ran out, and where the time went: rate-limit holds, retries, and
+ * whatever is left, which went to answers that came slowly or not at all.
+ */
 function lateReport() {
   const { step, files, downloaded, refusals, heldMs, otherRetries } = progress;
-  // A hold still running counts only as far as now.
-  const held = heldMs - Math.max(resumeAt - Date.now(), 0);
+  // A hold still running counts only as far as now. Whole seconds, so the lines add up as printed.
+  const held = Math.round((heldMs - Math.max(resumeAt - Date.now(), 0)) / 1000) * 1000;
+  const rest = SYNC_DEADLINE_MS - held;
   const causes = [];
   if (refusals > 0) {
-    const advice = TOKEN ? '' : ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.';
+    const advice = held >= NOTABLE_SHARE_MS ? RATE_LIMIT_ADVICE : '';
     causes.push(`GitHub's rate limit refused ${plural(refusals, 'request')} and held every request for ${duration(held)} in all.${advice}`);
   }
   if (otherRetries > 0) causes.push(`Server errors and network failures cost ${plural(otherRetries, 'retry', 'retries')}.`);
-  if (causes.length === 0) causes.push('GitHub answered slowly: no request was refused or retried.');
+  if (rest >= NOTABLE_SHARE_MS) causes.push(`GitHub answered slowly for ${held > 0 ? 'the other' : 'all'} ${duration(rest)}.`);
   const done = files > 0 ? `, with ${downloaded} of ${files} files downloaded` : '';
   return `The article sync stopped at its ${SYNC_DEADLINE_MS / 60_000}-minute limit while ${step}${done}:\n${causes.map((cause) => `  - ${cause}`).join('\n')}`;
 }

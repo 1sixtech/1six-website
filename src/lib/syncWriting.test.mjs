@@ -123,15 +123,16 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       if (finished) return;
       finished = true;
       result.endedAt = clock.now;
-      result.timersLeft = timers.size;
+      result.timersLeft = [...timers.values()].filter((timer) => !timer.forReply).length;
       resolve(result);
     };
     // Like Node, a delay under 1 ms, past the 32-bit limit, or no number at all fires after 1 ms.
     const nodeDelay = (delay) => (delay >= 1 && delay <= 2 ** 31 - 1 ? delay : 1);
-    const addTimer = (delay, callback) => {
+    // `forReply` marks the harness's own pauses for a scripted reply, which are not the script's timers.
+    const addTimer = (delay, callback, forReply = false) => {
       timersSet += 1;
       activity += 1;
-      timers.set(timersSet, { id: timersSet, due: clock.now + nodeDelay(delay), callback });
+      timers.set(timersSet, { id: timersSet, due: clock.now + nodeDelay(delay), callback, forReply });
       if (deferWaits) advance();
       return timersSet;
     };
@@ -162,7 +163,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       advancing = false;
     }
     // A pause on the run's clock for a scripted reply, not one of the script's own waits.
-    const wait = (delay) => new Promise((resolve) => addTimer(delay, resolve));
+    const wait = (delay) => new Promise((resolve) => addTimer(delay, resolve, true));
     // Like fetch, a reply not yet in is given up on once the request's signal aborts, with its reason.
     const unlessAborted = (signal, reply) => new Promise((resolve, reject) => {
       const abort = () => reject(signal.reason);
@@ -825,6 +826,23 @@ test('a download that keeps arriving is not given up on, however long it takes',
   assert.equal(run.endedAt - START, 150_000, 'its answer at 25 s, then a part every 25 s: five times the 30-second wait');
 });
 
+test('a refusal whose body trickles in or stops is answered by its status 30 seconds after it arrives, not held to the sync limit', async () => {
+  const trickling = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [trickle(Array.from({ length: 40 }, () => '.'), 20_000, { status: 404 })] } });
+  assert.equal(trickling.exit, 1);
+  assert.equal(trickling.endedAt - START, 30_000, 'a refusal body only adds to the message, so its parts do not start the wait again');
+  assert.equal(trickling.errors[0].message, 'GitHub commit lookup failed for main: 404 (body unreadable)');
+  assert.equal(trickling.requests.length, 1, 'a refusal is its own answer, not retried');
+
+  const stalled = await runSync(
+    { ...LIVE, '001-live/assets/f0.svg': '<svg/>' },
+    { now: START, deferWaits: true, replies: { 'f0.svg': [trickle(['Not'], 1000, { stall: true, status: 404 })] } },
+  );
+  assert.equal(stalled.exit, 1);
+  assert.equal(stalled.endedAt - START, 30_000);
+  assert.equal(stalled.errors[0].message, 'Failed to download 001-live/assets/f0.svg: 404', 'the refusal itself, not the late report');
+  assert.deepEqual(stalled.operations, []);
+});
+
 test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
   const run = await runSync(
     { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
@@ -946,6 +964,18 @@ test('a refusal whose body is missing or cannot be read keeps the wait GitHub na
   assert.equal(missing.exit, 1);
   assert.equal(missing.requests.length, 1, 'a refusal is its own answer, body or not');
   assert.equal(missing.errors[0].message, 'GitHub commit lookup failed for main: 404 (body unreadable)');
+});
+
+test('an answer with no body at all reads as empty, not as a broken download, and a refusal without one keeps its status', async () => {
+  const file = await runSync({ ...LIVE, '001-live/assets/chart.svg': '<svg/>' }, { replies: { 'chart.svg': [new Response(null)] } });
+  assert.equal(file.exit, undefined);
+  assert.deepEqual(file.waits, [], 'an empty answer is complete, so it is not retried');
+  assert.equal(file.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '');
+
+  const refused = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(null, { status: 404 })] } });
+  assert.equal(refused.exit, 1);
+  assert.equal(refused.requests.length, 1);
+  assert.equal(refused.errors[0].message, 'GitHub commit lookup failed for main: 404 ', 'an empty body, not "(body unreadable)"');
 });
 
 test('refusals and network failures share one budget of three retries', async () => {
@@ -1126,6 +1156,7 @@ test('a sync that failed requests hold past its limit says how many retries they
   assert.equal(silent.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 49 of 57 files downloaded:',
     '  - Server errors and network failures cost 144 retries.',
+    '  - GitHub answered slowly for all 10 min.',
   ].join('\n'));
   assert.deepEqual(silent.operations, []);
 
@@ -1137,10 +1168,11 @@ test('a sync that failed requests hold past its limit says how many retries they
     'The article sync stopped at its 10-minute limit while downloading assets, with 57 of 65 files downloaded:',
     "  - GitHub's rate limit refused 64 requests and held every request for 6 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
     '  - Server errors and network failures cost 56 retries.',
+    '  - GitHub answered slowly for the other 4 min.',
   ].join('\n'));
 });
 
-test('a sync that slow answers alone hold past its limit says nothing was refused or retried, and where it was', async () => {
+test('a sync that slow answers alone hold past its limit says GitHub answered slowly for all of it, and where it was', async () => {
   // Each figure arrives in seven parts 20 s apart, so every eight take 140 s.
   const slowly = () => trickle(['<svg>', '1', '2', '3', '4', '5', '</svg>'], 20_000);
   const assets = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(40, 1, slowly) });
@@ -1148,7 +1180,7 @@ test('a sync that slow answers alone hold past its limit says nothing was refuse
   assert.equal(assets.endedAt - START, 600_000);
   assert.equal(assets.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 33 of 41 files downloaded:',
-    '  - GitHub answered slowly: no request was refused or retried.',
+    '  - GitHub answered slowly for all 10 min.',
   ].join('\n'));
   assert.deepEqual(assets.operations, []);
 
@@ -1157,7 +1189,7 @@ test('a sync that slow answers alone hold past its limit says nothing was refuse
   assert.equal(lookup.endedAt - START, 600_000);
   assert.equal(lookup.errors[0].message, [
     'The article sync stopped at its 10-minute limit while looking up the commit:',
-    '  - GitHub answered slowly: no request was refused or retried.',
+    '  - GitHub answered slowly for all 10 min.',
   ].join('\n'));
   assert.equal(lookup.requests.length, 1);
 });
@@ -1173,6 +1205,75 @@ test('a sync that finishes inside its limit, however long it was held, passes an
   const quick = await runSync({ ...LIVE });
   assert.equal(quick.exit, undefined);
   assert.equal(quick.timersLeft, 0);
+});
+
+test('a sync that fails on its own before its limit reports its own error when it fails and leaves no timer running', async () => {
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [[503], [503], [503], [503]] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 7000, 'after the 1, 2, and 4-second backoffs, not at the 10-minute limit');
+  assert.equal(run.errors[0].message, 'GitHub commit lookup failed for main: 503 busy');
+  assert.equal(run.timersLeft, 0, 'the limit is cleared when the sync fails, as when it passes');
+  assert.deepEqual(run.operations, []);
+});
+
+/** A reply whose body takes 800 s to arrive, a part every 20 s, so only the sync's limit stops it. */
+const pastTheLimit = () => trickle(Array.from({ length: 40 }, () => ' '), 20_000);
+
+test('a sync that runs out of time on the listing or on the READMEs names that step, and counts each README as a file', async () => {
+  const listing = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/git/trees/': [pastTheLimit()] } });
+  assert.equal(listing.exit, 1);
+  assert.equal(listing.endedAt - START, 600_000);
+  assert.equal(listing.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while reading the file listing:',
+    '  - GitHub answered slowly for all 10 min.',
+  ].join('\n'));
+  assert.deepEqual(listing.operations, []);
+
+  const readmes = await runSync({ ...LIVE, '002-second/README.md': PUBLISHED }, { now: START, deferWaits: true, replies: { '002-second/README.md': [pastTheLimit()] } });
+  assert.equal(readmes.exit, 1);
+  assert.equal(readmes.endedAt - START, 600_000);
+  assert.equal(readmes.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading READMEs, with 1 of 2 files downloaded:',
+    '  - GitHub answered slowly for all 10 min.',
+  ].join('\n'));
+  assert.deepEqual(readmes.operations, []);
+});
+
+test('a hold under a minute and a retry do not hide slow answers, and a hold that short gets no token advice', async () => {
+  const replies = { '/commits/': [[429, { 'retry-after': '30' }], [503], pastTheLimit()] };
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 600_000);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    "  - GitHub's rate limit refused 1 request and held every request for 30 s in all.",
+    '  - Server errors and network failures cost 1 retry.',
+    '  - GitHub answered slowly for the other 9 min 30 s.',
+  ].join('\n'));
+});
+
+test('a late report gives a hold past a minute in minutes and seconds, rounded to the second it prints, and its lines add up', async () => {
+  const lateLookup = (refusals) => ({ '/commits/': [...refusals, pastTheLimit()] });
+  const ninety = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: lateLookup([[429, { 'retry-after': '30' }], [429, { 'retry-after': '60' }]]) });
+  assert.equal(ninety.exit, 1);
+  assert.equal(ninety.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    "  - GitHub's rate limit refused 2 requests and held every request for 1 min 30 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - GitHub answered slowly for the other 8 min 30 s.',
+  ].join('\n'));
+
+  // Until the reset, and a second more: 59.5 s, which reads as a minute rather than as "60 s", and so,
+  // as printed, earns the token advice.
+  const now = START + 500;
+  const reset = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(now / 1000) + 59) };
+  const rounded = await runSync({ ...LIVE }, { now, deferWaits: true, replies: lateLookup([[403, reset]]) });
+  assert.equal(rounded.exit, 1);
+  assert.deepEqual(rounded.waits, [59_500]);
+  assert.equal(rounded.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    "  - GitHub's rate limit refused 1 request and held every request for 1 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - GitHub answered slowly for the other 9 min.',
+  ].join('\n'));
 });
 
 test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {
