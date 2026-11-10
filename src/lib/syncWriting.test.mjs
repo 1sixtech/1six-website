@@ -54,8 +54,15 @@ function brokenBody(reason) {
 /** An answer whose connection dropped before its body could be read or released. */
 const unreadableBody = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
 
-/** An answer whose body arrives only after `turns` event-loop turns, which take no time on the run's clock. */
+// Under deferWaits the run's clock moves only after this many event-loop turns pass with nothing happening.
+const QUIET_TURNS = 20;
+// After firing a timer, the clock runs this many microtasks before the next timer due at the same moment,
+// as Node runs a timer callback's microtasks before its next timer.
+const MICROTASKS_PER_TIMER = 100;
+
+/** An answer whose body arrives only after `turns` event-loop turns, fewer than QUIET_TURNS, so no time on the run's clock. */
 function slowBody(text, turns, init) {
+  assert.ok(turns < QUIET_TURNS, 'more turns than that and the clock would move during the body');
   return new Response(new ReadableStream({
     async pull(controller) {
       for (let left = turns; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
@@ -95,9 +102,10 @@ const trickle = (parts, gap, { after = 0, stall = false, ...init } = {}) => asyn
  * given `{ wait }` (a pause on the run's clock) that returns a Response or a promise of one;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
  * whole answer.
- * The run has its own clock, read by the script's Date.now(), its timers, and its waits; `now` sets
- * where it starts. Waits are recorded and not slept, and the clock stands still, so no watchdog or
- * deadline fires. With `deferWaits` the clock moves, but only once nothing else is happening, and then
+ * The run has its own clock, read by the script's Date.now(), performance.now(), timers, and waits; `now`
+ * sets where it starts, and `wallClock` maps it to what Date.now() alone reads, so a test can step the
+ * wall clock while the rest runs on. Waits are recorded and not slept, and the clock stands still, so no
+ * watchdog or deadline fires. With `deferWaits` the clock moves, but only once nothing else is happening, and then
  * straight to the next timer due: requests take no time, other requests go on during a wait, and a
  * request that sends nothing is given up on.
  * With `sameTurn`, every request sent in one turn is answered together in the next, each after
@@ -108,7 +116,7 @@ const trickle = (parts, gap, { after = 0, stall = false, ...init } = {}) => asyn
  * wait is pending; `warnings` holds the retry lines; `endedAt` is the clock when the run ended, and
  * `timersLeft` the number of timers the script still had set then.
  */
-function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, sameTurn = false, delays = {}, now } = {}) {
+function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, sameTurn = false, delays = {}, now, wallClock = (time) => time } = {}) {
   return new Promise((resolve) => {
     const result = { requests: [], headers: new Map(), signals: [], sentAt: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined, endedAt: undefined, timersLeft: undefined };
     let open = 0;
@@ -146,7 +154,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       while (!finished && timers.size > 0) {
         for (let seen; seen !== activity; ) {
           seen = activity;
-          for (let left = 20; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
+          for (let left = QUIET_TURNS; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
         }
         if (finished || timers.size === 0) break;
         const due = Math.min(...[...timers.values()].map((timer) => timer.due));
@@ -157,7 +165,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
           timers.delete(timer.id);
           activity += 1;
           timer.callback();
-          for (let left = 100; left > 0; left -= 1) await null;
+          for (let left = MICROTASKS_PER_TIMER; left > 0; left -= 1) await null;
         }
       }
       advancing = false;
@@ -274,7 +282,8 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       Buffer,
       AbortController,
       DOMException,
-      Date: class extends Date { static now() { return clock.now; } },
+      Date: class extends Date { static now() { return wallClock(clock.now); } },
+      performance: { now: () => clock.now },
       // The script's watchdogs and deadline, on the run's clock.
       setTimeout(callback, delay) {
         const id = addTimer(delay, callback);
@@ -868,7 +877,8 @@ test('every attempt has its own watchdog, so a retry does not start on a spent o
   }
 });
 
-const TWENTY_FIGURES = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const TWENTY_FIGURES = figures(20);
 const figureAt = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
 
 /** Asserts every one of the twenty figures was saved whole. */
@@ -1016,7 +1026,7 @@ test('a request keeps its slot through its retries, so it is tried again before 
   assert.ok(order.requests.lastIndexOf(figureAt('f0.svg')) < order.requests.indexOf(figureAt('f8.svg')), 'its retry comes before the ninth file');
 });
 
-const FORTY_FIGURES = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const FORTY_FIGURES = figures(40);
 
 test('a lasting outage fails once the first files use up their retries, without first trying every queued file', async () => {
   const unreachable = await runSync({ ...LIVE, ...FORTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 200 }, () => dropped()) } });
@@ -1122,10 +1132,14 @@ test('eight downloads that each fail once still finish and give their slots on, 
   assertAllFigures(run);
 });
 
-const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
 /** Replies that give each of the first `count` figures `times` of `reply(its index)` before it is served. */
 const eachFigure = (count, times, reply) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`/f${index}.svg`, Array.from({ length: times }, () => reply(index))]));
 const refusedFor45 = () => [429, { 'retry-after': '45' }];
+const LOOKUP = `https://api.github.com/repos/${REPO}/commits/main`;
+/** URLs of `count` figures from f`from`, in the order their requests went out. */
+const figureRange = (from, count) => Array.from({ length: count }, (_, index) => figureAt(`f${from + index}.svg`));
+/** The late report's line naming the requests still waiting for an answer. */
+const stillWaitingOn = (urls) => `  - Still waiting on ${urls.length} answer${urls.length === 1 ? '' : 's'}, from ${urls.join(', ')}.`;
 
 test('a sync that rate limits hold past its 10-minute limit fails at the limit, says so, and leaves the last good sync in place', async () => {
   // Each figure is refused three times for 45 s, so every eight take 135 s, and the fifth eight run past 600 s.
@@ -1149,26 +1163,30 @@ test('a sync that rate limits hold past its 10-minute limit fails at the limit, 
 });
 
 test('a sync that failed requests hold past its limit says how many retries they cost, beside any rate-limit hold', async () => {
-  // Each figure sends nothing three times: 30 s, 1 s, 30 s, 2 s, 30 s, 4 s, so every eight take 97 s.
+  // Each figure sends nothing three times: 30 s, 1 s, 30 s, 2 s, 30 s, 4 s, so every eight take 97 s, 7 of
+  // them waiting to retry; six eights finish, and the seventh is silent at the limit.
   const silent = await runSync({ ...LIVE, ...figures(56) }, { now: START, deferWaits: true, replies: eachFigure(56, 3, () => silence) });
   assert.equal(silent.exit, 1);
   assert.equal(silent.endedAt - START, 600_000);
   assert.equal(silent.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 49 of 57 files downloaded:',
-    '  - Server errors and network failures cost 144 retries.',
-    '  - GitHub answered slowly for all 10 min.',
+    '  - Server errors and network failures cost 144 retries, and waiting to retry took 42 s.',
+    '  - GitHub answered slowly for the other 9 min 18 s.',
+    stillWaitingOn(figureRange(48, 8)),
   ].join('\n'));
   assert.deepEqual(silent.operations, []);
 
-  // Refused for 45 s, then silent for 30 s and a 2-second backoff: every eight take 77 s, and eight holds make 6 min.
+  // Refused for 45 s, then silent for 30 s and a 2-second backoff: every eight take 77 s. Eight holds make
+  // 6 min, seven backoffs 14 s, and the eighth eight is silent at the limit.
   const replies = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`/f${index}.svg`, [refusedFor45(), silence]]));
   const mixed = await runSync({ ...LIVE, ...figures(64) }, { now: START, deferWaits: true, replies });
   assert.equal(mixed.exit, 1);
   assert.equal(mixed.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 57 of 65 files downloaded:',
     "  - GitHub's rate limit refused 64 requests and held every request for 6 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
-    '  - Server errors and network failures cost 56 retries.',
-    '  - GitHub answered slowly for the other 4 min.',
+    '  - Server errors and network failures cost 56 retries, and waiting to retry took 14 s more.',
+    '  - GitHub answered slowly for the other 3 min 46 s.',
+    stillWaitingOn(figureRange(56, 8)),
   ].join('\n'));
 });
 
@@ -1181,6 +1199,7 @@ test('a sync that slow answers alone hold past its limit says GitHub answered sl
   assert.equal(assets.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading assets, with 33 of 41 files downloaded:',
     '  - GitHub answered slowly for all 10 min.',
+    stillWaitingOn(figureRange(32, 8)),
   ].join('\n'));
   assert.deepEqual(assets.operations, []);
 
@@ -1190,6 +1209,7 @@ test('a sync that slow answers alone hold past its limit says GitHub answered sl
   assert.equal(lookup.errors[0].message, [
     'The article sync stopped at its 10-minute limit while looking up the commit:',
     '  - GitHub answered slowly for all 10 min.',
+    stillWaitingOn([LOOKUP]),
   ].join('\n'));
   assert.equal(lookup.requests.length, 1);
 });
@@ -1226,6 +1246,7 @@ test('a sync that runs out of time on the listing or on the READMEs names that s
   assert.equal(listing.errors[0].message, [
     'The article sync stopped at its 10-minute limit while reading the file listing:',
     '  - GitHub answered slowly for all 10 min.',
+    stillWaitingOn([`https://api.github.com/repos/${REPO}/git/trees/${COMMIT}?recursive=1`]),
   ].join('\n'));
   assert.deepEqual(listing.operations, []);
 
@@ -1235,6 +1256,7 @@ test('a sync that runs out of time on the listing or on the READMEs names that s
   assert.equal(readmes.errors[0].message, [
     'The article sync stopped at its 10-minute limit while downloading READMEs, with 1 of 2 files downloaded:',
     '  - GitHub answered slowly for all 10 min.',
+    stillWaitingOn([`https://raw.githubusercontent.com/${REPO}/${COMMIT}/002-second/README.md`]),
   ].join('\n'));
   assert.deepEqual(readmes.operations, []);
 });
@@ -1247,8 +1269,9 @@ test('a hold under a minute and a retry do not hide slow answers, and a hold tha
   assert.equal(run.errors[0].message, [
     'The article sync stopped at its 10-minute limit while looking up the commit:',
     "  - GitHub's rate limit refused 1 request and held every request for 30 s in all.",
-    '  - Server errors and network failures cost 1 retry.',
-    '  - GitHub answered slowly for the other 9 min 30 s.',
+    '  - Server errors and network failures cost 1 retry, and waiting to retry took 2 s more.',
+    '  - GitHub answered slowly for the other 9 min 28 s.',
+    stillWaitingOn([LOOKUP]),
   ].join('\n'));
 });
 
@@ -1260,6 +1283,7 @@ test('a late report gives a hold past a minute in minutes and seconds, rounded t
     'The article sync stopped at its 10-minute limit while looking up the commit:',
     "  - GitHub's rate limit refused 2 requests and held every request for 1 min 30 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
     '  - GitHub answered slowly for the other 8 min 30 s.',
+    stillWaitingOn([LOOKUP]),
   ].join('\n'));
 
   // Until the reset, and a second more: 59.5 s, which reads as a minute rather than as "60 s", and so,
@@ -1273,6 +1297,78 @@ test('a late report gives a hold past a minute in minutes and seconds, rounded t
     'The article sync stopped at its 10-minute limit while looking up the commit:',
     "  - GitHub's rate limit refused 1 request and held every request for 1 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
     '  - GitHub answered slowly for the other 9 min.',
+    stillWaitingOn([LOOKUP]),
+  ].join('\n'));
+});
+
+test('a sync that server errors hold past its limit counts their waits as retry waits, not as slow answers', async () => {
+  // Each figure gets an instant 503 asking for a minute, three times: every eight take 3 min, and the fourth
+  // eight are still waiting to retry at the limit.
+  const run = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(40, 3, () => [503, { 'retry-after': '60' }]) });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 600_000);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 25 of 41 files downloaded:',
+    '  - Server errors and network failures cost 80 retries, and waiting to retry took 10 min.',
+  ].join('\n'), 'no answer was slow, and no request was waiting on one');
+});
+
+test('time left over under a minute is not named as slow answers, and a minute is', async () => {
+  const heldForAMinute = () => [429, { 'retry-after': '60' }];
+  // Three eights held 3 min each; the fourth is silent for 30 s, waits 1 s to retry, and is held again at
+  // 571 s. That leaves 30 s that no hold or wait explains.
+  const leftover = await runSync({ ...LIVE, ...figures(32) }, {
+    now: START,
+    deferWaits: true,
+    replies: { ...eachFigure(24, 3, heldForAMinute), ...Object.fromEntries(figureRange(24, 8).map((_, offset) => [`/f${24 + offset}.svg`, [silence, heldForAMinute()]])) },
+  });
+  assert.equal(leftover.exit, 1);
+  assert.equal(leftover.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 25 of 33 files downloaded:',
+    "  - GitHub's rate limit refused 80 requests and held every request for 9 min 29 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - Server errors and network failures cost 8 retries, and waiting to retry took 1 s more.',
+  ].join('\n'));
+
+  // Held for exactly 9 min, then slow for the last minute: a minute is enough to be named.
+  const minute = await runSync({ ...LIVE, ...figures(32) }, {
+    now: START,
+    deferWaits: true,
+    replies: { ...eachFigure(24, 3, heldForAMinute), ...Object.fromEntries(figureRange(24, 8).map((_, offset) => [`/f${24 + offset}.svg`, [pastTheLimit()]])) },
+  });
+  assert.equal(minute.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 25 of 33 files downloaded:',
+    "  - GitHub's rate limit refused 72 requests and held every request for 9 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - GitHub answered slowly for the other 1 min.',
+    stillWaitingOn(figureRange(24, 8)),
+  ].join('\n'));
+});
+
+test('a late report counts the files still waiting for a slot, and names only the requests waiting for an answer', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(8, 1, () => pastTheLimit()) });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 600_000);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 1 of 21 files downloaded:',
+    '  - GitHub answered slowly for all 10 min.',
+    stillWaitingOn(figureRange(0, 8)),
+  ].join('\n'), 'the twelve figures queued behind the eight slow ones count among the 21, but are not named');
+});
+
+test('a step in the wall clock does not bend the late report, which times holds on the monotonic clock', async () => {
+  // The commit arrives a character every 13 s, done at 533 s; the listing is then held for a minute twice,
+  // the second hold running at the limit, and the wall clock steps back five minutes at 595 s.
+  const run = await runSync({ ...LIVE }, {
+    now: START,
+    deferWaits: true,
+    wallClock: (time) => (time >= START + 595_000 ? time - 300_000 : time),
+    replies: { '/commits/': [trickle([...`${COMMIT}\n`], 13_000)], '/git/trees/': [[429, { 'retry-after': '60' }], [429, { 'retry-after': '60' }]] },
+  });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 600_000);
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while reading the file listing:',
+    "  - GitHub's rate limit refused 2 requests and held every request for 1 min 7 s in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - GitHub answered slowly for the other 8 min 53 s.',
   ].join('\n'));
 });
 

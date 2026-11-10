@@ -125,11 +125,11 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   4 seconds, within the same three retries, and each retry prints a line to the build log; a slow download that keeps
   arriving is not cut off. At most eight files download at once, each keeping its place through its retries, so a lasting
   outage fails as fast however many files are queued. The sync has 10 minutes in all: past that the build fails before
-  anything is written, naming what the sync was doing and where the time went (rate-limit holds, retries, slow answers),
-  instead of running into Vercel's 45-minute build limit. With `WRITING_GITHUB_TOKEN` every request uses the REST API;
-  without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails the build, and so does one with a
-  space, line break, or non-ASCII character inside it (surrounding whitespace is trimmed), before any request and without
-  printing it.
+  anything is written, naming what the sync was doing, where the time went (rate-limit holds, retry waits, slow answers),
+  and the requests still waiting for an answer, instead of running into Vercel's 45-minute build limit. With
+  `WRITING_GITHUB_TOKEN` every request uses the REST API; without it files come from `raw.githubusercontent.com`. A token
+  GitHub rejects fails the build, and so does one with a space, line break, or non-ASCII character inside it (surrounding
+  whitespace is trimmed), before any request and without printing it.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
   omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
   Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
