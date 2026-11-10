@@ -6,7 +6,8 @@
 @theme {
   /* Pretendard Variable is the official dynamic subset (fonts/pretendard-variable.css). */
   --font-sans: 'Pretendard Variable', 'Pretendard Fallback', system-ui, sans-serif;
-  /* about.css encodes this color in a filter chain (the completed 16). */
+  /* The logo's red, and the site's only red: marks, links, labels and states
+     in both themes. about.css encodes it in a filter chain (the completed 16). */
   --color-accent: #FF3700;
   --color-bg-dark: #1C1C1C;
   --color-bg-light: #F3F0F0;
@@ -23,9 +24,10 @@
    they sit on (bg, card, card2) in both themes:
      sub-text1 — quieter tier: labels, meta, footer links
      sub-text2 — stronger tier: secondary names and captions
-   accent-text is the accent for text below 24px, where #FF3700 itself
-   falls short on light grounds (3.2:1) and on the dark card (3.8:1).
-   Large text and non-text marks keep --color-accent. */
+   Red text uses --color-accent at every size (owner decision, 2026-11-10):
+   4.7:1 on the dark ground, 3.2:1 on the light ground, so on light it meets
+   AA only from 24px (or 19px bold). Keep small red text to labels and
+   states that something besides color also carries. */
 :root {
   --color-bg: var(--color-bg-light);
   --color-text: var(--color-text-light);
@@ -33,7 +35,6 @@
   --color-card2: #F7F5F5;
   --color-sub-text1: #6B6B6B; /* 4.7:1 on bg · 5.1:1 on card */
   --color-sub-text2: var(--color-sub2); /* #646464 · 5.2:1 on bg */
-  --color-accent-text: #C92C00; /* 4.8:1 on bg · 5.2:1 on card */
   --color-header-bg: rgba(255, 255, 255, 0.4);
   --color-divider: #E5E2E2;
   /* The fixed site header's height (Header.tsx); pages that offset content
@@ -54,7 +55,6 @@
   --color-card2: var(--color-card-dark2);
   --color-sub-text1: #949494; /* 5.6:1 on bg · 4.5:1 on card */
   --color-sub-text2: #ABABAB; /* 7.4:1 on bg · 6.0:1 on card */
-  --color-accent-text: #FF6A3D; /* 6.0:1 on bg · 4.8:1 on card */
   --color-header-bg: rgba(255, 255, 255, 0.1);
   --color-divider: #3A3A3A;
 }

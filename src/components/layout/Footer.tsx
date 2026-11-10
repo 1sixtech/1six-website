@@ -25,7 +25,7 @@ const SOCIAL_LINKS: FooterLinkItem[] = [
 // sentence-case text in the stronger gray. 4px of vertical padding makes
 // every row a 30px target (WCAG 2.5.8 asks for 24).
 const linkClass =
-  'inline-block py-[4px] text-[15px] font-normal leading-[1.45] tracking-normal text-[var(--color-sub-text2)] transition-[color,opacity] duration-150 ease-out hover:text-[var(--color-accent-text)] active:opacity-50';
+  'inline-block py-[4px] text-[15px] font-normal leading-[1.45] tracking-normal text-[var(--color-sub-text2)] transition-[color,opacity] duration-150 ease-out hover:text-[var(--color-accent)] active:opacity-50';
 
 function FooterColumn({
   title,

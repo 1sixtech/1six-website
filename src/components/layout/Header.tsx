@@ -371,7 +371,7 @@ export function Header() {
                 href={item.href}
                 data-menu-item
                 aria-current={isCurrentRoute(pathname, item.href) ? 'page' : undefined}
-                className="py-2 text-[15px] font-normal tracking-[0.04em] uppercase text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50 aria-[current=page]:text-[var(--color-accent-text)]"
+                className="py-2 text-[15px] font-normal tracking-[0.04em] uppercase text-[var(--color-text)] transition-opacity duration-100 ease-out active:opacity-50 aria-[current=page]:text-[var(--color-accent)] aria-[current=page]:underline aria-[current=page]:decoration-[1.5px] aria-[current=page]:underline-offset-[6px]"
                 onClick={(e) => handleNavClick(e, item.href)}
               >
                 {item.label}
