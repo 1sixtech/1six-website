@@ -127,7 +127,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       exports: {},
       Buffer,
       ...(now === undefined ? {} : { Date: class extends Date { static now() { return now; } } }),
-      // Never fires: a stall is scripted as the error the real signal would raise.
+      // Never fires: a request past its deadline is scripted as the error the real signal would raise.
       AbortSignal: { timeout: (delay) => ({ timeout: delay }) },
       setTimeout(callback, delay) {
         result.waits.push(delay);
@@ -672,9 +672,17 @@ test('every attempt has its own 30-second timeout, so a retry does not start on 
   }
 });
 
+const TWENTY_FIGURES = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const figureAt = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
+
+/** Asserts every one of the twenty figures was saved whole. */
+function assertAllFigures(run) {
+  for (const [file, text] of Object.entries(TWENTY_FIGURES)) assert.equal(run.written.get(`/repo/public/writing-assets/${file}`), text, file);
+}
+
 test('a download that keeps failing on the way fails the sync, names the request, and leaves the last good sync in place', async () => {
   const always = () => [dropped(), dropped(), dropped(), dropped()];
-  const figure = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/chart.svg`;
+  const figure = figureAt('chart.svg');
   const run = await runSync({ ...LIVE, '001-live/assets/chart.svg': '<svg/>' }, { replies: { 'chart.svg': always() } });
   assert.equal(run.exit, 1);
   assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${figure}`);
@@ -701,20 +709,18 @@ test('downloads run eight at a time, READMEs and figures alike, and every file s
   assert.equal(readmes.written.size, 20);
   for (const folder of folders) assert.equal(readmes.written.get(`/repo/content/writing/${folder}/README.md`), `# ${folder}\n\nDate: 2026-11-01\n`);
 
-  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
-  const assets = await runSync({ ...LIVE, ...figures });
+  const assets = await runSync({ ...LIVE, ...TWENTY_FIGURES });
   assert.equal(assets.exit, undefined);
   assert.equal(assets.peak, 8);
-  for (const [file, text] of Object.entries(figures)) assert.equal(assets.written.get(`/repo/public/writing-assets/${file}`), text);
+  assertAllFigures(assets);
 
   const few = await runSync({ ...LIVE, '001-live/assets/a.svg': '<svg/>', '001-live/assets/b.svg': '<svg/>' });
   assert.equal(few.peak, 2, 'fewer files than the limit still download together');
 });
 
 test('a download that fails after the first eight have started still stops the sync before anything is removed', async () => {
-  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
-  const late = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/f15.svg`;
-  const run = await runSync({ ...LIVE, ...figures }, { failing: ['001-live/assets/f15.svg'] });
+  const late = figureAt('f15.svg');
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { failing: ['001-live/assets/f15.svg'] });
   assert.equal(run.exit, 1);
   assert.match(run.errors[0].message, /Failed to download 001-live\/assets\/f15\.svg: 500/);
   assert.ok(run.requests.filter((url) => url.includes('/assets/')).indexOf(late) >= 8, 'the file waited for a free slot');
@@ -791,14 +797,6 @@ test('a token with a space, line break, or non-ASCII character fails before any 
   }
 });
 
-const TWENTY_FIGURES = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
-const figureAt = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
-
-/** Asserts every one of the twenty figures was saved whole. */
-function assertAllFigures(run) {
-  for (const [file, text] of Object.entries(TWENTY_FIGURES)) assert.equal(run.written.get(`/repo/public/writing-assets/${file}`), text, file);
-}
-
 test('a request waiting out a server error holds no slot, so the downloads queued behind it go on meanwhile', async () => {
   const meanwhile = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]] } });
   assert.equal(meanwhile.exit, undefined);
@@ -816,6 +814,38 @@ test('a rate limit holds every request until it resets, not only the one GitHub 
   assert.deepEqual(run.waits, [30_000], 'one wait for the whole sync');
   assert.equal(run.sentWhileWaiting, 0, 'nothing is sent while GitHub has asked to wait');
   assert.deepEqual(run.warnings, [`Retry 1 of 3 in 30 s after 429: ${figureAt('f0.svg')}`]);
+  assertAllFigures(run);
+});
+
+test('a 403 rate limit holds every request too, whether GitHub names the wait or only the reset', async () => {
+  const named = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[403, { 'retry-after': '30' }]] } });
+  assert.equal(named.exit, undefined);
+  assert.deepEqual(named.waits, [30_000]);
+  assert.equal(named.sentWhileWaiting, 0);
+  assertAllFigures(named);
+
+  const now = 1_800_000_000_500;
+  const exhausted = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(now / 1000) + 20) };
+  const primary = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { now, deferWaits: true, replies: { '/f0.svg': [[403, exhausted]] } });
+  assert.equal(primary.exit, undefined);
+  assert.deepEqual(primary.waits, [20_500]);
+  assert.equal(primary.sentWhileWaiting, 0);
+  assertAllFigures(primary);
+});
+
+test('a longer rate limit that arrives during a shorter one holds every request to the longer wait', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '5' }]], '/f1.svg': [[429, { 'retry-after': '30' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [5000, 30_000]);
+  assert.equal(run.sentWhileWaiting, 0, 'a request that began waiting on the shorter pause waits out the longer one too');
+  assertAllFigures(run);
+});
+
+test('a shorter rate limit does not cut short a longer one already running', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '30' }]], '/f1.svg': [[429, { 'retry-after': '5' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [30_000], 'one pause, the longer');
+  assert.equal(run.sentWhileWaiting, 0);
   assertAllFigures(run);
 });
 

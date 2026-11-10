@@ -53,6 +53,7 @@ const MAX_OPEN_REQUESTS = 8;
 const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
 
 const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
+const isRateLimit = (status) => status === 403 || status === 429;
 
 // Node's fetch gives a network failure or a cut-off body the socket or DNS error as its cause,
 // and a request past its deadline its signal's TimeoutError. A header that fetch rejects outright
@@ -124,12 +125,12 @@ async function readAnswer(response) {
 async function attempt(url, headers, retriesUsed) {
   // A fresh signal each time, so a retry does not inherit a spent timeout.
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-  const transient = response.status === 403 || response.status === 429 || response.status >= 500;
+  const limited = isRateLimit(response.status);
+  const transient = limited || response.status >= 500;
   const delay = transient && retriesUsed < MAX_RETRIES ? retryDelay(response, retriesUsed) : undefined;
   // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
   if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
   // Paused before this slot passes on. A server error is this request's own.
-  const limited = response.status === 403 || response.status === 429;
   if (limited) pauseRequests(delay);
   // Released so it does not hold a connection; a body that already broke keeps the wait above.
   await response.body?.cancel().catch(() => {});
@@ -161,7 +162,7 @@ async function githubFetch(url, headers) {
 
 function tokenHint(answer) {
   if (TOKEN) return answer.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
-  return answer.status === 403 || answer.status === 429
+  return isRateLimit(answer.status)
     ? ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.'
     : '';
 }
