@@ -38,8 +38,8 @@ const timedOut = () => new DOMException('The operation was aborted due to timeou
 // What a body read rejects with when the connection closes mid-transfer.
 const terminated = () => new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
 
-/** An answer (a 200 unless `init` says otherwise) whose body breaks after its first bytes. */
-function brokenBody(reason, init) {
+/** A 200 whose body breaks after its first bytes. */
+function brokenBody(reason) {
   let pulls = 0;
   return new Response(new ReadableStream({
     pull(controller) {
@@ -47,25 +47,60 @@ function brokenBody(reason, init) {
       if (pulls === 1) controller.enqueue(new TextEncoder().encode('<svg>par'));
       else controller.error(reason);
     },
-  }), init);
+  }));
 }
 
 /** An answer whose connection dropped before its body could be read or released. */
-const unreadable = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
+const unreadableBody = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
 
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
  * `replies` maps part of a URL to what GitHub gives it before answering normally: a refusal
  * [status, headers], an error the request rejects with, or a Response to return as is;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
- * whole answer. Waits are recorded and not slept; `now` fixes the clock the script reads.
- * `signals` lists each request's signal, `peak` the most requests that were open at once, and
- * `warnings` the lines the sync printed before retrying.
+ * whole answer. Waits are recorded and not slept, unless `deferWaits` lets each run a few event
+ * loop turns so other requests can go on meanwhile; `now` fixes the clock the script reads.
+ * `signals` lists each request's signal; `peak` is the most requests open at once, from the call
+ * until the body is read or released; `sentWhileWaiting` and `peakWhileWaiting` count requests
+ * sent, and the most open, while a deferred wait is pending; `warnings` holds the retry lines.
  */
-function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, now } = {}) {
+function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, now } = {}) {
   return new Promise((resolve) => {
-    const result = { requests: [], headers: new Map(), signals: [], peak: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
+    const result = { requests: [], headers: new Map(), signals: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
     let open = 0;
+    let waiting = 0;
+    // A request stays open until its body is read to the end or released, as on a real connection.
+    const held = (response) => {
+      const reader = response.body?.getReader();
+      if (!reader) {
+        open -= 1;
+        return response;
+      }
+      let closed = false;
+      const close = () => {
+        if (!closed) open -= 1;
+        closed = true;
+      };
+      return new Response(new ReadableStream({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              close();
+              controller.close();
+            } else controller.enqueue(value);
+          } catch (error) {
+            close();
+            controller.error(error);
+          }
+        },
+        cancel(reason) {
+          close();
+          return reader.cancel(reason);
+        },
+      // Read only on demand, so an answer nobody touches stays unread.
+      }, { highWaterMark: 0 }), { status: response.status, headers: response.headers });
+    };
     const fileAt = (url) => {
       const { pathname } = new URL(url);
       return decodeURIComponent(pathname.split('/').slice(url.includes('/contents/') ? 5 : 4).join('/'));
@@ -96,7 +131,19 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       AbortSignal: { timeout: (delay) => ({ timeout: delay }) },
       setTimeout(callback, delay) {
         result.waits.push(delay);
-        callback();
+        if (!deferWaits) return callback();
+        waiting += 1;
+        let turns = 20;
+        const tick = () => {
+          if (turns > 0) {
+            turns -= 1;
+            setImmediate(tick);
+            return;
+          }
+          waiting -= 1;
+          callback();
+        };
+        tick();
       },
       require(name) {
         assert.ok(Object.hasOwn(dependencies, name), `unmocked dependency: ${name}`);
@@ -118,33 +165,45 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
         // A real request is answered later, never at once; the gap shows how many are open together.
         open += 1;
         result.peak = Math.max(result.peak, open);
+        if (waiting > 0) {
+          result.sentWhileWaiting += 1;
+          result.peakWhileWaiting = Math.max(result.peakWhileWaiting, open);
+        }
         await new Promise((resolve) => setImmediate(resolve));
-        open -= 1;
-        if (offline) throw networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com');
-        const reply = scripted(url);
-        if (reply instanceof Error) throw reply;
-        if (reply instanceof Response) return reply;
-        if (reply) {
-          result.refusals.push(refusal(reply[0], 'busy', reply[1]));
-          return result.refusals.at(-1);
+        try {
+          return held(answer(url));
+        } catch (error) {
+          open -= 1;
+          throw error;
         }
-        if (url.includes('/commits/')) {
-          if (commitStatus !== 200) return refusal(commitStatus, 'Not Found');
-          return new Response(commitBody);
-        }
-        if (url.includes('/git/trees/')) {
-          // Like GitHub, the tree exists only at a real commit.
-          const status = url.includes(`/git/trees/${COMMIT}?`) ? treeStatus : 404;
-          if (status !== 200) return refusal(status, 'tree unavailable');
-          const size = (file) => (Object.hasOwn(sizes, file) ? sizes[file] : new TextEncoder().encode(files[file]).length);
-          const tree = [{ type: 'tree', path: 'a-folder' }, ...Object.keys(files).map((file) => ({ type: 'blob', mode: '100644', path: file, size: size(file) }))];
-          return Response.json(listing({ tree, truncated }));
-        }
-        const file = fileAt(url);
-        if (failing.includes(file)) return refusal(500);
-        return new Response(files[file]);
       },
     }));
+
+    function answer(url) {
+      if (offline) throw networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com');
+      const reply = scripted(url);
+      if (reply instanceof Error) throw reply;
+      if (reply instanceof Response) return reply;
+      if (reply) {
+        result.refusals.push(refusal(reply[0], 'busy', reply[1]));
+        return result.refusals.at(-1);
+      }
+      if (url.includes('/commits/')) {
+        if (commitStatus !== 200) return refusal(commitStatus, 'Not Found');
+        return new Response(commitBody);
+      }
+      if (url.includes('/git/trees/')) {
+        // Like GitHub, the tree exists only at a real commit.
+        const status = url.includes(`/git/trees/${COMMIT}?`) ? treeStatus : 404;
+        if (status !== 200) return refusal(status, 'tree unavailable');
+        const size = (file) => (Object.hasOwn(sizes, file) ? sizes[file] : new TextEncoder().encode(files[file]).length);
+        const tree = [{ type: 'tree', path: 'a-folder' }, ...Object.keys(files).map((file) => ({ type: 'blob', mode: '100644', path: file, size: size(file) }))];
+        return Response.json(listing({ tree, truncated }));
+      }
+      const file = fileAt(url);
+      if (failing.includes(file)) return refusal(500);
+      return new Response(files[file]);
+    }
   });
 }
 
@@ -575,7 +634,7 @@ test('a request that fails on the way is retried with the server-error backoff, 
   assert.deepEqual(authenticated.waits, [1000]);
 });
 
-test('a request that stalls is abandoned at its timeout and sent again, whether it stalls before the answer or in the body', async () => {
+test('a request still unanswered or unread at its 30-second deadline is abandoned and sent again', async () => {
   const beforeAnswer = await runSync({ ...LIVE }, { replies: { '/commits/': [timedOut()] } });
   assert.equal(beforeAnswer.exit, undefined);
   assert.deepEqual(beforeAnswer.waits, [1000]);
@@ -687,21 +746,21 @@ test('a refusal whose body is missing or cannot be read keeps the wait GitHub na
   assert.equal(empty.exit, undefined);
   assert.deepEqual(empty.waits, [30_000], 'nothing to release, so the wait GitHub named still holds');
 
-  const broken = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(429, { 'retry-after': '30' })] } });
+  const broken = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(429, { 'retry-after': '30' })] } });
   assert.equal(broken.exit, undefined);
   assert.equal(broken.requests.filter((url) => url.includes('/commits/')).length, 2);
   assert.deepEqual(broken.waits, [30_000], 'a body that will not release does not shorten the wait');
 
-  const pastBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(429, { 'retry-after': '3600' })] } });
+  const pastBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(429, { 'retry-after': '3600' })] } });
   assert.equal(pastBudget.exit, 1);
   assert.equal(pastBudget.requests.length, 1, 'a wait past the budget is not attempted');
   assert.deepEqual(pastBudget.waits, []);
-  assert.match(pastBudget.errors[0].message, /GitHub commit lookup failed for main: 429 .*Set WRITING_GITHUB_TOKEN/);
+  assert.equal(pastBudget.errors[0].message, 'GitHub commit lookup failed for main: 429 (body unreadable) Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
 
-  const missing = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(404)] } });
+  const missing = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadableBody(404)] } });
   assert.equal(missing.exit, 1);
   assert.equal(missing.requests.length, 1, 'a refusal is its own answer, body or not');
-  assert.match(missing.errors[0].message, /GitHub commit lookup failed for main: 404/);
+  assert.equal(missing.errors[0].message, 'GitHub commit lookup failed for main: 404 (body unreadable)');
 });
 
 test('refusals and network failures share one budget of three retries', async () => {
@@ -732,14 +791,39 @@ test('a token with a space, line break, or non-ASCII character fails before any 
   }
 });
 
-test('a request waiting to retry gives up its place, so the downloads queued behind it carry on', async () => {
-  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
-  const at = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
-  const run = await runSync({ ...LIVE, ...figures }, { replies: { '/f0.svg': [[429, { 'retry-after': '30' }]] } });
+const TWENTY_FIGURES = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+const figureAt = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
+
+/** Asserts every one of the twenty figures was saved whole. */
+function assertAllFigures(run) {
+  for (const [file, text] of Object.entries(TWENTY_FIGURES)) assert.equal(run.written.get(`/repo/public/writing-assets/${file}`), text, file);
+}
+
+test('a request waiting out a server error holds no slot, so the downloads queued behind it go on meanwhile', async () => {
+  const meanwhile = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]] } });
+  assert.equal(meanwhile.exit, undefined);
+  assert.equal(meanwhile.peakWhileWaiting, 8, 'eight others are open while it waits');
+  assertAllFigures(meanwhile);
+
+  const queued = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/f0.svg': [[503]] } });
+  const others = Array.from({ length: 19 }, (_, index) => queued.requests.indexOf(figureAt(`f${index + 1}.svg`)));
+  assert.ok(queued.requests.lastIndexOf(figureAt('f0.svg')) > Math.max(...others), 'its retry joins the back of the queue');
+});
+
+test('a rate limit holds every request until it resets, not only the one GitHub refused', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '30' }]] } });
   assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [30_000], 'one wait for the whole sync');
+  assert.equal(run.sentWhileWaiting, 0, 'nothing is sent while GitHub has asked to wait');
+  assert.deepEqual(run.warnings, [`Retry 1 of 3 in 30 s after 429: ${figureAt('f0.svg')}`]);
+  assertAllFigures(run);
+});
+
+test('a request that fails on the way gives its slot back, so the downloads queued behind it still run', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 8 }, () => dropped()) } });
+  assert.equal(run.exit, undefined, 'eight lost slots would leave the sync pending until Node exits 0 with nothing printed');
   assert.equal(run.peak, 8);
-  assert.ok(run.requests.lastIndexOf(at('f0.svg')) > run.requests.indexOf(at('f19.svg')), 'the retry joins the back of the queue');
-  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/f0.svg'), '<svg>0</svg>');
+  assertAllFigures(run);
 });
 
 test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {

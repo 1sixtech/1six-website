@@ -48,15 +48,15 @@ const RESET_MARGIN_MS = 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
 // GitHub allows 100 concurrent REST requests, and a token build reads every file there.
 const MAX_OPEN_REQUESTS = 8;
-// A header cannot carry a line break or a non-ASCII character, and fetch quotes the whole
-// rejected header in its error, which would print the token in the build log.
+// A GitHub token is printable ASCII, so a space or any other character inside one means a bad
+// copy. For a line break, fetch would also quote the whole header, token included, in its error.
 const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
 
 const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
 
 // Node's fetch gives a network failure or a cut-off body the socket or DNS error as its cause,
-// and a stall its signal's TimeoutError. A request it could not even build has neither, and
-// would fail the same way every time.
+// and a request past its deadline its signal's TimeoutError. A header that fetch rejects outright
+// has neither, and would fail the same way every time.
 const isNetworkFailure = (error) => error?.name === 'TimeoutError' || error?.cause !== undefined;
 
 /** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
@@ -74,11 +74,28 @@ function retryDelay(response, retriesUsed) {
 let openRequests = 0;
 const waitingForSlot = [];
 
-/** Runs one request once fewer than MAX_OPEN_REQUESTS are open. A request waiting to retry holds no slot. */
+// A rate limit holds every request, not only the one refused: GitHub may ban a client that keeps
+// asking while it is limited.
+let resumeAt = 0;
+let resumed = Promise.resolve();
+
+function pauseRequests(delay) {
+  const until = Date.now() + delay;
+  if (until <= resumeAt) return;
+  resumeAt = until;
+  resumed = new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+/** Runs one request once fewer than MAX_OPEN_REQUESTS are open. A request waiting out a backoff holds no slot. */
 async function inSlot(request) {
   if (openRequests < MAX_OPEN_REQUESTS) openRequests += 1;
   else await new Promise((resolve) => waitingForSlot.push(resolve));
   try {
+    // Checked with the slot in hand, so a pause that began while this request queued still holds it.
+    for (let pause; pause !== resumed; ) {
+      pause = resumed;
+      await pause;
+    }
     return await request();
   } finally {
     // Hand the slot straight to the next request, or give it back.
@@ -89,8 +106,9 @@ async function inSlot(request) {
 }
 
 /**
- * Reads a final answer within its attempt, so a connection that drops or stalls mid-body fails
- * here and is retried. A refusal's status is its answer even when its body cannot be read.
+ * Reads a final answer within its attempt, so a connection that drops mid-body, or a body still
+ * arriving at the deadline, fails here and is retried. A refusal's status is its answer even when
+ * its body cannot be read.
  */
 async function readAnswer(response) {
   const { ok, status } = response;
@@ -98,7 +116,7 @@ async function readAnswer(response) {
     return { ok, status, body: Buffer.from(await response.arrayBuffer()) };
   } catch (error) {
     if (ok) throw error;
-    return { ok, status, body: Buffer.alloc(0) };
+    return { ok, status, body: Buffer.from('(body unreadable)') };
   }
 }
 
@@ -110,14 +128,17 @@ async function attempt(url, headers, retriesUsed) {
   const delay = transient && retriesUsed < MAX_RETRIES ? retryDelay(response, retriesUsed) : undefined;
   // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
   if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
+  // Paused before this slot passes on. A server error is this request's own.
+  const limited = response.status === 403 || response.status === 429;
+  if (limited) pauseRequests(delay);
   // Released so it does not hold a connection; a body that already broke keeps the wait above.
   await response.body?.cancel().catch(() => {});
-  return { delay, reason: response.status };
+  return { delay, reason: response.status, paused: limited };
 }
 
 /**
  * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
- * on the way: no connection, a reset, or a stall. The caller judges the final status.
+ * on the way: no connection, a reset, or the deadline. The caller judges the final status.
  */
 async function githubFetch(url, headers) {
   for (let retriesUsed = 0; ; retriesUsed += 1) {
@@ -133,13 +154,14 @@ async function githubFetch(url, headers) {
     }
     if (outcome.answer) return outcome.answer;
     console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
-    await new Promise((resolve) => setTimeout(resolve, outcome.delay));
+    // A rate limit's wait is the shared pause, which the next attempt waits out in inSlot.
+    if (!outcome.paused) await new Promise((resolve) => setTimeout(resolve, outcome.delay));
   }
 }
 
-function tokenHint(response) {
-  if (TOKEN) return response.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
-  return response.status === 403 || response.status === 429
+function tokenHint(answer) {
+  if (TOKEN) return answer.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
+  return answer.status === 403 || answer.status === 429
     ? ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.'
     : '';
 }
@@ -148,25 +170,25 @@ function tokenHint(response) {
 // Hook starts this build seconds after a push. Reading by commit SHA gets the
 // pushed files and keeps the listing and every download in one snapshot.
 async function resolveCommit() {
-  const response = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
+  const answer = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github.sha',
   });
-  if (!response.ok) {
-    throw new Error(`GitHub commit lookup failed for ${REF}: ${response.status} ${response.body}${tokenHint(response)}`);
+  if (!answer.ok) {
+    throw new Error(`GitHub commit lookup failed for ${REF}: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
-  return response.body.toString().trim();
+  return answer.body.toString().trim();
 }
 
 async function listFiles(commit) {
-  const response = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
+  const answer = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github+json',
   });
-  if (!response.ok) {
-    throw new Error(`GitHub tree fetch failed: ${response.status} ${response.body}${tokenHint(response)}`);
+  if (!answer.ok) {
+    throw new Error(`GitHub tree fetch failed: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
-  const tree = JSON.parse(response.body.toString());
+  const tree = JSON.parse(answer.body.toString());
   // Past 100,000 entries or 7 MB GitHub returns part of the tree, and the missing
   // articles would leave the site without an error.
   if (tree.truncated) {
@@ -188,11 +210,11 @@ function fileRequest(commit, file) {
 }
 
 async function fetchFile(commit, file) {
-  const response = await githubFetch(...fileRequest(commit, file));
-  if (!response.ok) {
-    throw new Error(`Failed to download ${file}: ${response.status}${tokenHint(response)}`);
+  const answer = await githubFetch(...fileRequest(commit, file));
+  if (!answer.ok) {
+    throw new Error(`Failed to download ${file}: ${answer.status}${tokenHint(answer)}`);
   }
-  return response.body;
+  return answer.body;
 }
 
 async function save(bytes, destination) {
