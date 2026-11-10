@@ -3,6 +3,16 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.13.0] - 2026-11-10
+
+### Changed
+
+- Every page's browser tab is titled "1six". Link previews on social sites keep each page's own title. Bookmarks, history, search results and screen readers now see the same "1six" for every page; the owner accepted this.
+- The favicon is the 16 mark in black on a slightly rounded square in the logo red. The iPhone home-screen icon is the same square edge to edge, which iOS rounds itself.
+- About's product label reads "01 / prediction market" on desktop and tablet. Phones show the product name without a label, as before.
+- The icons are served under new URLs, so browsers and search engines fetch the new icon instead of keeping the old one.
+- Opened on its own, the favicon file runs nothing, whatever a future export of it contains.
+
 ## [0.3.12.0] - 2026-11-10
 
 ### Changed
