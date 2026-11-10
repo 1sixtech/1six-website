@@ -88,3 +88,21 @@ test('About: one screen per section, with the contact last, every onward link la
   assert.match(css, /\.crossing-heading \{\s*padding-bottom: var\(--crossing-rule-gap\);\s*border-bottom: 1px solid var\(--color-text\);/);
   assert.doesNotMatch(css, /\.crossing-band__body \{[^}]*border-top/);
 });
+
+test('About: the product is labeled a prediction market on wider screens, and phones go straight to its name', () => {
+  const [products] = collect(renderCrossing(), ({ props }) => props?.id === 'products');
+  const [tag] = collect(products, ({ props }) => props?.className === 'crossing-tag crossing-product__tag');
+  assert.equal(tag.props.children, '01 / prediction market');
+
+  // The phone block (max-width: 767px) hides the label; wider screens keep the shared .crossing-tag.
+  const css = readFileSync(new URL('./about.css', import.meta.url), 'utf8');
+  const start = css.indexOf('@media (max-width: 767px) {');
+  assert.notEqual(start, -1, 'about.css has a phone block');
+  let end = css.indexOf('{', start);
+  for (let depth = 0; end < css.length; end++) {
+    if (css[end] === '{') depth++;
+    else if (css[end] === '}' && --depth === 0) break;
+  }
+  assert.match(css.slice(start, end), /\.crossing-product__tag \{\s*display: none;\s*\}/);
+  assert.equal(css.match(/\.crossing-product__tag \{/g).length, 1, 'only the phone block styles the label on its own');
+});
