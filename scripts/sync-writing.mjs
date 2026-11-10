@@ -87,19 +87,22 @@ function pauseRequests(delay) {
   resumed = new Promise((resolve) => setTimeout(resolve, delay));
 }
 
-/** Runs one request once fewer than MAX_OPEN_REQUESTS are open. A request waiting out a backoff holds no slot. */
-async function inSlot(request) {
+/** Waits out the rate-limit pause, including one that grows longer meanwhile. */
+async function pauseOver() {
+  for (let pause; pause !== resumed; ) {
+    pause = resumed;
+    await pause;
+  }
+}
+
+/** Runs `task` once fewer than MAX_OPEN_REQUESTS tasks hold a slot. */
+async function inSlot(task) {
   if (openRequests < MAX_OPEN_REQUESTS) openRequests += 1;
   else await new Promise((resolve) => waitingForSlot.push(resolve));
   try {
-    // Checked with the slot in hand, so a pause that began while this request queued still holds it.
-    for (let pause; pause !== resumed; ) {
-      pause = resumed;
-      await pause;
-    }
-    return await request();
+    return await task();
   } finally {
-    // Hand the slot straight to the next request, or give it back.
+    // Hand the slot straight to the next task, or give it back.
     const next = waitingForSlot.shift();
     if (next) next();
     else openRequests -= 1;
@@ -130,7 +133,7 @@ async function attempt(url, headers, retriesUsed) {
   const delay = transient && retriesUsed < MAX_RETRIES ? retryDelay(response, retriesUsed) : undefined;
   // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
   if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
-  // Paused before this slot passes on. A server error is this request's own.
+  // Every request waits a rate limit out, not only this one; a server error is this request's own.
   if (limited) pauseRequests(delay);
   // Released so it does not hold a connection; a body that already broke keeps the wait above.
   await response.body?.cancel().catch(() => {});
@@ -140,24 +143,29 @@ async function attempt(url, headers, retriesUsed) {
 /**
  * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
  * on the way: no connection, a reset, or the deadline. The caller judges the final status.
+ * A request keeps its slot through its retries, so a failing one uses them up before the files
+ * queued behind it start, and a lasting outage fails as fast however many files are waiting.
  */
-async function githubFetch(url, headers) {
-  for (let retriesUsed = 0; ; retriesUsed += 1) {
-    let outcome;
-    try {
-      outcome = await inSlot(() => attempt(url, headers, retriesUsed));
-    } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
-      if (retriesUsed === MAX_RETRIES) {
-        throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
+function githubFetch(url, headers) {
+  return inSlot(async () => {
+    for (let retriesUsed = 0; ; retriesUsed += 1) {
+      await pauseOver();
+      let outcome;
+      try {
+        outcome = await attempt(url, headers, retriesUsed);
+      } catch (error) {
+        if (!isNetworkFailure(error)) throw error;
+        if (retriesUsed === MAX_RETRIES) {
+          throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
+        }
+        outcome = { delay: backoff(retriesUsed), reason: error.cause?.code ?? error.name };
       }
-      outcome = { delay: backoff(retriesUsed), reason: error.cause?.code ?? error.name };
+      if (outcome.answer) return outcome.answer;
+      console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
+      // A rate limit's wait is the shared pause, which the next attempt waits out first.
+      if (!outcome.paused) await new Promise((resolve) => setTimeout(resolve, outcome.delay));
     }
-    if (outcome.answer) return outcome.answer;
-    console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
-    // A rate limit's wait is the shared pause, which the next attempt waits out in inSlot.
-    if (!outcome.paused) await new Promise((resolve) => setTimeout(resolve, outcome.delay));
-  }
+  });
 }
 
 function tokenHint(answer) {

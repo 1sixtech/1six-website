@@ -797,15 +797,30 @@ test('a token with a space, line break, or non-ASCII character fails before any 
   }
 });
 
-test('a request waiting out a server error holds no slot, so the downloads queued behind it go on meanwhile', async () => {
+test('a request keeps its slot through its retries, so it is tried again before the files queued behind it start', async () => {
   const meanwhile = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]] } });
   assert.equal(meanwhile.exit, undefined);
-  assert.equal(meanwhile.peakWhileWaiting, 8, 'eight others are open while it waits');
+  assert.equal(meanwhile.peakWhileWaiting, 7, 'the other seven slots keep working while it waits');
   assertAllFigures(meanwhile);
 
-  const queued = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/f0.svg': [[503]] } });
-  const others = Array.from({ length: 19 }, (_, index) => queued.requests.indexOf(figureAt(`f${index + 1}.svg`)));
-  assert.ok(queued.requests.lastIndexOf(figureAt('f0.svg')) > Math.max(...others), 'its retry joins the back of the queue');
+  const order = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/f0.svg': [[503]] } });
+  assert.ok(order.requests.lastIndexOf(figureAt('f0.svg')) < order.requests.indexOf(figureAt('f8.svg')), 'its retry comes before the ninth file');
+});
+
+const FORTY_FIGURES = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+
+test('a lasting outage fails once the first files use up their retries, without first trying every queued file', async () => {
+  const unreachable = await runSync({ ...LIVE, ...FORTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 200 }, () => dropped()) } });
+  assert.equal(unreachable.exit, 1);
+  assert.match(unreachable.errors[0].message, /^GitHub request failed after 3 retries: .*\/assets\/f[0-7]\.svg$/);
+  assert.equal(unreachable.requests.includes(figureAt('f39.svg')), false, 'the queue does not have to drain before the build fails');
+  assert.deepEqual(unreachable.operations, []);
+
+  const limited = await runSync({ ...LIVE, ...FORTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 200 }, () => [429, { 'retry-after': '30' }]) } });
+  assert.equal(limited.exit, 1);
+  assert.match(limited.errors[0].message, /^Failed to download 001-live\/assets\/f[0-7]\.svg: 429 Set WRITING_GITHUB_TOKEN/);
+  assert.equal(limited.requests.includes(figureAt('f39.svg')), false, 'a lasting limit is not asked once per file');
+  assert.deepEqual(limited.operations, []);
 });
 
 test('a rate limit holds every request until it resets, not only the one GitHub refused', async () => {
@@ -849,9 +864,9 @@ test('a shorter rate limit does not cut short a longer one already running', asy
   assertAllFigures(run);
 });
 
-test('a request that fails on the way gives its slot back, so the downloads queued behind it still run', async () => {
+test('eight downloads that each fail once still finish and give their slots on, so the files queued behind them follow', async () => {
   const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { replies: { '/assets/f': Array.from({ length: 8 }, () => dropped()) } });
-  assert.equal(run.exit, undefined, 'eight lost slots would leave the sync pending until Node exits 0 with nothing printed');
+  assert.equal(run.exit, undefined, 'a slot never given on would leave the sync pending until Node exits 0 with nothing printed');
   assert.equal(run.peak, 8);
   assertAllFigures(run);
 });
