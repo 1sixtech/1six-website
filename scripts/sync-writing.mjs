@@ -6,9 +6,13 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDraftArticle } from '../src/lib/writingDraft.mjs';
+import { isArticleSlug } from '../src/lib/writingSlug.mjs';
 
 const REPO = '1sixtech/1six-researchs';
 const REF = process.env.WRITING_GIT_REF || 'main';
+// Optional and read-only. Without one, GitHub allows 60 API requests an hour per
+// address, and a hosted build shares its address with other builds.
+const TOKEN = process.env.WRITING_GITHUB_TOKEN?.trim();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const contentRoot = path.join(root, 'content/writing');
 const publicRoot = path.join(root, 'public/writing-assets');
@@ -16,34 +20,113 @@ const publicRoot = path.join(root, 'public/writing-assets');
 const GITHUB_API_HEADERS = {
   'User-Agent': '1six-website',
   'X-GitHub-Api-Version': '2022-11-28',
+  ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
 };
+
+const NUMBERED_FOLDER = /^[0-9]{3}-/;
+
+// Git lists a symbolic link as a file sized by its target's path, and the two download
+// hosts answer differently for one, so the type and size checks could not vouch for it.
+const SYMLINK_MODE = '120000';
+
+// Anything under public/ has a URL, and an article can only show images.
+const ASSET_EXTENSIONS = new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp']);
+const MAX_ASSET_MB = 5;
+const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
+// Every download is held in memory until the last one arrives, and Git stores a
+// repeated file once, so many small entries in the listing can still be many gigabytes.
+const MAX_TOTAL_MB = 200;
+const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
+
+const MAX_RETRIES = 3;
+const MAX_RETRY_WAIT_MS = 60_000;
+const BACKOFF_BASE_MS = 1000;
+const RESET_MARGIN_MS = 1000;
+
+/** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
+function retryDelay(response, retriesUsed) {
+  const retryAfter = Number(response.headers.get('retry-after'));
+  if (retryAfter > 0) return retryAfter * 1000;
+  if (response.status >= 500) return BACKOFF_BASE_MS * 2 ** retriesUsed;
+  const resetAt = Number(response.headers.get('x-ratelimit-reset'));
+  if (response.headers.get('x-ratelimit-remaining') === '0' && resetAt > 0) {
+    return Math.max(resetAt * 1000 - Date.now(), 0) + RESET_MARGIN_MS;
+  }
+  return MAX_RETRY_WAIT_MS;
+}
+
+/** Fetches, retrying a refusal or server error; the caller reads the final answer. */
+async function githubFetch(url, headers) {
+  for (let retriesUsed = 0; ; retriesUsed += 1) {
+    const response = await fetch(url, { headers });
+    const transient = response.status === 403 || response.status === 429 || response.status >= 500;
+    if (!transient || retriesUsed === MAX_RETRIES) return response;
+    // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
+    const delay = retryDelay(response, retriesUsed);
+    if (delay > MAX_RETRY_WAIT_MS) return response;
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
+function tokenHint(response) {
+  if (TOKEN) return response.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
+  return response.status === 403 || response.status === 429
+    ? ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.'
+    : '';
+}
 
 // raw.githubusercontent.com caches a branch URL for five minutes, and a Deploy
 // Hook starts this build seconds after a push. Reading by commit SHA gets the
 // pushed files and keeps the listing and every download in one snapshot.
 async function resolveCommit() {
-  const response = await fetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
-    headers: { ...GITHUB_API_HEADERS, Accept: 'application/vnd.github.sha' },
+  const response = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
+    ...GITHUB_API_HEADERS,
+    Accept: 'application/vnd.github.sha',
   });
   if (!response.ok) {
     throw new Error(
-      `GitHub commit lookup failed for ${REF}: ${response.status} ${await response.text()}`,
+      `GitHub commit lookup failed for ${REF}: ${response.status} ${await response.text()}${tokenHint(response)}`,
     );
   }
   return (await response.text()).trim();
 }
 
-function rawUrl(commit, file) {
+async function listFiles(commit) {
+  const response = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
+    ...GITHUB_API_HEADERS,
+    Accept: 'application/vnd.github+json',
+  });
+  if (!response.ok) {
+    throw new Error(
+      `GitHub tree fetch failed: ${response.status} ${await response.text()}${tokenHint(response)}`,
+    );
+  }
+  const tree = await response.json();
+  // Past 100,000 entries or 7 MB GitHub returns part of the tree, and the missing
+  // articles would leave the site without an error.
+  if (tree.truncated) {
+    throw new Error(`GitHub truncated the file listing of ${REPO}@${commit.slice(0, 7)}; refusing a partial sync.`);
+  }
+  return tree.tree;
+}
+
+// Only the REST API documents a token and its rate limit, so an authenticated build
+// reads every file there. Without a token the API's 60 an hour is kept for the listing.
+function fileRequest(commit, file) {
   const encoded = file.split('/').map(encodeURIComponent).join('/');
-  return `https://raw.githubusercontent.com/${REPO}/${commit}/${encoded}`;
+  return TOKEN
+    ? [
+        `https://api.github.com/repos/${REPO}/contents/${encoded}?ref=${commit}`,
+        { ...GITHUB_API_HEADERS, Accept: 'application/vnd.github.raw+json' },
+      ]
+    : [`https://raw.githubusercontent.com/${REPO}/${commit}/${encoded}`, { 'User-Agent': '1six-website' }];
 }
 
 async function fetchFile(commit, file) {
-  const response = await fetch(rawUrl(commit, file), {
-    headers: { 'User-Agent': '1six-website' },
-  });
+  const response = await githubFetch(...fileRequest(commit, file));
   if (!response.ok) {
-    throw new Error(`Failed to download ${file}: ${response.status}`);
+    throw new Error(`Failed to download ${file}: ${response.status}${tokenHint(response)}`);
   }
   return Buffer.from(await response.arrayBuffer());
 }
@@ -53,25 +136,70 @@ async function save(bytes, destination) {
   await writeFile(destination, bytes);
 }
 
+function numberedFolders(listing) {
+  // A file at the top level is not a folder, but a tree or a submodule there is.
+  const folders = listing
+    .filter((entry) => entry.type !== 'blob' || entry.path.includes('/'))
+    .map((entry) => entry.path.split('/')[0]);
+  return [...new Set(folders)].filter((folder) => NUMBERED_FOLDER.test(folder));
+}
+
+function sizeProblems(file, size) {
+  if (!Number.isInteger(size)) return [`${file}: the GitHub listing gave no size`];
+  return size > MAX_ASSET_BYTES ? [`${file}: is over the ${MAX_ASSET_MB} MB limit (${size} bytes)`] : [];
+}
+
+function folderProblems(folder, entries) {
+  const inFolder = entries.filter((entry) => entry.path.startsWith(`${folder}/`));
+  const problems = [];
+  if (!isArticleSlug(folder)) {
+    problems.push(`${folder}: a folder name must be three digits, a hyphen, then lowercase letters, digits, or hyphens`);
+  }
+  const readme = inFolder.find((entry) => entry.path === `${folder}/README.md`);
+  if (!readme) problems.push(`${folder}: has no README.md`);
+  else problems.push(...sizeProblems(readme.path, readme.size));
+  for (const entry of inFolder) {
+    if (entry.mode === SYMLINK_MODE) problems.push(`${entry.path}: a symbolic link cannot be published`);
+  }
+  return problems;
+}
+
+function assetProblems({ path: file, size }) {
+  const extension = path.extname(file).toLowerCase();
+  const problems = [];
+  if (!ASSET_EXTENSIONS.has(extension)) {
+    problems.push(`${file}: ${extension || 'a file with no extension'} is not an allowed type (${[...ASSET_EXTENSIONS].join(', ')})`);
+  }
+  problems.push(...sizeProblems(file, size));
+  return problems;
+}
+
+function totalProblems(label, entries) {
+  const total = entries.reduce((sum, { size }) => sum + size, 0);
+  return total > MAX_TOTAL_BYTES
+    ? [`${label} total ${total} bytes, over the ${MAX_TOTAL_MB} MB limit for one build`]
+    : [];
+}
+
+function refuse(commit, problems) {
+  if (problems.length > 0) {
+    throw new Error(`Cannot publish ${REPO}@${commit.slice(0, 7)}:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
+  }
+}
+
 async function main() {
   const commit = await resolveCommit();
-  const treeResponse = await fetch(
-    `https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`,
-    { headers: { ...GITHUB_API_HEADERS, Accept: 'application/vnd.github+json' } },
-  );
-  if (!treeResponse.ok) {
-    throw new Error(
-      `GitHub tree fetch failed: ${treeResponse.status} ${await treeResponse.text()}`,
-    );
-  }
+  const listing = await listFiles(commit);
+  const entries = listing.filter((entry) => entry.type === 'blob');
 
-  const tree = await treeResponse.json();
-  const files = tree.tree
-    .filter((entry) => entry.type === 'blob')
-    .map((entry) => entry.path);
-  const readmes = files.filter((file) => /^[0-9]{3}-[^/]+\/README\.md$/.test(file));
+  // Read from the whole listing, so a submodule in a numbered folder's place is still found.
+  // A misnamed folder would otherwise publish its figures without its article.
+  const folders = numberedFolders(listing);
+  const readmes = entries.filter((entry) => folders.some((folder) => entry.path === `${folder}/README.md`));
+  refuse(commit, [...folders.flatMap((folder) => folderProblems(folder, entries)), ...totalProblems('READMEs', readmes)]);
+
   const articles = await Promise.all(
-    readmes.map(async (readme) => ({ readme, bytes: await fetchFile(commit, readme) })),
+    folders.map(async (slug) => ({ slug, bytes: await fetchFile(commit, `${slug}/README.md`) })),
   );
   // Skipped here, not only when pages are built: anything under public/ has a
   // URL, so a draft's figures must never reach it.
@@ -80,23 +208,20 @@ async function main() {
     throw new Error(`No published articles found in ${REPO}@${REF}`);
   }
 
+  const assets = published.flatMap(({ slug }) =>
+    entries.filter((entry) => entry.path.startsWith(`${slug}/`) && entry.path !== `${slug}/README.md`),
+  );
+  refuse(commit, [...assets.flatMap(assetProblems), ...totalProblems('published assets', assets)]);
+
   // Everything arrives before anything is removed, so a failed download leaves
   // the last good sync in place.
-  const downloads = await Promise.all(
-    published.flatMap(({ readme, bytes }) => {
-      const slug = readme.split('/')[0];
-      const assets = files.filter(
-        (file) => file.startsWith(`${slug}/`) && file !== readme,
-      );
-      return [
-        { destination: path.join(contentRoot, slug, 'README.md'), bytes },
-        ...assets.map(async (file) => ({
-          destination: path.join(publicRoot, slug, file.slice(slug.length + 1)),
-          bytes: await fetchFile(commit, file),
-        })),
-      ];
-    }),
-  );
+  const downloads = await Promise.all([
+    ...published.map(({ slug, bytes }) => ({ destination: path.join(contentRoot, slug, 'README.md'), bytes })),
+    ...assets.map(async ({ path: file }) => ({
+      destination: path.join(publicRoot, file),
+      bytes: await fetchFile(commit, file),
+    })),
+  ]);
 
   await rm(contentRoot, { recursive: true, force: true });
   await rm(publicRoot, { recursive: true, force: true });
