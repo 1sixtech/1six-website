@@ -28,11 +28,23 @@ The article repository's publishing gate is recorded under Completed.
 
 **Why:** A malformed article is still found only by the production build after it merges, and a failed hook-triggered build tells no one.
 
-**Context:** The workflows, rollout order, evidence, and what is still unverified are in [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md). It changes another repository and needs the owner's approval.
+**Context:** The workflows, rollout order, evidence, and what is still unverified are in [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md). It changes another repository and needs the owner's approval. Since v0.3.14.0 the sync alone may take up to 10 minutes before it fails, so the proposal's 12-minute wait for a build result should cover that plus install and `next build` before it is applied.
 
 **Effort:** S
 **Priority:** P1
 **Depends on:** The sync hardening (merged in v0.3.8.0) and the figure check merged to the website's `main`
+
+### Count each download's bytes against the size the listing gives it
+
+**What:** In `scripts/sync-writing.mjs`, count each body as it arrives: give up on a file once it passes the size the listing gave it, retry one that ends short, and cap the commit lookup and the listing (about 1 KB and 8 MB).
+
+**Why:** The sync checks only the sizes the listing claims. Since the idle timeout (v0.3.14.0), a body that keeps arriving runs until the 10-minute deadline instead of 30 seconds, so a host sending far more than it listed could fill memory and kill the build before the deadline's report prints. A body that ends early without a length header would also be saved cut short.
+
+**Context:** GitHub serves a pinned commit's files at their exact size (undici decodes gzip first), so an equality check is safe; it needs a CDN or proxy fault to trigger. Deferred from the v0.3.14.0 pre-landing review by the owner, to get its own review.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
 
 ## Site-wide
 
