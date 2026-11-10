@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import vm from 'node:vm';
+import { gzipSync } from 'node:zlib';
 import ts from 'typescript';
 import { getArticle } from './writing.ts';
 import { ASSET_EXTENSIONS } from './writingAssets.mjs';
@@ -641,11 +643,9 @@ test('any other file in a published article fails the sync before any asset is d
 });
 
 test('an asset over the size limit fails the sync before it is downloaded; one at the limit is copied', async () => {
-  const atLimit = await runSync(
-    { ...LIVE, '001-live/assets/big.png': 'image' },
-    { sizes: { '001-live/assets/big.png': MAX_ASSET_BYTES } },
-  );
+  const atLimit = await runSync({ ...LIVE, '001-live/assets/big.png': 'x'.repeat(MAX_ASSET_BYTES) });
   assert.equal(atLimit.exit, undefined);
+  assert.equal(atLimit.written.get('/repo/public/writing-assets/001-live/assets/big.png').length, MAX_ASSET_BYTES);
 
   const over = await runSync(
     { ...LIVE, '001-live/assets/huge.png': 'image' },
@@ -656,13 +656,13 @@ test('an asset over the size limit fails the sync before it is downloaded; one a
   assert.equal(over.requests.some((url) => url.includes('huge')), false);
   assert.deepEqual(over.operations, [], 'the last good sync stays in place');
 
-  for (const size of [undefined, null, '12']) {
+  for (const size of [undefined, null, '12', -1]) {
     const unsized = await runSync(
       { ...LIVE, '001-live/assets/mystery.png': 'image' },
       { sizes: { '001-live/assets/mystery.png': size } },
     );
     assert.equal(unsized.exit, 1, `a listing that gives ${size} as the size does not get a pass`);
-    assert.match(unsized.errors[0].message, /001-live\/assets\/mystery\.png: the GitHub listing gave no size/);
+    assert.match(unsized.errors[0].message, /001-live\/assets\/mystery\.png: the GitHub listing gave no valid size/);
   }
 });
 
@@ -682,15 +682,25 @@ test('READMEs are capped in total before any is downloaded, and one with no list
   assertRefusedAtListing(over, [/READMEs total 214958080 bytes, over the 200 MB limit for one build/]);
 
   const unsized = await runSync({ ...LIVE }, { sizes: { '001-live/README.md': undefined } });
-  assertRefusedAtListing(unsized, [/001-live\/README\.md: the GitHub listing gave no size/]);
+  assertRefusedAtListing(unsized, [/001-live\/README\.md: the GitHub listing gave no valid size/]);
+
+  // A second entry for a README, which Git never lists, is neither downloaded nor counted, so whatever size it
+  // gives cannot lower the total below what the first entries bring.
+  for (const size of [-1e15, undefined, 'x']) {
+    const duplicated = await runSync(files, { sizes, listing: ({ tree, truncated }) => ({ truncated, tree: [...tree, { type: 'blob', mode: '100644', path: '000-article/README.md', size }] }) });
+    assertRefusedAtListing(duplicated, [/READMEs total 214958080 bytes, over the 200 MB limit for one build/]);
+  }
 });
 
 test('published assets are capped in total as well as each, before any asset is downloaded', async () => {
   const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.png`, 'image']));
   const sizes = (count) => Object.fromEntries(Object.keys(figures(count)).map((file) => [file, MAX_ASSET_BYTES]));
 
+  // 40 files of 5 MB is exactly 200 MB, so the listing passes and the downloads begin. Each is served short of
+  // the 5 MB listed, and the sync then fails on that instead: 200 MB of real bytes would make this test slow.
   const atLimit = await runSync({ ...LIVE, ...figures(40) }, { sizes: sizes(40) });
-  assert.equal(atLimit.exit, undefined, '40 files of 5 MB is exactly 200 MB');
+  assert.equal(atLimit.exit, 1);
+  assert.match(atLimit.errors[0].message, /^Failed to download 001-live\/assets\/f\d+\.png after 3 retries: the listing gives it 5242880 bytes, and GitHub sent 5$/);
 
   const over = await runSync({ ...LIVE, ...figures(41) }, { sizes: sizes(41) });
   assert.equal(over.exit, 1);
@@ -987,9 +997,12 @@ test('a refusal whose body is missing or cannot be read keeps the wait GitHub na
 });
 
 test('an answer with no body at all reads as empty, not as a broken download, and a refusal without one keeps its status', async () => {
-  const file = await runSync({ ...LIVE, '001-live/assets/chart.svg': '<svg/>' }, { replies: { 'chart.svg': [new Response(null)] } });
+  const file = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': '<svg/>' },
+    { sizes: { '001-live/assets/chart.svg': 0 }, replies: { 'chart.svg': [new Response(null)] } },
+  );
   assert.equal(file.exit, undefined);
-  assert.deepEqual(file.waits, [], 'an empty answer is complete, so it is not retried');
+  assert.deepEqual(file.waits, [], 'an empty answer for an empty file is complete, so it is not retried');
   assert.equal(file.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '');
 
   const refused = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(null, { status: 404 })] } });
@@ -1202,7 +1215,7 @@ test('a sync that failed requests hold past its limit says how many retries they
 
 test('a sync that slow answers alone hold past its limit says GitHub answered slowly for all of it, and where it was', async () => {
   // Each figure arrives in seven parts 20 s apart, so every eight take 140 s.
-  const slowly = () => trickle(['<svg>', '1', '2', '3', '4', '5', '</svg>'], 20_000);
+  const slowly = (index) => trickle(['<', 's', 'v', 'g', '>', String(index), '</svg>'], 20_000);
   const assets = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(40, 1, slowly) });
   assert.equal(assets.exit, 1);
   assert.equal(assets.endedAt - START, 600_000);
@@ -1246,8 +1259,14 @@ test('a sync that fails on its own before its limit reports its own error when i
   assert.deepEqual(run.operations, []);
 });
 
-/** A reply whose body takes 800 s to arrive, a part every 20 s, so only the sync's limit stops it. */
+/**
+ * A reply whose body takes 800 s to arrive, a part every 20 s. Only the sync's limit stops it when the request allows
+ * its 40 bytes, as the lookup and the listing do; a file must be listed at them (see crawling), or it is given up on
+ * once it passes its size.
+ */
 const pastTheLimit = () => trickle(Array.from({ length: 40 }, () => ' '), 20_000);
+/** Lists `files` at the 40 bytes pastTheLimit() sends, so a file that crawls is slow, not too long. */
+const crawling = (files) => ({ sizes: Object.fromEntries(files.map((file) => [file, 40])) });
 
 test('a sync that runs out of time on the listing or on the READMEs names that step, and counts each README as a file', async () => {
   const listing = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/git/trees/': [pastTheLimit()] } });
@@ -1260,7 +1279,7 @@ test('a sync that runs out of time on the listing or on the READMEs names that s
   ].join('\n'));
   assert.deepEqual(listing.operations, []);
 
-  const readmes = await runSync({ ...LIVE, '002-second/README.md': PUBLISHED }, { now: START, deferWaits: true, replies: { '002-second/README.md': [pastTheLimit()] } });
+  const readmes = await runSync({ ...LIVE, '002-second/README.md': PUBLISHED }, { now: START, deferWaits: true, ...crawling(['002-second/README.md']), replies: { '002-second/README.md': [pastTheLimit()] } });
   assert.equal(readmes.exit, 1);
   assert.equal(readmes.endedAt - START, 600_000);
   assert.equal(readmes.errors[0].message, [
@@ -1343,6 +1362,7 @@ test('time left over under a minute is not named as slow answers, and a minute i
   const minute = await runSync({ ...LIVE, ...figures(32) }, {
     now: START,
     deferWaits: true,
+    ...crawling(Object.keys(figures(32)).slice(24)),
     replies: { ...eachFigure(24, 3, heldForAMinute), ...Object.fromEntries(figureRange(24, 8).map((_, offset) => [`/f${24 + offset}.svg`, [pastTheLimit()]])) },
   });
   assert.equal(minute.errors[0].message, [
@@ -1354,7 +1374,7 @@ test('time left over under a minute is not named as slow answers, and a minute i
 });
 
 test('a late report counts the files still waiting for a slot, and names only the requests waiting for an answer', async () => {
-  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(8, 1, () => pastTheLimit()) });
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { now: START, deferWaits: true, ...crawling(Object.keys(figures(8))), replies: eachFigure(8, 1, () => pastTheLimit()) });
   assert.equal(run.exit, 1);
   assert.equal(run.endedAt - START, 600_000);
   assert.equal(run.errors[0].message, [
@@ -1389,6 +1409,7 @@ test('retry waits inside a rate-limit hold count once, as the hold, and retries 
   const run = await runSync({ ...LIVE, ...figures(3) }, {
     now: START,
     deferWaits: true,
+    ...crawling(Object.keys(figures(3))),
     replies: { '/f0.svg': [[429, { 'retry-after': '60' }], pastTheLimit()], '/f1.svg': [[503], pastTheLimit()], '/f2.svg': [silence, pastTheLimit()] },
   });
   assert.equal(run.exit, 1);
@@ -1453,7 +1474,7 @@ test('a dropped connection costs a retry in the late report, but is not an answe
 });
 
 test('a late report counts the files asked for even before any has arrived', async () => {
-  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '001-live/README.md': [pastTheLimit()] } });
+  const run = await runSync({ ...LIVE }, { now: START, deferWaits: true, ...crawling(['001-live/README.md']), replies: { '001-live/README.md': [pastTheLimit()] } });
   assert.equal(run.exit, 1);
   assert.equal(run.errors[0].message.split('\n')[0], 'The article sync stopped at its 10-minute limit while downloading READMEs, with 0 of 1 files downloaded:');
 });
@@ -1702,4 +1723,372 @@ test('a token is blamed for a 401 on the listing and on downloads too, and for n
 
   const missing = await runSync({ ...LIVE }, { env, commitStatus: 404 });
   assert.doesNotMatch(missing.errors[0].message, /WRITING_GITHUB_TOKEN/);
+});
+
+/**
+ * A 200 that sends `text`, then spaces `chunk` bytes at a time, up to `total` bytes in all: a host that sends far
+ * more than it should. It sends only what is read; `sent()` says how much went out.
+ */
+function flood(text, { chunk = 1024, total = 16 * 1024 * 1024 } = {}) {
+  const first = new TextEncoder().encode(text);
+  const spaces = new Uint8Array(chunk).fill(0x20);
+  let sent = 0;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      if (sent >= total) {
+        controller.close();
+        return;
+      }
+      const part = sent === 0 ? first : spaces;
+      sent += part.length;
+      controller.enqueue(part);
+    },
+  }, { highWaterMark: 0 }));
+  return Object.assign(response, { sent: () => sent });
+}
+
+const CHART = { ...LIVE, '001-live/assets/chart.svg': '<svg/>' };
+const SAVED_CHART = '/repo/public/writing-assets/001-live/assets/chart.svg';
+
+test('a download longer than its listed size is given up on as soon as it passes it, retried, and named if it keeps coming', async () => {
+  const figure = figureAt('chart.svg');
+  const flooding = flood('<svg/>');
+  const once = await runSync(CHART, { replies: { 'chart.svg': [flooding] } });
+  assert.equal(once.exit, undefined);
+  assert.equal(flooding.sent(), 6 + 1024, 'not read past the part that took it over the 6 bytes listed');
+  assert.deepEqual(once.warnings, [`Retry 1 of 3 in 1 s after a body over 6 bytes: ${figure}`]);
+  assert.equal(once.written.get(SAVED_CHART), '<svg/>', 'downloaded again at its size');
+
+  const byOne = () => Array.from({ length: 4 }, () => new Response('<svg/>\n'));
+  const always = await runSync(CHART, { replies: { 'chart.svg': byOne() } });
+  assert.equal(always.exit, 1);
+  assert.equal(always.errors[0].message, 'Failed to download 001-live/assets/chart.svg after 3 retries: the listing gives it 6 bytes, and GitHub sent at least 7');
+  assert.equal(always.errors[0].cause.name, 'WrongSize');
+  assert.equal(always.requests.filter((url) => url === figure).length, 4);
+  assert.deepEqual(always.waits, [1000, 2000, 4000]);
+  assert.deepEqual(always.operations, [], 'the last good sync stays in place');
+
+  // A README is held to its size too, and so is a download from the API with a token.
+  const readme = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'tok' }, replies: { '/contents/': Array.from({ length: 4 }, () => new Response(`${PUBLISHED}more`)) } });
+  assert.equal(readme.exit, 1);
+  assert.equal(readme.errors[0].message, `Failed to download 001-live/README.md after 3 retries: the listing gives it ${PUBLISHED.length} bytes, and GitHub sent at least ${PUBLISHED.length + 4}`);
+  assert.deepEqual(readme.operations, []);
+
+  // An empty file allows no bytes at all: its size is a limit like any other, not the absence of one.
+  const blank = figureAt('blank.svg');
+  const emptyFlood = flood('<svg/>');
+  const empty = await runSync({ ...LIVE, '001-live/assets/blank.svg': '' }, { replies: { 'blank.svg': [emptyFlood, ...Array.from({ length: 3 }, () => new Response('<svg/>'))] } });
+  assert.equal(empty.exit, 1);
+  assert.equal(emptyFlood.sent(), 6, 'not read past its first part');
+  assert.equal(empty.warnings[0], `Retry 1 of 3 in 1 s after a body over 0 bytes: ${blank}`);
+  assert.equal(empty.errors[0].message, 'Failed to download 001-live/assets/blank.svg after 3 retries: the listing gives it 0 bytes, and GitHub sent at least 6');
+  assert.deepEqual(empty.operations, []);
+});
+
+test('a download that ends short of its listed size is retried, so a file cut off without a length header is never saved', async () => {
+  const figure = figureAt('chart.svg');
+  const short = await runSync(CHART, { replies: { 'chart.svg': [new Response('<svg'), new Response(null)] } });
+  assert.equal(short.exit, undefined);
+  assert.deepEqual(short.warnings, [
+    `Retry 1 of 3 in 1 s after a body of 4 bytes, not 6: ${figure}`,
+    `Retry 2 of 3 in 2 s after a body of 0 bytes, not 6: ${figure}`,
+  ]);
+  assert.equal(short.written.get(SAVED_CHART), '<svg/>', 'downloaded again in full');
+
+  const always = await runSync({ ...LIVE }, { replies: { 'raw.githubusercontent.com': Array.from({ length: 4 }, () => new Response('# Live\n')) } });
+  assert.equal(always.exit, 1);
+  assert.equal(always.errors[0].message, `Failed to download 001-live/README.md after 3 retries: the listing gives it ${PUBLISHED.length} bytes, and GitHub sent 7`);
+  assert.deepEqual(always.waits, [1000, 2000, 4000]);
+  assert.deepEqual(always.operations, [], 'the last good sync stays in place');
+});
+
+test('a download that arrives at exactly its listed size is saved as sent, however it is split, counting bytes rather than characters', async () => {
+  // Korean and a dash take three bytes each in UTF-8, so the file has more bytes than characters, and its parts
+  // split them partway.
+  const text = '# 한국어 — Live\n\nDate: 2026-11-01\n\nBody.\n';
+  const bytes = new TextEncoder().encode(text);
+  assert.notEqual(bytes.length, text.length);
+  const inParts = new Response(new ReadableStream({
+    start(controller) {
+      for (let at = 0; at < bytes.length; at += 4) controller.enqueue(bytes.slice(at, at + 4));
+      controller.close();
+    },
+  }));
+  const run = await runSync({ '001-live/README.md': text }, { replies: { 'raw.githubusercontent.com': [inParts] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, [], 'not retried');
+  assert.equal(run.written.get('/repo/content/writing/001-live/README.md'), text);
+
+  const empty = await runSync({ ...LIVE, '001-live/assets/blank.svg': '' });
+  assert.equal(empty.exit, undefined, 'an empty file listed at 0 bytes is complete');
+  assert.equal(empty.written.get('/repo/public/writing-assets/001-live/assets/blank.svg'), '');
+});
+
+test('a download sent gzipped is counted as fetch hands it over, decoded, and not by its Content-Length', async () => {
+  // As raw.githubusercontent.com serves a file: gzipped, with Content-Length the compressed size. Node's fetch
+  // decodes the body before anything reads it, so the harness serves the decoded bytes under those headers.
+  const svg = `<svg>${'<path d="M0 0h1v1z"/>'.repeat(50)}</svg>`;
+  const zipped = gzipSync(svg);
+  assert.ok(zipped.length < svg.length);
+  const served = new Response(svg, { headers: { 'content-encoding': 'gzip', 'content-length': String(zipped.length) } });
+  assert.equal(served.headers.get('content-length'), String(zipped.length));
+  const run = await runSync({ ...LIVE, '001-live/assets/chart.svg': svg }, { replies: { 'chart.svg': [served] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, [], 'not retried');
+  assert.equal(run.written.get(SAVED_CHART), svg);
+});
+
+const LISTING = `https://api.github.com/repos/${REPO}/git/trees/${COMMIT}?recursive=1`;
+const MAX_LISTING_BYTES = 32 * 1024 * 1024;
+/** The listing GitHub gives for LIVE, as the JSON it sends. */
+const LIVE_LISTING = JSON.stringify({ tree: [{ type: 'blob', mode: '100644', path: '001-live/README.md', size: PUBLISHED.length }], truncated: false });
+
+test('the commit lookup may send at most 1 KB: more is given up on as soon as it passes, retried, and then fails the sync', async () => {
+  // The lookup's answer is trimmed, so a SHA padded with line breaks to exactly 1 KB is still the commit.
+  const atCap = await runSync({ ...LIVE }, { commitBody: COMMIT.padEnd(1024, '\n') });
+  assert.equal(atCap.exit, undefined);
+  assert.deepEqual(atCap.warnings, []);
+
+  const flooding = flood(COMMIT, { chunk: 256 });
+  const once = await runSync({ ...LIVE }, { replies: { '/commits/': [flooding] } });
+  assert.equal(once.exit, undefined);
+  assert.ok(flooding.sent() <= 1024 + 256, `read ${flooding.sent()} bytes, not stopped at the part that passed 1 KB`);
+  assert.deepEqual(once.warnings, [`Retry 1 of 3 in 1 s after a body over 1024 bytes: ${LOOKUP}`]);
+
+  const over = await runSync({ ...LIVE }, { commitBody: COMMIT.padEnd(1025, '\n') });
+  assert.equal(over.exit, 1);
+  assert.equal(over.errors[0].message, `GitHub sent a body over 1024 bytes after 3 retries: ${LOOKUP}`, 'not a failure to answer');
+  assert.equal(over.errors[0].cause.message, 'a body over 1024 bytes');
+  assert.deepEqual(over.requests, [LOOKUP, LOOKUP, LOOKUP, LOOKUP], 'no listing follows');
+  assert.deepEqual(over.operations, [], 'the last good sync stays in place');
+
+  // A refusal's body only adds to the message, so it may hold 4 KB, past the lookup's cap, and one longer keeps its
+  // status, unretried.
+  const message = 'x'.repeat(4096);
+  const refused = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(message, { status: 404 })] } });
+  assert.equal(refused.exit, 1);
+  assert.equal(refused.errors[0].message, `GitHub commit lookup failed for main: 404 ${message}`);
+  const longer = await runSync({ ...LIVE }, { replies: { '/git/trees/': [new Response(`${message}x`, { status: 404 })] } });
+  assert.equal(longer.exit, 1);
+  assert.equal(longer.errors[0].message, 'GitHub tree fetch failed: 404 (body over 4096 bytes)', 'held to 4 KB, not to the listing\'s 32 MB');
+  assert.equal(longer.requests.length, 2, 'the lookup and the listing, unretried');
+});
+
+test('the listing may send at most 32 MB: more is given up on as soon as it passes, retried, and then fails the sync', async () => {
+  const atCap = await runSync({ ...LIVE }, { replies: { '/git/trees/': [new Response(LIVE_LISTING.padEnd(MAX_LISTING_BYTES, ' '))] } });
+  assert.equal(atCap.exit, undefined, 'JSON allows the trailing spaces');
+  assert.deepEqual(atCap.warnings, []);
+
+  const chunk = 1024 * 1024;
+  const flooding = flood(LIVE_LISTING, { chunk, total: 64 * chunk });
+  const once = await runSync({ ...LIVE }, { replies: { '/git/trees/': [flooding] } });
+  assert.equal(once.exit, undefined);
+  assert.ok(flooding.sent() <= MAX_LISTING_BYTES + chunk, `read ${flooding.sent()} bytes, not stopped at the part that passed 32 MB`);
+  assert.deepEqual(once.warnings, [`Retry 1 of 3 in 1 s after a body over ${MAX_LISTING_BYTES} bytes: ${LISTING}`]);
+  assert.equal(once.written.get('/repo/content/writing/001-live/README.md'), PUBLISHED);
+
+  const over = await runSync({ ...LIVE }, { replies: { '/git/trees/': Array.from({ length: 4 }, () => flood(LIVE_LISTING, { chunk, total: 64 * chunk })) } });
+  assert.equal(over.exit, 1);
+  assert.equal(over.errors[0].message, `GitHub sent a body over ${MAX_LISTING_BYTES} bytes after 3 retries: ${LISTING}`, 'not a failure to answer');
+  assert.equal(over.errors[0].cause.message, `a body over ${MAX_LISTING_BYTES} bytes`);
+  assert.equal(over.requests.length, 5, 'the lookup and four listings; no download follows');
+  assert.deepEqual(over.operations, [], 'the last good sync stays in place');
+});
+
+test('a wrong-size body shares the three retries with refusals and network failures, and the last failure names the error', async () => {
+  const figure = figureAt('chart.svg');
+  const sizeLast = await runSync(CHART, { replies: { 'chart.svg': [dropped(), new Response('<svg'), [503], new Response('<svg/>\n')] } });
+  assert.equal(sizeLast.exit, 1);
+  assert.deepEqual(sizeLast.warnings, [
+    `Retry 1 of 3 in 1 s after ECONNRESET: ${figure}`,
+    `Retry 2 of 3 in 2 s after a body of 4 bytes, not 6: ${figure}`,
+    `Retry 3 of 3 in 4 s after 503: ${figure}`,
+  ]);
+  assert.deepEqual(sizeLast.waits, [1000, 2000, 4000]);
+  assert.equal(sizeLast.errors[0].message, 'Failed to download 001-live/assets/chart.svg after 3 retries: the listing gives it 6 bytes, and GitHub sent at least 7');
+  assert.deepEqual(sizeLast.operations, [], 'the last good sync stays in place');
+
+  // Ended by a dropped connection, the failure names the request, as any network failure does.
+  const dropLast = await runSync(CHART, { replies: { 'chart.svg': [new Response('<svg'), new Response('<svg/>\n'), [503], dropped()] } });
+  assert.equal(dropLast.exit, 1);
+  assert.deepEqual(dropLast.warnings, [
+    `Retry 1 of 3 in 1 s after a body of 4 bytes, not 6: ${figure}`,
+    `Retry 2 of 3 in 2 s after a body over 6 bytes: ${figure}`,
+    `Retry 3 of 3 in 4 s after 503: ${figure}`,
+  ]);
+  assert.equal(dropLast.errors[0].message, `GitHub request failed after 3 retries: ${figure}`);
+  assert.equal(dropLast.errors[0].cause.cause.code, 'ECONNRESET');
+
+  // Ended by a refusal, the failure is the refusal's own.
+  const refusedLast = await runSync(CHART, { replies: { 'chart.svg': [new Response('<svg'), new Response('<svg'), new Response('<svg'), [503]] } });
+  assert.equal(refusedLast.exit, 1);
+  assert.equal(refusedLast.errors[0].message, 'Failed to download 001-live/assets/chart.svg: 503');
+});
+
+test('a refusal for a file is answered by its status, unretried, even with a body longer than the file it stands for', async () => {
+  const notFound = await runSync(CHART, { replies: { 'chart.svg': [new Response('404: Not Found, no such path at this commit', { status: 404 })] } });
+  assert.equal(notFound.exit, 1);
+  assert.equal(notFound.errors[0].message, 'Failed to download 001-live/assets/chart.svg: 404');
+  assert.equal(notFound.requests.filter((url) => url === figureAt('chart.svg')).length, 1, 'a refusal is its own answer, not a wrong-size body');
+  assert.deepEqual(notFound.warnings, []);
+
+  // An empty file allows no bytes at all, and a rate limit past the wait budget still reads as one.
+  const empty = await runSync({ ...LIVE, '001-live/assets/blank.svg': '' }, { replies: { 'blank.svg': [[429, PAST_BUDGET]] } });
+  assert.equal(empty.exit, 1);
+  assert.equal(empty.errors[0].message, 'Failed to download 001-live/assets/blank.svg: 429 Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
+  assert.deepEqual(empty.warnings, []);
+});
+
+test('a body given up on for passing its size is released, so it does not hold its connection open', async () => {
+  let released = false;
+  const endless = new Response(new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode('<svg/> '));
+    },
+    cancel() {
+      released = true;
+    },
+  }, { highWaterMark: 0 }));
+  const run = await runSync(CHART, { replies: { 'chart.svg': [endless] } });
+  assert.equal(run.exit, undefined);
+  assert.equal(released, true);
+  assert.equal(run.written.get(SAVED_CHART), '<svg/>', 'downloaded again at its size');
+});
+
+test('a download that keeps arriving past its listed size is given up on as each attempt passes it, long before the sync limit', async () => {
+  // Each attempt sends the six listed bytes at 20 s, then a seventh at 40 s, and would go on for 13 minutes.
+  const overflowing = () => trickle(['<svg/>', ...Array.from({ length: 40 }, () => ' ')], 20_000);
+  const run = await runSync(CHART, { now: START, deferWaits: true, replies: { 'chart.svg': Array.from({ length: 4 }, overflowing) } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 167_000, 'four attempts of 40 s, and the 1, 2, and 4-second backoffs');
+  assert.deepEqual(sendsOf(run, figureAt('chart.svg')), [0, 41_000, 83_000, 127_000]);
+  assert.equal(run.errors[0].message, 'Failed to download 001-live/assets/chart.svg after 3 retries: the listing gives it 6 bytes, and GitHub sent at least 7');
+  assert.equal(run.timersLeft, 0, 'no watchdog or deadline is left running');
+  assert.deepEqual(run.operations, []);
+});
+
+test('a late report names bodies of the wrong size as the cause of their retries, and not as answers that never came', async () => {
+  const lookup = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [new Response('0'.repeat(2048)), pastTheLimit()] } });
+  assert.equal(lookup.exit, 1);
+  assert.deepEqual(lookup.warnings, [`Retry 1 of 3 in 1 s after a body over 1024 bytes: ${LOOKUP}`]);
+  assert.equal(lookup.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    '  - Bodies of the wrong size cost 1 retry, and waiting to retry took 1 s.',
+    '  - GitHub answered slowly for the other 9 min 59 s.',
+    stillWaitingOn([LOOKUP]),
+  ].join('\n'));
+
+  // Beside a server error and a dropped connection, a body of the wrong size is named with them.
+  const mixed = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [[503], dropped(), new Response('0'.repeat(2048)), pastTheLimit()] } });
+  assert.equal(mixed.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    '  - Server errors, network failures, and bodies of the wrong size cost 3 retries, and waiting to retry took 7 s.',
+    '  - GitHub answered slowly for the other 9 min 53 s.',
+    stillWaitingOn([LOOKUP]),
+  ].join('\n'));
+
+  // A figure listed at the 40 bytes pastTheLimit() sends, which first arrives short.
+  const figure = await runSync(CHART, {
+    now: START,
+    deferWaits: true,
+    ...crawling(['001-live/assets/chart.svg']),
+    replies: { 'chart.svg': [new Response('<svg'), pastTheLimit()] },
+  });
+  assert.equal(figure.exit, 1);
+  assert.equal(figure.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 1 of 2 files downloaded:',
+    '  - Bodies of the wrong size cost 1 retry, and waiting to retry took 1 s.',
+    '  - GitHub answered slowly for the other 9 min 59 s.',
+    stillWaitingOn([figureAt('chart.svg')]),
+  ].join('\n'));
+  assert.deepEqual(figure.operations, []);
+});
+
+test("Node's fetch hands over a gzipped body decoded, so a file served that way arrives at its listed size", async () => {
+  // The harness above serves decoded bytes under gzip headers; this checks that premise against the real fetch.
+  const svg = `<svg>${'<path d="M0 0h1v1z"/>'.repeat(50)}</svg>`;
+  const zipped = gzipSync(svg);
+  const server = createServer((request, response) => {
+    response.writeHead(200, { 'content-encoding': 'gzip', 'content-length': zipped.length });
+    response.end(zipped);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/chart.svg`);
+    assert.equal(response.headers.get('content-length'), String(zipped.length));
+    let received = 0;
+    for await (const part of response.body) received += part.length;
+    assert.equal(received, Buffer.byteLength(svg), 'counted decoded, not by its Content-Length');
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
+test('the listing is checked in time proportional to its size, so a huge one cannot hold the build past its deadline', async () => {
+  // 60,000 numbered folders, each with a figure and no README. Checking each folder against every file took about
+  // 6 s for 20,000 here, and grows with the square; grouping the files by folder once takes a fraction of a second.
+  // The deadline cannot fire while the checks run, so a listing near the 32 MB cap, checked the slow way, would
+  // have held the build for over an hour.
+  const files = Object.fromEntries(Array.from({ length: 60_000 }, (_, index) => [`${String(index % 1000).padStart(3, '0')}-f${index}/chart.svg`, '<svg/>']));
+  const started = performance.now();
+  const run = await runSync(files);
+  const took = performance.now() - started;
+  assertRefusedAtListing(run, [/000-f0: has no README\.md/, /999-f59999: has no README\.md/]);
+  assert.ok(took < 3000, `the listing checks took ${Math.round(took)} ms`);
+});
+
+test('a body sent a byte at a time is saved byte for byte, each part copied into place as it arrives and let go', async () => {
+  // Every part is copied into one buffer and let go (see readBody): kept instead, parts a byte long would cost
+  // hundreds of bytes of memory each. The host here sends every byte in the same reused buffer, so a part kept
+  // rather than copied would read as the last byte. A byte at a time is also where an offset slip would show, and
+  // Korean text puts a character's bytes in different parts.
+  const text = `# 한국어 Live\n\nDate: 2026-11-01\n\n${'Body. '.repeat(400)}\n`;
+  const bytes = new TextEncoder().encode(text);
+  const byteAtATime = () => {
+    const part = new Uint8Array(1);
+    let at = 0;
+    return new Response(new ReadableStream({
+      pull(controller) {
+        if (at === bytes.length) {
+          controller.close();
+          return;
+        }
+        part[0] = bytes[at];
+        at += 1;
+        controller.enqueue(part);
+      },
+    }, { highWaterMark: 0 }));
+  };
+  const run = await runSync({ '001-live/README.md': text }, { replies: { 'raw.githubusercontent.com': [byteAtATime()], '/commits/': [new Response(new ReadableStream({
+    start(controller) {
+      for (const byte of new TextEncoder().encode(`${COMMIT}\n`)) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    },
+  }))] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, []);
+  assert.equal(run.written.get('/repo/content/writing/001-live/README.md'), text);
+  assert.equal(run.requests[1], LISTING, 'the commit, sent a byte at a time, read whole');
+});
+
+test('a folder is checked and downloaded by the first README the listing gives it, whatever a second entry says', async () => {
+  const withSecond = (size) => ({ listing: ({ tree, truncated }) => ({ truncated, tree: [...tree, { type: 'blob', mode: '100644', path: '001-live/README.md', size }] }) });
+  for (const size of [PUBLISHED.length + 5, 1e12]) {
+    const run = await runSync({ ...LIVE }, withSecond(size));
+    assert.equal(run.exit, undefined, String(size));
+    assert.deepEqual(run.warnings, [], `${size}: downloaded at the first entry's size`);
+  }
+  // A second entry listed far larger does not raise the limit the download is held to.
+  const flooding = flood(PUBLISHED);
+  const capped = await runSync({ ...LIVE }, { ...withSecond(1e12), replies: { 'raw.githubusercontent.com': [flooding] } });
+  assert.equal(capped.warnings[0], `Retry 1 of 3 in 1 s after a body over ${PUBLISHED.length} bytes: https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/README.md`);
+  assert.equal(flooding.sent(), PUBLISHED.length + 1024);
+});
+
+test('a file at the top level is never part of a folder, even one whose name it begins with', async () => {
+  const run = await runSync({ ...LIVE, '001-livex': 'notes', '001-live.md': 'notes' });
+  assert.equal(run.exit, undefined);
+  assert.equal(run.requests.some((url) => url.includes('001-livex') || url.includes('001-live.md')), false);
+  assert.deepEqual([...run.written.keys()], ['/repo/content/writing/001-live/README.md']);
 });
