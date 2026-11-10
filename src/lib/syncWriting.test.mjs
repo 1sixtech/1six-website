@@ -34,8 +34,8 @@ const refusal = (status, text = '', headers = {}) => new Response(text, { status
 // How Node's fetch rejects when a request never gets an answer: a TypeError whose cause names the reason.
 const networkError = (code, message) => new TypeError('fetch failed', { cause: Object.assign(new Error(message), { code }) });
 const dropped = () => networkError('ECONNRESET', 'read ECONNRESET');
-// What AbortSignal.timeout rejects with, in fetch() or, once the headers are in, in the body read.
-const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+// What the script's watchdog gives up on a request with, in fetch() or, once the headers are in, in the body read.
+const timedOut = () => new DOMException('Nothing arrived for 30 s', 'TimeoutError');
 // What a body read rejects with when the connection closes mid-transfer.
 const terminated = () => new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
 
@@ -54,7 +54,7 @@ function brokenBody(reason) {
 /** An answer whose connection dropped before its body could be read or released. */
 const unreadableBody = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
 
-/** An answer whose body arrives only after `turns` event-loop turns. */
+/** An answer whose body arrives only after `turns` event-loop turns, which take no time on the run's clock. */
 function slowBody(text, turns, init) {
   return new Response(new ReadableStream({
     async pull(controller) {
@@ -65,24 +65,114 @@ function slowBody(text, turns, init) {
   }), init);
 }
 
+/** A reply that never comes, until the request gives up on it. */
+const silence = () => new Promise(() => {});
+
+/**
+ * A reply, for runs with deferWaits, that answers `after` ms in and then sends its body in `parts`,
+ * one every `gap` ms on the run's clock. With `stall`, nothing more comes after the last part.
+ */
+const trickle = (parts, gap, { after = 0, stall = false, ...init } = {}) => async ({ wait }) => {
+  if (after > 0) await wait(after);
+  const left = [...parts];
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      if (left.length === 0) {
+        if (stall) await silence();
+        controller.close();
+        return;
+      }
+      await wait(gap);
+      controller.enqueue(new TextEncoder().encode(left.shift()));
+    },
+  }, { highWaterMark: 0 }), init);
+};
+
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
  * `replies` maps part of a URL to what GitHub gives it before answering normally: a refusal
- * [status, headers], an error the request rejects with, or a Response to return as is;
+ * [status, headers], an error the request rejects with, a Response to return as is, or a function
+ * given `{ wait }` (a pause on the run's clock) that returns a Response or a promise of one;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
- * whole answer. Waits are recorded and not slept, unless `deferWaits` lets each run a few event
- * loop turns so other requests can go on meanwhile; `now` fixes the clock the script reads.
+ * whole answer.
+ * The run has its own clock, read by the script's Date.now(), its timers, and its waits; `now` sets
+ * where it starts. Waits are recorded and not slept, and the clock stands still, so no watchdog or
+ * deadline fires. With `deferWaits` the clock moves, but only once nothing else is happening, and then
+ * straight to the next timer due: requests take no time, other requests go on during a wait, and a
+ * request that sends nothing is given up on.
  * With `sameTurn`, every request sent in one turn is answered together in the next, each after
  * the number of microtasks `delays` gives the first URL fragment it contains.
- * `signals` lists each request's signal; `peak` is the most requests open at once, from the call
- * until the body is read or released; `sentWhileWaiting` and `peakWhileWaiting` count requests
- * sent, and the most open, while a deferred wait is pending; `warnings` holds the retry lines.
+ * `signals` lists each request's signal and `sentAt` the clock when it was sent; `peak` is the most
+ * requests open at once, from the call until the body is read, released, or given up on;
+ * `sentWhileWaiting` and `peakWhileWaiting` count requests sent, and the most open, while a deferred
+ * wait is pending; `warnings` holds the retry lines; `endedAt` is the clock when the run ended, and
+ * `timersLeft` the number of timers the script still had set then.
  */
 function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, deferWaits = false, sameTurn = false, delays = {}, now } = {}) {
   return new Promise((resolve) => {
-    const result = { requests: [], headers: new Map(), signals: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
+    const result = { requests: [], headers: new Map(), signals: [], sentAt: [], peak: 0, sentWhileWaiting: 0, peakWhileWaiting: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined, endedAt: undefined, timersLeft: undefined };
     let open = 0;
     let waiting = 0;
+    const clock = { now: now ?? Date.now() };
+    const timers = new Map();
+    let timersSet = 0;
+    // Anything sent, answered, read, or set. The clock moves only after a stretch of turns with none.
+    let activity = 0;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      result.endedAt = clock.now;
+      result.timersLeft = timers.size;
+      resolve(result);
+    };
+    // Like Node, a delay under 1 ms, past the 32-bit limit, or no number at all fires after 1 ms.
+    const nodeDelay = (delay) => (delay >= 1 && delay <= 2 ** 31 - 1 ? delay : 1);
+    const addTimer = (delay, callback) => {
+      timersSet += 1;
+      activity += 1;
+      timers.set(timersSet, { id: timersSet, due: clock.now + nodeDelay(delay), callback });
+      if (deferWaits) advance();
+      return timersSet;
+    };
+    let advancing = false;
+    // Once a whole stretch of turns has passed quietly, moves the clock to the next timer due and fires
+    // every timer due then. Like Node's timers phase, they all fire before any answer can arrive, in the
+    // order they were set, with the microtasks each one starts run before the next.
+    async function advance() {
+      if (advancing) return;
+      advancing = true;
+      while (!finished && timers.size > 0) {
+        for (let seen; seen !== activity; ) {
+          seen = activity;
+          for (let left = 20; left > 0; left -= 1) await new Promise((resolve) => setImmediate(resolve));
+        }
+        if (finished || timers.size === 0) break;
+        const due = Math.min(...[...timers.values()].map((timer) => timer.due));
+        clock.now = Math.max(clock.now, due);
+        for (const timer of [...timers.values()].filter((pending) => pending.due === due)) {
+          // A callback before it may have cleared or moved it.
+          if (timers.get(timer.id)?.due !== due) continue;
+          timers.delete(timer.id);
+          activity += 1;
+          timer.callback();
+          for (let left = 100; left > 0; left -= 1) await null;
+        }
+      }
+      advancing = false;
+    }
+    // A pause on the run's clock for a scripted reply, not one of the script's own waits.
+    const wait = (delay) => new Promise((resolve) => addTimer(delay, resolve));
+    // Like fetch, a reply not yet in is given up on once the request's signal aborts, with its reason.
+    const unlessAborted = (signal, reply) => new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener('abort', abort, { once: true });
+      Promise.resolve(reply).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
     let turn;
     const nextTurn = () => {
       turn ??= new Promise((resolve) => setImmediate(() => {
@@ -98,8 +188,9 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       const fragment = Object.keys(delays).find((part) => url.includes(part));
       for (let left = fragment === undefined ? 0 : delays[fragment]; left > 0; left -= 1) await null;
     };
-    // A request stays open until its body is read to the end or released, as on a real connection.
-    const held = (response) => {
+    // A request stays open until its body is read to the end, released, or given up on, as on a real
+    // connection. Like fetch, giving up on it errors the body with the signal's reason.
+    const held = (response, signal) => {
       const reader = response.body?.getReader();
       if (!reader) {
         open -= 1;
@@ -111,14 +202,26 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
         closed = true;
       };
       return new Response(new ReadableStream({
+        start(controller) {
+          signal.addEventListener('abort', () => {
+            if (closed) return;
+            close();
+            activity += 1;
+            controller.error(signal.reason);
+            reader.cancel(signal.reason).catch(() => {});
+          }, { once: true });
+        },
         async pull(controller) {
           try {
             const { done, value } = await reader.read();
+            if (closed) return;
+            activity += 1;
             if (done) {
               close();
               controller.close();
             } else controller.enqueue(value);
           } catch (error) {
+            if (closed) return;
             close();
             controller.error(error);
           }
@@ -152,29 +255,42 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       '../src/lib/writingAssets.mjs': { ASSET_EXTENSIONS },
       '../src/lib/writingDraft.mjs': { isDraftArticle },
       '../src/lib/writingSlug.mjs': { isArticleSlug },
+      // The script's waits: recorded, and slept on the run's clock only under deferWaits.
+      'node:timers/promises': {
+        setTimeout(delay) {
+          result.waits.push(delay);
+          if (!deferWaits) return Promise.resolve();
+          waiting += 1;
+          return new Promise((resolve) => addTimer(delay, () => {
+            waiting -= 1;
+            resolve();
+          }));
+        },
+      },
     };
     new vm.Script(code, { filename: script.pathname }).runInContext(vm.createContext({
       exports: {},
       Buffer,
-      ...(now === undefined ? {} : { Date: class extends Date { static now() { return now; } } }),
-      // Never fires: a request past its deadline is scripted as the error the real signal would raise.
-      AbortSignal: { timeout: (delay) => ({ timeout: delay }) },
+      AbortController,
+      DOMException,
+      Date: class extends Date { static now() { return clock.now; } },
+      // The script's watchdogs and deadline, on the run's clock.
       setTimeout(callback, delay) {
-        result.waits.push(delay);
-        if (!deferWaits) return callback();
-        waiting += 1;
-        // Like Node, a delay past the 32-bit limit, or no number at all, fires almost at once.
-        let turns = delay > 2 ** 31 - 1 || !Number.isFinite(delay) ? 1 : 20;
-        const tick = () => {
-          if (turns > 0) {
-            turns -= 1;
-            setImmediate(tick);
-            return;
-          }
-          waiting -= 1;
-          callback();
+        const id = addTimer(delay, callback);
+        return {
+          id,
+          // Like Node's, a timer still pending starts its wait again from now.
+          refresh() {
+            const timer = timers.get(id);
+            if (timer) timer.due = clock.now + nodeDelay(delay);
+            activity += 1;
+            return this;
+          },
         };
-        tick();
+      },
+      clearTimeout(handle) {
+        timers.delete(handle?.id);
+        activity += 1;
       },
       require(name) {
         assert.ok(Object.hasOwn(dependencies, name), `unmocked dependency: ${name}`);
@@ -182,10 +298,10 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       },
       process: {
         env,
-        exit(code) { result.exit = code; resolve(result); },
+        exit(code) { result.exit = code; finish(); },
       },
       console: {
-        log(line) { result.logged.push(line); resolve(result); },
+        log(line) { result.logged.push(line); finish(); },
         warn(line) { result.warnings.push(line); },
         error(error) { result.errors.push(error); },
       },
@@ -193,6 +309,8 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
         result.requests.push(url);
         result.headers.set(url, { ...init.headers });
         result.signals.push(init.signal);
+        result.sentAt.push(clock.now);
+        activity += 1;
         // A real request is answered later, never at once; the gap shows how many are open together.
         open += 1;
         result.peak = Math.max(result.peak, open);
@@ -200,11 +318,15 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
           result.sentWhileWaiting += 1;
           result.peakWhileWaiting = Math.max(result.peakWhileWaiting, open);
         }
-        await answeredLater(url);
         try {
-          return held(answer(url));
+          await unlessAborted(init.signal, answeredLater(url));
+          const reply = answer(url);
+          const response = typeof reply === 'function' ? await unlessAborted(init.signal, reply({ wait })) : reply;
+          activity += 1;
+          return held(response, init.signal);
         } catch (error) {
           open -= 1;
+          activity += 1;
           throw error;
         }
       },
@@ -214,7 +336,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       if (offline) throw networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com');
       const reply = scripted(url);
       if (reply instanceof Error) throw reply;
-      if (reply instanceof Response) return reply;
+      if (reply instanceof Response || typeof reply === 'function') return reply;
       if (reply) {
         result.refusals.push(refusal(reply[0], 'busy', reply[1]));
         return result.refusals.at(-1);
@@ -666,18 +788,41 @@ test('a request that fails on the way is retried with the server-error backoff, 
   assert.deepEqual(authenticated.waits, [1000]);
 });
 
-test('a request still unanswered or unread at its 30-second deadline is abandoned and sent again', async () => {
-  const beforeAnswer = await runSync({ ...LIVE }, { replies: { '/commits/': [timedOut()] } });
-  assert.equal(beforeAnswer.exit, undefined);
-  assert.deepEqual(beforeAnswer.waits, [1000]);
+const START = 1_800_000_000_000;
+/** When each request for `url` was sent, measured from the start of the run. */
+const sendsOf = (run, url) => run.requests.flatMap((sent, index) => (sent === url ? [run.sentAt[index] - START] : []));
 
-  const inBody = await runSync(
+test('a request that sends nothing for 30 seconds, before its answer or partway through its body, is given up on and sent again', async () => {
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
+  const unanswered = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [silence] } });
+  assert.equal(unanswered.exit, undefined);
+  assert.deepEqual(sendsOf(unanswered, lookup), [0, 31_000], 'given up on at 30 s, then sent again after the 1-second backoff');
+  assert.deepEqual(unanswered.warnings, [`Retry 1 of 3 in 1 s after TimeoutError: ${lookup}`]);
+  assert.equal(unanswered.signals[0].reason.message, 'Nothing arrived for 30 s');
+  assert.equal(unanswered.signals[1].aborted, false, 'the retry has a watchdog of its own');
+
+  const figure = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/chart.svg`;
+  const stalled = await runSync(
     { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
-    { replies: { 'chart.svg': [brokenBody(timedOut())] } },
+    { now: START, deferWaits: true, replies: { 'chart.svg': [trickle(['<svg>', 'pub'], 20_000, { stall: true })] } },
   );
-  assert.equal(inBody.exit, undefined);
-  assert.deepEqual(inBody.waits, [1000]);
-  assert.equal(inBody.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
+  assert.equal(stalled.exit, undefined);
+  assert.deepEqual(sendsOf(stalled, figure), [0, 71_000], 'its last bytes at 40 s, given up on 30 s later');
+  assert.equal(stalled.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>', 'downloaded again in full');
+  assert.equal(stalled.timersLeft, 0);
+});
+
+test('a download that keeps arriving is not given up on, however long it takes', async () => {
+  const parts = ['<svg>', 'slow', ' but', ' moving', '</svg>'];
+  const run = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': parts.join('') },
+    { now: START, deferWaits: true, replies: { 'chart.svg': [trickle(parts, 25_000, { after: 25_000 })] } },
+  );
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, [], 'never retried');
+  assert.equal(run.requests.filter((url) => url.includes('chart.svg')).length, 1);
+  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), parts.join(''));
+  assert.equal(run.endedAt - START, 150_000, 'its answer at 25 s, then a part every 25 s: five times the 30-second wait');
 });
 
 test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
@@ -690,7 +835,7 @@ test('a body cut off partway is downloaded again in full, so part of a file is n
   assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
 });
 
-test('every attempt has its own 30-second timeout, so a retry does not start on a spent one', async () => {
+test('every attempt has its own watchdog, so a retry does not start on a spent one, and each is cleared when its attempt ends', async () => {
   for (const env of [{}, { WRITING_GITHUB_TOKEN: 'tok' }]) {
     const run = await runSync(
       { ...LIVE, '001-live/assets/chart.svg': '<svg/>' },
@@ -699,8 +844,9 @@ test('every attempt has its own 30-second timeout, so a retry does not start on 
     assert.equal(run.exit, undefined);
     assert.equal(run.requests.length, 6, 'two lookups, the listing, the README, and the figure twice');
     assert.equal(run.signals.length, run.requests.length);
-    for (const signal of run.signals) assert.deepEqual(signal, { timeout: 30_000 });
+    for (const signal of run.signals) assert.equal(signal.aborted, false);
     assert.equal(new Set(run.signals).size, run.signals.length);
+    assert.equal(run.timersLeft, 0, 'a watchdog left set would hold the build open');
   }
 });
 
@@ -908,7 +1054,8 @@ test('a rate limit this sync fails on still holds every other request while its 
 
 test('a cooldown longer than a timer can hold still holds every other request while the sync fails on it', async () => {
   for (const retryAfter of ['2592000', 'Infinity']) {
-    const refusal = slowBody('busy', 10, { status: 429, headers: { 'retry-after': retryAfter } });
+    // Its body takes time on the run's clock, so an overflowed hold, ending after 1 ms, would end first.
+    const refusal = trickle(['bu', 'sy'], 1000, { status: 429, headers: { 'retry-after': retryAfter } });
     const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [refusal] } });
     assert.equal(run.exit, 1, retryAfter);
     assert.deepEqual(run.waits, [2 ** 31 - 1], `${retryAfter}: the hold is capped, not left to overflow to 1 ms`);
@@ -943,6 +1090,89 @@ test('eight downloads that each fail once still finish and give their slots on, 
   assert.equal(run.exit, undefined, 'a slot never given on would leave the sync pending until Node exits 0 with nothing printed');
   assert.equal(run.peak, 8);
   assertAllFigures(run);
+});
+
+const figures = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+/** Replies that give each of the first `count` figures `times` of `reply(its index)` before it is served. */
+const eachFigure = (count, times, reply) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`/f${index}.svg`, Array.from({ length: times }, () => reply(index))]));
+const refusedFor45 = () => [429, { 'retry-after': '45' }];
+
+test('a sync that rate limits hold past its 10-minute limit fails at the limit, says so, and leaves the last good sync in place', async () => {
+  // Each figure is refused three times for 45 s, so every eight take 135 s, and the fifth eight run past 600 s.
+  const run = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(40, 3, refusedFor45) });
+  assert.equal(run.exit, 1);
+  assert.equal(run.endedAt - START, 600_000, 'it stops at the limit, not when the hold it is in ends at 630 s');
+  assert.equal(run.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 33 of 41 files downloaded:',
+    "  - GitHub's rate limit refused 112 requests and held every request for 10 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+  ].join('\n'));
+  assert.deepEqual(run.operations, [], 'nothing is removed or written');
+
+  // Each eight are refused together for 40 to 47 s: holds that overlap count once, so every eight take 141 s.
+  const staggered = (index) => [429, { 'retry-after': String(40 + (index % 8)) }];
+  const authenticated = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, env: { WRITING_GITHUB_TOKEN: 'tok' }, replies: eachFigure(40, 3, staggered) });
+  assert.equal(authenticated.exit, 1);
+  assert.equal(authenticated.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 33 of 41 files downloaded:',
+    "  - GitHub's rate limit refused 104 requests and held every request for 10 min in all.",
+  ].join('\n'), 'a build with a token is not told to set one');
+});
+
+test('a sync that failed requests hold past its limit says how many retries they cost, beside any rate-limit hold', async () => {
+  // Each figure sends nothing three times: 30 s, 1 s, 30 s, 2 s, 30 s, 4 s, so every eight take 97 s.
+  const silent = await runSync({ ...LIVE, ...figures(56) }, { now: START, deferWaits: true, replies: eachFigure(56, 3, () => silence) });
+  assert.equal(silent.exit, 1);
+  assert.equal(silent.endedAt - START, 600_000);
+  assert.equal(silent.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 49 of 57 files downloaded:',
+    '  - Server errors and network failures cost 144 retries.',
+  ].join('\n'));
+  assert.deepEqual(silent.operations, []);
+
+  // Refused for 45 s, then silent for 30 s and a 2-second backoff: every eight take 77 s, and eight holds make 6 min.
+  const replies = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`/f${index}.svg`, [refusedFor45(), silence]]));
+  const mixed = await runSync({ ...LIVE, ...figures(64) }, { now: START, deferWaits: true, replies });
+  assert.equal(mixed.exit, 1);
+  assert.equal(mixed.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 57 of 65 files downloaded:',
+    "  - GitHub's rate limit refused 64 requests and held every request for 6 min in all. Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.",
+    '  - Server errors and network failures cost 56 retries.',
+  ].join('\n'));
+});
+
+test('a sync that slow answers alone hold past its limit says nothing was refused or retried, and where it was', async () => {
+  // Each figure arrives in seven parts 20 s apart, so every eight take 140 s.
+  const slowly = () => trickle(['<svg>', '1', '2', '3', '4', '5', '</svg>'], 20_000);
+  const assets = await runSync({ ...LIVE, ...FORTY_FIGURES }, { now: START, deferWaits: true, replies: eachFigure(40, 1, slowly) });
+  assert.equal(assets.exit, 1);
+  assert.equal(assets.endedAt - START, 600_000);
+  assert.equal(assets.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while downloading assets, with 33 of 41 files downloaded:',
+    '  - GitHub answered slowly: no request was refused or retried.',
+  ].join('\n'));
+  assert.deepEqual(assets.operations, []);
+
+  const lookup = await runSync({ ...LIVE }, { now: START, deferWaits: true, replies: { '/commits/': [trickle(Array.from({ length: 40 }, () => '0'), 20_000)] } });
+  assert.equal(lookup.exit, 1);
+  assert.equal(lookup.endedAt - START, 600_000);
+  assert.equal(lookup.errors[0].message, [
+    'The article sync stopped at its 10-minute limit while looking up the commit:',
+    '  - GitHub answered slowly: no request was refused or retried.',
+  ].join('\n'));
+  assert.equal(lookup.requests.length, 1);
+});
+
+test('a sync that finishes inside its limit, however long it was held, passes and leaves no timer running', async () => {
+  // Four eights of figures, each refused three times for 45 s: done at 540 s.
+  const held = await runSync({ ...LIVE, ...figures(32) }, { now: START, deferWaits: true, replies: eachFigure(32, 3, refusedFor45) });
+  assert.equal(held.exit, undefined);
+  assert.equal(held.endedAt - START, 540_000);
+  assert.equal(held.written.size, 33);
+  assert.equal(held.timersLeft, 0, 'a deadline left running would hold the build open for the rest of its 10 minutes');
+
+  const quick = await runSync({ ...LIVE });
+  assert.equal(quick.exit, undefined);
+  assert.equal(quick.timersLeft, 0);
 });
 
 test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {
