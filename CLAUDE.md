@@ -132,7 +132,9 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   matched by exact name as 1six.tech serves it, and its src is rebuilt from that name, fragment kept. A missing,
   miscased, hidden (`.name`), or non-image file fails the build and names the article, as does any image given by
   URL (`http(s)`, `//`, or `data:`), even one the CSP (`img-src 'self' blob: data:`) would allow; a miscased name
-  gets a "did you mean". A name differing only in Unicode normalization (NFD from Finder) is accepted.
+  gets a "did you mean". A name differing only in Unicode normalization (NFD from Finder) is accepted. A figure
+  marked cannot read (a path with a space outside `<…>`, an undefined `[label]`) fails too, instead of publishing
+  its Markdown text.
 
 ### Theme System
 

@@ -160,6 +160,7 @@ test('an image source names its file as the server reads it', () => {
     write(`public/writing-assets/${slug}/assets/q3 chart #1?.svg`, svg('width="70" height="90"'));
     write(`public/writing-assets/${slug}/assets/Shot.PNG`, 'an image type in capitals');
     write(`public/writing-assets/${slug}/assets/Chart.SVG`, svg('width="80" height="20"'));
+    write(`public/writing-assets/${slug}/assets/AT&T;chart.svg`, svg('width="5" height="6"'));
     write(
       `content/writing/${slug}/README.md`,
       `---\ntitle: Paths\ndate: 2026-11-08\n---\n\n` +
@@ -179,6 +180,11 @@ test('an image source names its file as the server reads it', () => {
           `![Trailing](/writing-assets/${SLUG}/top.svg/)`,
           '![Viewed](<assets/지연 차트.svg#svgView(viewBox(0,0,10,10))>)',
           `![Joined](../${SLUG}/assets/chart.svg#a&b)`,
+          // Not a real character reference, so a browser keeps "&T;" as written, and so does the lookup.
+          '![Literal](assets/AT&T;chart.svg)',
+          // Text in an alt or a fragment is not an attribute: the SVG is still sized, and still lazy.
+          '![Bar width=10px](<assets/지연 차트.svg#loading=eager>)',
+          '- ![Listed](<assets/지연 차트.svg>)\n- a list item',
         ].join('\n\n'),
     );
     const tags = imgTags(getArticle(slug).html);
@@ -199,7 +205,11 @@ test('an image source names its file as the server reads it', () => {
       Trailing: ['10', '20'],
       Viewed: ['30', '40'],
       Joined: ['760', '330'],
+      Literal: ['5', '6'],
+      'Bar width=10px': ['30', '40'],
+      Listed: ['30', '40'],
     });
+    assert.equal(attr(tags.find((tag) => attr(tag, 'alt') === 'Bar width=10px'), 'loading'), 'lazy');
     // The src names the file by its own name on disk, each segment encoded in full, whatever form the
     // source took: Next's static server matches only that form for a name such as R&D's chart.svg.
     const assets = `/writing-assets/${slug}/assets`;
@@ -223,6 +233,9 @@ test('an image source names its file as the server reads it', () => {
       // The query is dropped and the fragment kept: an SVG can show the view it names. Its "&" is escaped.
       Viewed: `${korean}#svgView(viewBox(0,0,10,10))`,
       Joined: `/writing-assets/${SLUG}/assets/chart.svg#a&amp;b`,
+      Literal: `${assets}/AT%26T%3Bchart.svg`,
+      'Bar width=10px': `${korean}#loading=eager`,
+      Listed: korean,
     });
   } finally {
     removeArticle(slug);
@@ -261,7 +274,7 @@ test('an image with no file under public/, or from a web address, fails the buil
       write(`content/writing/${slug}/README.md`, `---\ntitle: Broken\ndate: 2026-11-08\n---\n\nText.\n\n${markdown}\n`);
       assert.throws(
         () => getArticle(slug),
-        (error) => error.message.startsWith(`writing: ${slug} shows the image `) && error.message.includes(expected) && error.message.endsWith('; refusing to publish it.'),
+        (error) => error.message.startsWith(`writing: ${slug} `) && error.message.includes(expected) && error.message.endsWith('; refusing to publish it.'),
         label,
       );
     } finally {
@@ -283,10 +296,18 @@ test('an image with no file under public/, or from a web address, fails the buil
   fails(`![Figure](<${fixture}/100%.png>)`, 'but a "%" in its path starts no valid escape (write a literal % as %25)', 'a malformed escape');
   fails('![Figure](assets/%FF.svg)', '"assets/%FF.svg", but a "%" in its path starts no valid escape', 'an escape that is not UTF-8');
   fails(`![Figure](<${fixture}/assets/${'Café'.normalize('NFD')}.svg>)`, `did you mean public${fixture}/assets/${'café'.normalize('NFC')}.svg?`, 'case and normalization both differ');
-  // marked leaves these for the browser to decode into a name the check would not look up.
-  for (const [source, reference] of [['assets/a&#x20;b.svg', '&#x20;'], ['assets/a&nbsp;b.svg', '&nbsp;'], ['/&#47;example.com/x.png', '&#47;']]) {
+  // marked leaves numeric references for the browser to decode into a name the check would not look up.
+  for (const [source, reference] of [['assets/a&#x20;b.svg', '&#x20;'], ['/&#47;example.com/x.png', '&#47;']]) {
     fails(`![Figure](${source})`, `"${source}", which a browser reads as the character reference ${reference}: type the character itself, or write a literal & as %26`, reference);
   }
+  // A named one is looked up as written (a browser decodes only real names); a miss says what it may mean.
+  fails('![Figure](assets/a&nbsp;b.svg)', `"assets/a&nbsp;b.svg", but public/writing-assets/${slug}/assets/a&nbsp;b.svg is not a file (if &nbsp; is meant as a character, type the character itself)`, '&nbsp;');
+  // A figure marked cannot read would ship as its own Markdown text.
+  const unread = (markdown, quoted, label) =>
+    fails(markdown, `has a figure marked cannot read, "${quoted}" (put a path holding a space in <angle brackets>, and define a [label] it names)`, label);
+  unread('![Figure 3](assets/chart 2.svg)', '![Figure 3](assets/chart 2.svg)', 'a space outside angle brackets');
+  unread('![Figure 3][fig-3]\n\n[fig3]: assets/chart.svg', '![Figure 3][fig-3]', 'a label with no definition');
+  unread('> See ![Figure 3](assets/chart 2.svg) here.', '![Figure 3](assets/chart 2.svg) here.', 'inside a quote, after other text');
   for (const source of external) {
     fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be one of the site's own files`, source);
   }
@@ -299,12 +320,14 @@ test('an image with no file under public/, or from a web address, fails the buil
 
 test('a build error quotes an article with its control characters still encoded', () => {
   const slug = '002-control';
-  const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+  const controls = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/;
   const cases = [
     // Decoded raw, %0A would start a line the Actions log reads as a command, and %1B a terminal escape.
     ['Date: 2026-11-08\n\n![Figure](<assets/a%0A::error title=x::y%1B[2K.svg>)', '"assets/a%0A::error title=x::y%1B[2K.svg"'],
     // C1 controls (NEL, an 8-bit CSI) and the line separator, too.
     ['Date: 2026-11-08\n\n![Figure](<assets/a%C2%85b%C2%9B[2K%E2%80%A8.svg>)', '"assets/a%C2%85b%C2%9B[2K%E2%80%A8.svg"'],
+    // A bidi override, which could reorder what the rest of the line appears to say.
+    ['Date: 2026-11-08\n\n![Figure](<assets/a%E2%80%AEgvs.svg>)', '"assets/a%E2%80%AEgvs.svg"'],
     ['Date: 2026-11-08\u001b]0;title\u0007', 'needs a date like 2026-11-08, found "2026-11-08%1B]0;title%07"'],
   ];
   for (const [line, quoted] of cases) {

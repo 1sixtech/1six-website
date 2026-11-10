@@ -235,10 +235,13 @@ const EXCERPT_LENGTH = 160;
 /**
  * Article text for an error message, cut short. Control characters stay
  * encoded: printed raw, an article's %0A or %1B could forge a line (such as
- * an Actions "::error") or a terminal escape in the build log.
+ * an Actions "::error") or a terminal escape in the build log, and a bidi
+ * control (%E2%80%AE) could reorder what the line appears to say.
  */
 function excerpt(text: string): string {
-  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, encodeURIComponent).slice(0, EXCERPT_LENGTH);
+  return text
+    .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, encodeURIComponent)
+    .slice(0, EXCERPT_LENGTH);
 }
 
 /**
@@ -261,8 +264,11 @@ function readable(url: string): string {
 /** A stand-in origin, to resolve an image path the way a browser does. */
 const ARTICLE_ORIGIN = 'https://article.invalid';
 
-/** A character reference (&#x20;, &nbsp;) that marked leaves in an image source and a browser would decode. */
-const CHARACTER_REFERENCE = /&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i;
+/** A numeric character reference (&#x20;) that marked leaves in an image source and a browser would decode. */
+const NUMERIC_REFERENCE = /&#(?:[0-9]+|x[0-9a-f]+);?/i;
+
+/** What may be a named character reference (&nbsp;). A browser decodes only real names, so one is read as written. */
+const NAMED_REFERENCE = /&[a-z][a-z0-9]*;/i;
 
 /**
  * Directory listings under public/ for one getArticles() call: every page
@@ -355,9 +361,9 @@ function articleImage(slug: string, written: string, local: string): { file: str
       " from a web address; an article image must be one of the site's own files, normally in its article's folder (the site's content security policy blocks other sites)",
     );
   }
-  // A browser would decode it into a name the lookup would not search for, and a
-  // numeric one's "#" would start a fragment here and cut the path short.
-  const reference = written.match(CHARACTER_REFERENCE)?.[0];
+  // A browser would decode it into a name the lookup would not search for, and its
+  // "#" would start a fragment here and cut the path short.
+  const reference = written.match(NUMERIC_REFERENCE)?.[0];
   if (reference) {
     throw failure(
       `, which a browser reads as the character reference ${excerpt(reference)}: type the character itself, or write a literal & as %26`,
@@ -374,7 +380,13 @@ function articleImage(slug: string, written: string, local: string): { file: str
   const names = walkPublic(segments, sameName);
   if (!names) {
     const variant = walkPublic(segments, caseVariant);
-    const hint = variant ? ` (names are case-sensitive: did you mean public/${excerpt(variant.join('/'))}?)` : '';
+    // A real named reference (&nbsp;) names no file as written: the author meant the character.
+    const named = written.match(NAMED_REFERENCE)?.[0];
+    const hint = variant
+      ? ` (names are case-sensitive: did you mean public/${excerpt(variant.join('/'))}?)`
+      : named
+        ? ` (if ${excerpt(named)} is meant as a character, type the character itself)`
+        : '';
     throw failure(`, but ${shown} is not a file${hint}`);
   }
   const name = names[names.length - 1];
@@ -456,7 +468,19 @@ export function unsafeArticleHtml(html: string): string | null {
 }
 
 function renderBody(slug: string, body: string): { html: string; headings: WritingHeading[] } {
-  const parsed = markdown.parse(body) as string;
+  const tokens = markdown.lexer(body);
+  // marked keeps a figure it cannot read (a space outside <angle brackets>, a
+  // [label] with no definition) as text, which would ship as "![...](...)". An
+  // escaped "\![" or a code span is a separate token, and so is not matched.
+  markdown.walkTokens(tokens, (token) => {
+    if (token.type !== 'text' || ('tokens' in token && token.tokens) || ('escaped' in token && token.escaped)) return;
+    const start = token.raw.search(/!\[[^\]]*\][([]/);
+    if (start < 0) return;
+    throw new Error(
+      `writing: ${slug} has a figure marked cannot read, "${excerpt(token.raw.slice(start))}" (put a path holding a space in <angle brackets>, and define a [label] it names); refusing to publish it.`,
+    );
+  });
+  const parsed = markdown.parser(tokens) as string;
   const headings: WritingHeading[] = [];
   const used = new Set<string>();
 
@@ -489,9 +513,9 @@ function renderBody(slug: string, body: string): { html: string; headings: Writi
     // below jumps when it does; the SVG's own size reserves its box.
     // An author-given width or height stands: the SVG's own size would add a
     // second height (or width) attribute, and the first one would win.
-    const size = !/\b(?:width|height)=/.test(tag) ? svgSize(image.file) : null;
+    const size = !/\s(?:width|height)="/.test(tag) ? svgSize(image.file) : null;
     if (size) tag = tag.replace('<img', `<img width="${size.width}" height="${size.height}"`);
-    if (tag.includes('loading=')) return tag;
+    if (/\sloading="/.test(tag)) return tag;
     return tag.replace('<img', '<img loading="lazy" decoding="async"');
   });
   // A figure (an image alone in its paragraph) links to its own file, so a

@@ -15,14 +15,15 @@ hears nothing. Three changes close that gap:
 
 Apply them in this order:
 
-1. Merge the website pull request that adds the sync checks.
+1. Merge the website pull requests that add the sync checks and the figure check.
 2. Open a pull request in the article repository adding `validate.yml` and `.gitignore`, and replacing
    `publish.yml`.
 3. After `Validate articles` passes once on that pull request, make it required on `main`.
 4. Set the token in Vercel. This can happen at any point.
 
-Do steps 1 and 2 together. Until step 2 lands, a stray file in a published folder fails the website
-build and only the Vercel dashboard shows it.
+Do steps 1 and 2 together. Until step 2 lands, a stray file in a published folder, or a figure with a
+mistyped path, fails every website build, website-code deploys included, and only the Vercel dashboard
+shows it. A figure path that used to ship as a broken image now stops the build.
 
 ## 1. Required check: `Validate articles`
 
@@ -95,6 +96,8 @@ What to expect:
   the website's `public/`, fails the check, and so does an `http(s)` image, even one on 1six.tech: an article
   image must be a file the site holds. Names must match exactly, including case. Only a difference in how
   Unicode composes a name, which cannot be seen (as when a Korean name is copied from Finder), is accepted.
+  A figure Markdown cannot read at all (a path with a space outside `<angle brackets>`, a `[label]` with no
+  definition) fails too, instead of publishing as its own Markdown text.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
 
