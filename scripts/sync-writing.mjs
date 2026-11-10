@@ -81,12 +81,15 @@ const waitingForSlot = [];
 // asking while it is limited.
 let resumeAt = 0;
 let resumed = Promise.resolve();
+// Node fires a timer set for longer than this (about 24.8 days) after 1 ms instead.
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 function pauseRequests(delay) {
-  const until = Date.now() + delay;
+  const wait = Math.min(delay, MAX_TIMER_MS);
+  const until = Date.now() + wait;
   if (until <= resumeAt) return;
   resumeAt = until;
-  resumed = new Promise((resolve) => setTimeout(resolve, delay));
+  resumed = new Promise((resolve) => setTimeout(resolve, wait));
 }
 
 /** Runs `task` once fewer than MAX_CONCURRENT_FETCHES tasks hold a slot. */

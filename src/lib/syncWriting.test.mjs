@@ -161,7 +161,8 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
         result.waits.push(delay);
         if (!deferWaits) return callback();
         waiting += 1;
-        let turns = 20;
+        // Like Node, a delay past the 32-bit limit, or no number at all, fires almost at once.
+        let turns = delay > 2 ** 31 - 1 || !Number.isFinite(delay) ? 1 : 20;
         const tick = () => {
           if (turns > 0) {
             turns -= 1;
@@ -901,6 +902,16 @@ test('a rate limit this sync fails on still holds every other request while its 
   assert.equal(run.errors[0].message, 'Failed to download 001-live/assets/f0.svg: 429 Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.');
   assert.equal(run.requests.includes(figureAt('f8.svg')), false, 'no queued file starts during the cooldown GitHub named');
   assert.equal(run.sentWhileWaiting, 0);
+});
+
+test('a cooldown longer than a timer can hold still holds every other request while the sync fails on it', async () => {
+  for (const retryAfter of ['2592000', 'Infinity']) {
+    const refusal = slowBody('busy', 10, { status: 429, headers: { 'retry-after': retryAfter } });
+    const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [refusal] } });
+    assert.equal(run.exit, 1, retryAfter);
+    assert.deepEqual(run.waits, [2 ** 31 - 1], `${retryAfter}: the hold is capped, not left to overflow to 1 ms`);
+    assert.equal(run.requests.includes(figureAt('f8.svg')), false, `${retryAfter}: no queued file starts`);
+  }
 });
 
 test('a rate limit that lands just as a queued request takes its slot still holds that request', async () => {
