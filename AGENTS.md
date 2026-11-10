@@ -70,7 +70,7 @@ src/
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
-    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
+    site.ts                   # CONTACT_EMAIL, COPYRIGHT, ICON_VERSION, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     writingAssets.mjs         # Article image types, shared by the site and the sync script
@@ -86,8 +86,10 @@ content/writing/              # Downloaded article Markdown (gitignored)
 public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
   writing-assets/             # Downloaded article assets (gitignored)
+  favicon.svg                 # Favicon source: the 16 mark, black on a rounded #FF3700 square
 scripts/sync-writing.mjs       # Sync from 1sixtech/1six-researchs
 scripts/bake-mosaic-atlases.mjs # Cell-sized glyph sheets from the 16 MP exports
+scripts/make-icons.mjs        # favicon.png and apple-icon.png from public/favicon.svg
 vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
 
@@ -285,8 +287,12 @@ redirects. Unknown article and author slugs return 404.
 Home anchors: `/#products`, `/#origins`, `/#investors`, `/#contact`.
 Thesis anchors: `/thesis#thesis`, `/thesis#products`. The header and footer Thesis links, pressed on Thesis, go to Hero and drop any hash.
 
-SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
-and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
+SEO: every page's tab title is `1six` (the root layout's; pages set none), while Open Graph cards keep
+per-page titles. With one title, screen readers name no page on navigation (accepted, see PRODUCT.md).
+Icon URLs carry `?v=ICON_VERSION`: after `scripts/make-icons.mjs` writes new icons, bump it in `site.ts`
+and record the files' SHA-256 in `ICON_DIGESTS` (`src/app/icons.test.mjs`). `/favicon.svg` gets a
+sandboxed CSP. Each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing,
+articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
 
 ## Deployment
 
