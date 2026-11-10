@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { getArticle } from './writing.ts';
+import { ASSET_EXTENSIONS } from './writingAssets.mjs';
 import { isDraftArticle } from './writingDraft.mjs';
 import { isArticleSlug } from './writingSlug.mjs';
 
@@ -57,6 +58,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
           result.written.set(target, bytes.toString('utf8'));
         },
       },
+      '../src/lib/writingAssets.mjs': { ASSET_EXTENSIONS },
       '../src/lib/writingDraft.mjs': { isDraftArticle },
       '../src/lib/writingSlug.mjs': { isArticleSlug },
     };
