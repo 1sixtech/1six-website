@@ -171,7 +171,7 @@ The full contract and its checks are in [page entry](PAGE_ENTRY.md).
 | LOAD-4 | Stall or fail fonts and media | Entry releases at its deadline | All | P0 | #11 |
 | LOAD-5 | Turn on reduced motion | No loader, no pin, no capture, Thesis stacks its pages | All | P0 | #6 |
 | LOAD-6 | Turn on Save-Data | No optional downloads | All | P1 | #11 |
-| LOAD-7 | First visit to About, then Thesis, Writing, an article, and About by client navigation. In a new session, open Writing, go to Thesis, and press Back while its logo shows | One `.intro-overlay` in the page after every step | All | P0 | PageEntry sibling keys: old overlays stayed in the page |
+| LOAD-7 | First visit to About, then Thesis, Writing, an article, and About by client navigation | One `.intro-overlay` in the page after every step | All | P0 | PageEntry sibling keys: old overlays stayed in the page |
 
 ## 8. Thesis art
 
