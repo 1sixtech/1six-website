@@ -46,8 +46,9 @@ const RESET_MARGIN_MS = 1000;
 // so one abandoned at the deadline is safe to send again. Eight files at the 5 MB cap, arriving
 // together, need about 11 Mbit/s between them to finish in time.
 const REQUEST_TIMEOUT_MS = 30_000;
-// GitHub allows 100 concurrent REST requests, and a token build reads every file there.
-const MAX_OPEN_REQUESTS = 8;
+// GitHub allows 100 concurrent REST requests, and a token build reads every file there. A fetch keeps
+// its slot through its retries and waits, so this bounds open requests too.
+const MAX_CONCURRENT_FETCHES = 8;
 // A GitHub token is printable ASCII, so a space or any other character inside one means a bad
 // copy. For a line break, fetch would also quote the whole header, token included, in its error.
 const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
@@ -72,7 +73,7 @@ function retryDelay(response, retriesUsed) {
   return MAX_RETRY_WAIT_MS;
 }
 
-let openRequests = 0;
+let runningFetches = 0;
 const waitingForSlot = [];
 
 // A rate limit holds every request, not only the one refused: GitHub may ban a client that keeps
@@ -95,9 +96,9 @@ async function pauseOver() {
   }
 }
 
-/** Runs `task` once fewer than MAX_OPEN_REQUESTS tasks hold a slot. */
+/** Runs `task` once fewer than MAX_CONCURRENT_FETCHES tasks hold a slot. */
 async function inSlot(task) {
-  if (openRequests < MAX_OPEN_REQUESTS) openRequests += 1;
+  if (runningFetches < MAX_CONCURRENT_FETCHES) runningFetches += 1;
   else await new Promise((resolve) => waitingForSlot.push(resolve));
   try {
     return await task();
@@ -105,7 +106,7 @@ async function inSlot(task) {
     // Hand the slot straight to the next task, or give it back.
     const next = waitingForSlot.shift();
     if (next) next();
-    else openRequests -= 1;
+    else runningFetches -= 1;
   }
 }
 

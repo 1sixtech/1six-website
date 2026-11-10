@@ -856,6 +856,14 @@ test('a longer rate limit that arrives during a shorter one holds every request 
   assertAllFigures(run);
 });
 
+test('a request whose own backoff ends during a rate limit waits the limit out before it retries', async () => {
+  const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[503]], '/f1.svg': [[429, { 'retry-after': '30' }]] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [1000, 30_000]);
+  assert.equal(run.sentWhileWaiting, 0, 'the server error\'s retry is held by the pause too');
+  assertAllFigures(run);
+});
+
 test('a shorter rate limit does not cut short a longer one already running', async () => {
   const run = await runSync({ ...LIVE, ...TWENTY_FIGURES }, { deferWaits: true, replies: { '/f0.svg': [[429, { 'retry-after': '30' }]], '/f1.svg': [[429, { 'retry-after': '5' }]] } });
   assert.equal(run.exit, undefined);
