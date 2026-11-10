@@ -171,7 +171,7 @@ test('a link to anything but the web, mail, a #fragment or a relative path keeps
   for (const words of ['the dataset', 'a ref', 'tabbed', 'coded', 'named', 'upper']) {
     assert.match(html, new RegExp(`[\\s,(]${words}[,.)\\s]`), `"${words}" stays as text`);
   }
-  for (const href of ['https://example.com/web', 'mailto:contact@1six.tech', '#results', './notes.md']) {
+  for (const href of ['https://example.com/web', 'mailto:contact@1six.tech', '#results', `/writing-assets/${SLUG}/notes.md`]) {
     assert.ok(hrefs.includes(href), `${href} keeps its link`);
   }
 });
@@ -446,4 +446,39 @@ test('only the date line of an article can mark it as a draft', () => {
     '---\ntitle: T\ndate: 2026-11-01\n---\n\nDate: 2026-12-01 (draft)\n\nBody',
     '---\r\ntitle: T\r\ndate: 2026-11-01\r\n---\r\n\r\nBody\r\n\r\nDate: 2026-12-01 (draft)\r\n',
   ]) assert.equal(isDraftArticle(markdown), false, markdown);
+});
+
+test('a relative link leads where it leads on GitHub: an article to its page, any other file to its synced copy', () => {
+  const slug = '006-links';
+  const cases = [
+    // The exact link at the end of article 002.
+    ['../001-hyperliquid-data-feed-latency/README.md', '/writing/001-hyperliquid-data-feed-latency'],
+    ['../001-fixture/README.md#results', '/writing/001-fixture#results'],
+    ['../001-fixture/', '/writing/001-fixture'],
+    ['../001-fixture', '/writing/001-fixture'],
+    ['README.md#part-two', `/writing/${slug}#part-two`],
+    ['./README.md', `/writing/${slug}`],
+    ['../README.md', '/writing'],
+    ['assets/data.csv', `/writing-assets/${slug}/assets/data.csv`],
+    ['./assets/data.csv?v=2#row-3', `/writing-assets/${slug}/assets/data.csv?v=2#row-3`],
+    ['../001-fixture/assets/chart.svg', '/writing-assets/001-fixture/assets/chart.svg'],
+    // Already right, or nothing on the site to lead to.
+    ['https://example.com/a/README.md', 'https://example.com/a/README.md'],
+    ['mailto:contact@1six.tech', 'mailto:contact@1six.tech'],
+    ['#results', '#results'],
+    ['/writing/001-fixture', '/writing/001-fixture'],
+    ['//example.com/x', '//example.com/x'],
+    ['../../outside/README.md', '../../outside/README.md'],
+    ['../LICENSE', '../LICENSE'],
+  ];
+  const body = cases.map(([href], index) => `- [link ${index}](${href})`).join('\n');
+  try {
+    write(`content/writing/${slug}/README.md`, `---\ntitle: Links\nauthor: Tester\ndate: 2026-02-02\n---\n\n${body}\n`);
+    const { html } = getArticle(slug);
+    const hrefs = Array.from(html.matchAll(/<a\b[^>]*\shref="([^"]*)"/g), ([, href]) => href);
+    assert.deepEqual(hrefs, cases.map(([, expected]) => expected));
+    assert.equal(unsafeArticleHtml(html), null);
+  } finally {
+    rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
+  }
 });
