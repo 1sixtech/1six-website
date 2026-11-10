@@ -45,8 +45,10 @@ activation and reduced motion move immediately, while pointer activation can gli
 ## One section per screen
 
 The owner asked for one section per screen on phones and desktop (2026-11-09). Each
-band is `100lvh` tall with its content centered, and the root snaps to it, so a flick
-moves exactly one section. The mark and statement share the first screen on a phone.
+band is `100lvh` tall and the root snaps to it, so a flick moves exactly one section.
+Desktop centres a band's content; on a phone the sections after the statement start
+from the top (see Section heads below). The mark and statement share the first screen
+on a phone.
 
 - Padding keeps content clear of the header and of Safari's toolbar (`100lvh - 100svh`).
   Safari also draws the page behind its floating toolbar below the large viewport, so
@@ -70,15 +72,21 @@ and closing line (1.17×, same ink), and 0.67× the 42px product name. It sat 20
 its rule and 20px above the first entry, while list rows were 33px apart, so it read as
 the first row. Centring also moved it between 214px and 338px down each screen.
 
-- The heading is 34px/1.1, at least 1.4× any entry under it and a weight above.
+- The heading is 34px/1.1: 1.4× the 24px backer names and closing line and a weight
+  above them. The larger product name (42px, red) and email (regular, underlined)
+  differ from it in color, weight or underline rather than size.
 - Space ties it to its rule and sets it off from the content: 12px under the rule,
   36px to the first entry. The statement keeps its 20px lead step.
-- Sections other than the statement start from the top, `header + clamp(32px, 12svh, 112px)`,
-  so the rule lands at the same height on every screen (y155 at 844, y134 at 667).
-  Every section still fits its screen wherever snapping applies (375 × 667 to 430 × 932);
-  at 320 × 568 snapping is off and Backers scrolls.
+- Sections other than the statement start from the top, at
+  `header + clamp(16px, 24svh - 128px, 112px)`, so the rule lands at the same height on
+  every screen of a phone: y80 at 640, y86 at 667, y97 at 714, y129 at 844, y150 at 932.
+  The offset shrinks with the screen because Backers is tallest at 320px wide and below
+  (529px, its role lines wrap). Every section fits one screen wherever snapping applies,
+  checked at 280 × 653, 300–360 × 640, 320 × 700, 375 × 667, 390 × 714/844 and 430 × 932.
+  At 320 × 568 snapping is off and Backers scrolls, as before.
 - The product name carries the logo red, which separates it from the black heading
-  by color as well as size. Hover underlines the name instead of recoloring it.
+  by color as well as size. Hover and press underline the name instead of recoloring
+  or fading it, so it never drops below the large-text minimum.
 - List hairlines are `--color-text` at 16% (about 1.46:1 on light), still far
   below the section rule.
 

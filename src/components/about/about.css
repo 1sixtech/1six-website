@@ -335,7 +335,13 @@
   outline-offset: 6px;
 }
 
-.crossing-product__name:active,
+/* Press feedback where hover does not exist. The name is red large text at
+   3.2:1, so it underlines instead of fading below the large-text minimum. */
+.crossing-product__name:active > span:first-child {
+  text-decoration-color: currentColor;
+  transition-duration: 0ms;
+}
+
 .crossing-product__visit:active {
   opacity: 0.6;
 }
@@ -828,10 +834,12 @@
 
   /* Every section's rule and title land at the same height on its screen,
      so the title is a landmark rather than wherever centring puts it. The
-     offset shrinks on short screens, where each section still fits. */
+     offset tracks the screen's height: 26px on a 640px screen, the shortest
+     that snaps, where Backers is tallest (529px at 320px wide, its role lines
+     wrapped) and still fits; 75px at 844px; 112px from 1000px. */
   .crossing-band:not(.crossing-band--statement) {
     justify-content: flex-start;
-    padding-top: calc(var(--crossing-header) + clamp(32px, 12svh, 112px));
+    padding-top: calc(var(--crossing-header) + clamp(16px, 24svh - 128px, 112px));
   }
 
   /* Rows stay a tier below the section rule, but read outdoors. */
@@ -899,9 +907,9 @@
     letter-spacing: -0.03em;
   }
 
-  /* A title outranks every entry under it: 1.4x the 24px backer names and
-     closing line, a weight above them, and set apart in color from the red
-     product name. */
+  /* A title stands apart from what follows: 1.4x the 24px backer names and
+     closing line and a weight above them; the larger product name and email
+     differ from it in color, weight or underline instead. */
   .crossing-heading {
     font-size: 34px;
     line-height: 1.1;
