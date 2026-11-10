@@ -18,12 +18,11 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: WriterPageProps): Promise<Metadata> {
   const { slug } = await params;
   const writer = getWriter(slug);
-  if (!writer) return { title: 'Writer not found' };
+  if (!writer) return {};
   const url = `https://1six.tech/writing/authors/${writer.slug}`;
   const credentials = `${writer.credentials.join('. ')}.`;
   const socialDescription = writer.bio || credentials;
   return {
-    title: `${writer.name} — Writing`,
     description: writer.bio ? `${writer.bio} ${credentials}` : credentials,
     alternates: { canonical: url },
     openGraph: { title: `${writer.name} | 1SIX`, description: socialDescription, url, type: 'profile' },

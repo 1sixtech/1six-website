@@ -22,7 +22,7 @@ web
 ## Operating Context
 
 - The site supports fundraising conversations; it is not a sales funnel. Investors usually arrive through warm intros and decks, then use the site to check the story and the people.
-- The November 2026 website brief authorizes a product introduction for predict.everywhere.trade: "An esports-focused prediction market", the provided https://predict.everywhere.trade link, and "More Coming Soon". The final logo has not been supplied, so the name appears as text. The provided domain did not resolve during release verification; do not claim the product is live or substitute an unconfirmed URL.
+- The November 2026 website brief authorizes a product introduction for predict.everywhere.trade: "An esports-focused prediction market", the provided https://predict.everywhere.trade link, and "More Coming Soon". Its desktop label reads "01 / prediction market" (owner, 2026-11-10; formerly "01 / esports"). The final logo has not been supplied, so the name appears as text. The provided domain did not resolve during release verification; do not claim the product is live or substitute an unconfirmed URL.
 - "powered by Lighter" is withheld at the owner's request. The entire Partnerships section is also withheld pending confirmation (2026-11-09).
 
 ## Capabilities and Constraints
@@ -39,7 +39,8 @@ web
 
 ## Brand Commitments
 
-- Name: 1SIX (wordmark and titles), written "1six" in lowercase body copy; lowercase manifesto voice.
+- Name: 1SIX in the wordmark and social-card titles, written "1six" in lowercase body copy; lowercase manifesto voice. Every page's browser tab title is "1six" (owner, 2026-11-10).
+- Favicon: the 16 mark in black on a slightly rounded #FF3700 square (owner, 2026-11-10). `public/favicon.svg` is the source; `scripts/make-icons.mjs` renders the PNGs, and the iOS home-screen icon is the same square full-bleed. Icon URLs carry a version so browsers and search engines fetch a changed icon.
 - The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction; Henry P.'s profile by the owner (2026-11-09).
 - Accent #FF3700, the logo's red, on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes. It is the site's only red, at every text size and in both themes (owner, 2026-11-10); the darker small-text red is retired.
 - ASCII-mosaic WebGL imagery (desert, graph, "16" symbol, world map) is the visual signature.
@@ -64,4 +65,5 @@ web
 ## Accessibility & Inclusion
 
 - WCAG 2.2 AA for text contrast and keyboard access; motion must have a reduced-motion equivalent that still shows all content.
+- Accepted exception (owner, 2026-11-10): every tab title is "1six", knowing it falls short of WCAG 2.4.2 (Page Titled). Screen readers name no page on load or on navigation (Next announces a route change only when the title changes), and search results, bookmarks and history do not tell pages apart by title. A route announcer and per-page titles ("thesis · 1six") were offered and declined.
 - Accepted exception (owner, 2026-11-10): because the site uses one red, red text below 24px (19px bold) is 3.2:1 on the light ground and 3.8:1 on the dark card, under AA's 4.5:1 for small text; on the dark ground it passes at 4.7:1. Small red text at rest is limited to the Writing category label, the current page in the phone menu, the desktop 16% count beside the mark, the "16%" figure in About's opening paragraph, the red key words in the mobile Thesis slides' 18px text, and the outlined buttons on the 404 ("back to home") and error ("try again") pages; elsewhere red marks hover and press states. Do not add more small red text at rest.

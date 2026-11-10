@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
 import { PageEntry } from '@/components/intro/PageEntry';
+import { ICON_VERSION } from '@/lib/site';
 import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
 /**
@@ -30,10 +31,9 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL('https://1six.tech'),
 
-  title: {
-    template: '%s | 1SIX',
-    default: '1SIX - Internet-native finance for the next 84%',
-  },
+  // Every page shares this tab title (owner, 2026-11-10); pages set no title of
+  // their own. Open Graph cards keep their own titles below and in each page.
+  title: '1six',
 
   description:
     'The next wave of global finance — built on behavior, not hope.',
@@ -95,9 +95,13 @@ export const metadata: Metadata = {
     canonical: 'https://1six.tech',
   },
 
+  // favicon.svg is the source; scripts/make-icons.mjs renders the PNGs from it.
   icons: {
-    icon: '/favicon.png',
-    apple: '/apple-icon.png',
+    icon: [
+      { url: `/favicon.svg?v=${ICON_VERSION}`, type: 'image/svg+xml', sizes: 'any' },
+      { url: `/favicon.png?v=${ICON_VERSION}`, type: 'image/png', sizes: '192x192' },
+    ],
+    apple: `/apple-icon.png?v=${ICON_VERSION}`,
   },
 };
 
@@ -106,7 +110,7 @@ const organizationJsonLd = {
   '@type': 'Organization',
   name: '1SIX Technologies',
   url: 'https://1six.tech',
-  logo: 'https://1six.tech/favicon.png',
+  logo: `https://1six.tech/favicon.png?v=${ICON_VERSION}`,
   description:
     'The next wave of global finance — built on behavior, not hope.',
   sameAs: [
