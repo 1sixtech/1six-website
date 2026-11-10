@@ -75,20 +75,28 @@ the first row. Centring also moved it between 214px and 338px down each screen.
 - The heading is 34px/1.1: 1.4× the 24px backer names and closing line and a weight
   above them. The larger product name (42px, red) and email (regular, underlined)
   differ from it in color, weight or underline rather than size.
-- Space ties it to its rule and sets it off from the content: 12px under the rule,
-  36px to the first entry. The statement keeps its 20px lead step.
+- The rule sits under the title, on phones and desktop (owner, 2026-11-10). A section
+  has a screen of its own, so a rule above the title separated nothing; under it, the
+  rule divides the title from its content. The title sits 14px above its rule (16px on
+  desktop) and the first entry 32px below it (40px on desktop), so the rule reads as the
+  title's own line. The statement keeps its lead step (20px, 32px on desktop). Desktop's
+  16 + 40 keeps each section as tall as it was with the rule above (24 + 32), so the
+  tablet range still fits: one-column Backers at 1023 × 760 has 2px to spare.
 - Sections other than the statement start from the top, at
-  `header + clamp(16px, 24svh - 128px, 112px)`, so the rule lands at the same height on
+  `header + clamp(16px, 24svh - 128px, 112px)`, so the title lands at the same height on
   every screen of a phone: y80 at 640, y86 at 667, y97 at 714, y129 at 844, y150 at 932.
   The offset shrinks with the screen because Backers is tallest at 320px wide and below
-  (529px, its role lines wrap). Every section fits one screen wherever snapping applies,
-  checked at 280 × 653, 300–360 × 640, 320 × 700, 375 × 667, 390 × 714/844 and 430 × 932.
+  (527px, its role lines wrap). Every section fits one screen wherever snapping applies,
+  checked at 280 × 653, 300–340 × 640, 320 × 700, 375 × 667, 390 × 714/844 and 430 × 932.
   At 320 × 568 snapping is off and Backers scrolls, as before.
 - The product name carries the logo red, which separates it from the black heading
   by color as well as size. Hover and press underline the name instead of recoloring
   or fading it, so it never drops below the large-text minimum.
 - List hairlines are `--color-text` at 16% (about 1.46:1 on light), still far
   below the section rule.
+- On desktop's light theme the 16 above its fill level is drawn at 0.4: 0.26 lost the
+  16 (1.6:1 against the ground), and 0.5 made the unfilled share too close to the
+  filled one (owner, 2026-11-10).
 
 Independent design review and detector/browser evidence ran in isolation again. The
 design review scored 23/32 before the change, with grouping and visual hierarchy as
