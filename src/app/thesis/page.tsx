@@ -8,7 +8,6 @@ import { ScrollRevealWrapper } from '@/components/ui/ScrollRevealWrapper';
 import { ScrollToTop } from '@/components/ui/ScrollToTop';
 
 export const metadata: Metadata = {
-  title: 'Thesis',
   description: 'From experiment to everyday, everywhere. Internet-native finance for the next 84%.',
   alternates: { canonical: 'https://1six.tech/thesis' },
   openGraph: {

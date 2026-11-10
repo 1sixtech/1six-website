@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { ICON_VERSION } from '@/lib/site';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -11,7 +12,7 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#FF3700',
     icons: [
       {
-        src: '/favicon.png',
+        src: `/favicon.png?v=${ICON_VERSION}`,
         sizes: '192x192',
         type: 'image/png',
       },

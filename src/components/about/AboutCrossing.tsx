@@ -91,7 +91,7 @@ export function AboutCrossing() {
               <div className="crossing-band__body">
                 <h2 id="products-title" className="crossing-heading">products.</h2>
                 <div className="crossing-product">
-                  <p className="crossing-tag crossing-product__tag">01 / esports</p>
+                  <p className="crossing-tag crossing-product__tag">01 / prediction market</p>
                   <a className="crossing-product__name" href="https://predict.everywhere.trade">
                     <span>predict.</span><span>everywhere.trade</span>
                   </a>

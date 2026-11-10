@@ -70,7 +70,7 @@ src/
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
-    site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
+    site.ts                   # CONTACT_EMAIL, COPYRIGHT, ICON_VERSION, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     writingAssets.mjs         # Article image types, shared by the site and the sync script
@@ -86,8 +86,10 @@ content/writing/              # Downloaded article Markdown (gitignored)
 public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
   writing-assets/             # Downloaded article assets (gitignored)
+  favicon.svg                 # Favicon source: the 16 mark, black on a rounded #FF3700 square
 scripts/sync-writing.mjs       # Sync from 1sixtech/1six-researchs
 scripts/bake-mosaic-atlases.mjs # Cell-sized glyph sheets from the 16 MP exports
+scripts/make-icons.mjs        # favicon.png and apple-icon.png from public/favicon.svg
 vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
 
@@ -288,8 +290,12 @@ redirects. Unknown article and author slugs return 404.
 Home anchors: `/#products`, `/#origins`, `/#investors`, `/#contact`.
 Thesis anchors: `/thesis#thesis`, `/thesis#products`. The header and footer Thesis links, pressed on Thesis, go to Hero and drop any hash.
 
-SEO: each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing, articles,
-and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
+SEO: every page's tab title is `1six` (the root layout's; pages set none), while Open Graph cards keep
+per-page titles. With one title, screen readers name no page on navigation (accepted, see PRODUCT.md).
+Icon URLs carry `?v=ICON_VERSION`: after `scripts/make-icons.mjs` writes new icons, bump it in `site.ts`
+and record the files' SHA-256 in `ICON_DIGESTS` (`src/app/icons.test.mjs`). `/favicon.svg` gets a
+sandboxed CSP. Each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing,
+articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
 
 ## Deployment
 
@@ -299,7 +305,8 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
   stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
-  writer profile output, and actual crossing, intro, mobile capture, and header navigation effects
+  writer profile output, page metadata and the shared tab title, the icons against `favicon.svg` and
+  their pinned digests, and actual crossing, intro, mobile capture, and header navigation effects
   with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
@@ -315,7 +322,7 @@ and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metad
 | @gsap/react | ^2.1.2 | GSAP React integration (useGSAP) |
 | use-scramble | ^2.2.15 | Character scramble text effects |
 | tailwindcss | ^4.0.0 | Utility-first CSS (v4 with @theme) |
-| sharp | ^0.35.3 | Image optimization |
+| sharp | ^0.35.3 | Image optimization; renders the glyph sheets and PNG icons in `scripts/` |
 | marked | ^18.1.2 | Article Markdown parsing with a constrained renderer |
 | swiper | ^12.1.3 | Mobile thesis slides |
 

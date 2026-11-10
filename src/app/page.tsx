@@ -18,7 +18,6 @@ const DESCRIPTION = `We don't dream. We build. Meet 1SIX, the team building inte
 const APOSTROPHE_SLICE = '/fonts/pretendard-1.3.9/PretendardVariable.subset.71.woff2';
 
 export const metadata: Metadata = {
-  title: { absolute: '1SIX — we don’t dream. we build.' },
   description:
     DESCRIPTION,
   openGraph: {

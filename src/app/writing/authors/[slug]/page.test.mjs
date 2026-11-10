@@ -59,7 +59,9 @@ const credentialsOf = (tree) => (
 
 test('writer metadata: without a bio, the credentials alone describe the page and its social cards', async () => {
   const metadata = await loadPage().generateMetadata(params('no-bio'));
-  assert.equal(metadata.title, 'No Bio — Writing');
+  // No title of its own: the root layout's "1six" is every page's tab title.
+  assert.equal(Object.hasOwn(metadata, 'title'), false);
+  assert.equal(metadata.openGraph.title, 'No Bio | 1SIX');
   assert.equal(metadata.description, 'Only credential.');
   assert.equal(metadata.openGraph.description, 'Only credential.');
   assert.equal(metadata.twitter.description, 'Only credential.');
@@ -93,6 +95,7 @@ test('writer profile: a writer without a bio still lists only their own articles
 
 test('writer page: an unknown slug is not found before any writer field is read', async () => {
   const page = loadPage();
-  assert.equal((await page.generateMetadata(params('../no-bio'))).title, 'Writer not found');
+  // Empty, so the root layout's title and description apply (the object comes from the vm's realm).
+  assert.deepEqual(Object.keys(await page.generateMetadata(params('../no-bio'))), []);
   await assert.rejects(page.default(params('../no-bio')), NOT_FOUND);
 });
