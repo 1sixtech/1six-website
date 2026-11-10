@@ -3,9 +3,9 @@ import path from 'node:path';
 import { Marked } from 'marked';
 import { getWriterByName, isWritingCategory, type WritingCategory } from './writingCatalog.ts';
 import { isDraftArticle } from './writingDraft.mjs';
+import { isArticleSlug } from './writingSlug.mjs';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content/writing');
-const SLUG = /^[0-9]{3}-[a-z0-9-]+$/;
 
 export type WritingHeading = {
   id: string;
@@ -387,7 +387,7 @@ export function getArticles(): WritingArticle[] {
     throw new Error('Missing content/writing. Run node scripts/sync-writing.mjs before building.');
   }
   const slugs = readdirSync(CONTENT_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && SLUG.test(entry.name))
+    .filter((entry) => entry.isDirectory() && isArticleSlug(entry.name))
     .map((entry) => entry.name)
     .filter((slug) => existsSync(path.join(CONTENT_DIR, slug, 'README.md')));
   const articles = slugs.map(loadArticle).filter((article) => article !== null);
@@ -398,6 +398,6 @@ export function getArticles(): WritingArticle[] {
 }
 
 export function getArticle(slug: string): WritingArticle | null {
-  if (!SLUG.test(slug)) return null;
+  if (!isArticleSlug(slug)) return null;
   return getArticles().find((article) => article.slug === slug) ?? null;
 }
