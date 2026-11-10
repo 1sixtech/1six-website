@@ -25,6 +25,7 @@ write('outside.svg', svg('width="1234" height="5678"'));
 mkdirSync(path.join(root, `public/writing-assets/${SLUG}/assets/folder.svg`), { recursive: true });
 // Files under public/ that no page can show as an article image.
 write(`public/writing-assets/${SLUG}/assets/.hidden.svg`, svg('width="1" height="1"'));
+write(`public/writing-assets/${SLUG}/assets/a\\b.svg`, svg('width="1" height="1"'));
 write('public/clip.mp4', 'not an image');
 write(
   `content/writing/${SLUG}/README.md`,
@@ -155,6 +156,7 @@ test('an image source names its file as the server reads it', () => {
     write(`public/writing-assets/${slug}/assets/R&D's chart.svg`, svg('width="50" height="60"'));
     write(`public/writing-assets/${slug}/assets/q3 chart #1?.svg`, svg('width="70" height="90"'));
     write(`public/writing-assets/${slug}/assets/Shot.PNG`, 'an image type in capitals');
+    write(`public/writing-assets/${slug}/assets/Chart.SVG`, svg('width="80" height="20"'));
     write(
       `content/writing/${slug}/README.md`,
       `---\ntitle: Paths\ndate: 2026-11-08\n---\n\n` +
@@ -169,6 +171,9 @@ test('an image source names its file as the server reads it', () => {
           "![Escaped](<assets/R&D's chart.svg>)",
           '![Reserved](assets/q3%20chart%20%231%3F.svg)',
           '![Capitals](assets/Shot.PNG)',
+          '![Upper](assets/Chart.SVG)',
+          '![Doubled](<assets//지연 차트.svg>)',
+          `![Trailing](/writing-assets/${SLUG}/top.svg/)`,
         ].join('\n\n'),
     );
     const tags = imgTags(getArticle(slug).html);
@@ -184,6 +189,9 @@ test('an image source names its file as the server reads it', () => {
       Escaped: ['50', '60'],
       Reserved: ['70', '90'],
       Capitals: [undefined, undefined],
+      Upper: ['80', '20'],
+      Doubled: ['30', '40'],
+      Trailing: ['10', '20'],
     });
     // The src names the file by its own name on disk, each segment encoded in full, whatever form the
     // source took: Next's static server matches only that form for a name such as R&D's chart.svg.
@@ -201,6 +209,10 @@ test('an image source names its file as the server reads it', () => {
       Escaped: `${assets}/R%26D's%20chart.svg`,
       Reserved: `${assets}/q3%20chart%20%231%3F.svg`,
       Capitals: `${assets}/Shot.PNG`,
+      Upper: `${assets}/Chart.SVG`,
+      // Next's static server collapses "//" and drops a trailing "/"; the src ships without them.
+      Doubled: korean,
+      Trailing: `/writing-assets/${SLUG}/top.svg`,
     });
   } finally {
     removeArticle(slug);
@@ -218,7 +230,7 @@ test('an image with no file under public/, or from a web address, fails the buil
     ['assets/없는 차트.svg', `public/writing-assets/${slug}/assets/없는 차트.svg`, 'a missing name is shown as written, not percent-encoded'],
     ['../../../outside.svg', 'public/outside.svg', 'a ../ path stops at the site root, as in a browser'],
     [`${fixture}/assets%2Fchart.svg`, `public${fixture}/assets%2Fchart.svg`, 'an encoded slash'],
-    [`${fixture}/100%.png`, `public${fixture}/100%.png`, 'a malformed escape'],
+    ["assets/R&D's missing.svg", `public/writing-assets/${slug}/assets/R&D's missing.svg`, 'a name with & and an apostrophe is quoted as written'],
     [`${fixture}/`, `public${fixture}/`, 'a folder path'],
     ['', `public/writing-assets/${slug}/`, 'an empty source'],
     ['data:image/png;base64,AAAA', `public/writing-assets/${slug}/data:image/png;base64,AAAA`, 'a data URL'],
@@ -252,8 +264,14 @@ test('an image with no file under public/, or from a web address, fails the buil
   fails('![Figure](/Writing-Assets/001-FIXTURE/top.svg)', meant('/Writing-Assets/001-FIXTURE/top.svg', `${fixture}/top.svg`), 'folders differing only in case');
   fails(`![Figure](${fixture}/assets/.hidden.svg)`, `but the site does not serve public${fixture}/assets/.hidden.svg: its name starts with "."`, 'a dotfile');
   fails('![Figure](/clip.mp4)', 'but public/clip.mp4 is not an allowed type (.avif, .gif, .jpeg, .jpg, .png, .svg, .webp)', 'a file that is not an image');
+  fails(`![Figure](${fixture}/assets/a%5Cb.svg)`, `but the site does not serve public${fixture}/assets/a\\b.svg: a name in it holds "\\"`, 'a backslash, which Next reads as a slash');
+  fails(`![Figure](<${fixture}/100%.png>)`, 'but a "%" in its path starts no valid escape (write a literal % as %25)', 'a malformed escape');
+  // marked leaves these for the browser to decode; the check would read a cut-short path instead.
+  for (const [source, reference] of [['assets/a&#x20;b.svg', '&#x20;'], ['assets/a&nbsp;b.svg', '&nbsp;'], ['/&#47;example.com/x.png', '&#47;']]) {
+    fails(`![Figure](${source})`, `"${source}", which spells a character as ${reference}: type the character itself`, reference);
+  }
   for (const source of external) {
-    fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be a file in its folder`, source);
+    fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be one of the site's own files`, source);
   }
   fails('An inline ![icon](assets/missing.svg) image.', `"assets/missing.svg", but public/writing-assets/${slug}/assets/missing.svg`, 'an inline image');
   fails('![Figure][chart]\n\n[chart]: https://example.com/chart.png', '"https://example.com/chart.png" from a web address', 'a reference image');
@@ -281,6 +299,45 @@ test('a build error quotes an article with its control characters still encoded'
     } finally {
       removeArticle(slug);
     }
+  }
+  try {
+    // The category error and a case hint quote article text too; the hint quotes a synced file name.
+    write(`content/writing/${slug}/README.md`, '---\ntitle: C\ndate: 2026-11-08\ncategory: x\u001b]0;t\u0007\n---\n\nText.\n');
+    assert.throws(() => getArticle(slug), (error) => error.message === 'Unknown writing category: x%1B]0;t%07');
+    write(`public/writing-assets/${slug}/assets/a\u001b[2K.svg`, svg('width="1" height="1"'));
+    write(`content/writing/${slug}/README.md`, '---\ntitle: C\ndate: 2026-11-08\n---\n\n![Figure](<assets/A%1B[2K.svg>)\n');
+    assert.throws(
+      () => getArticle(slug),
+      (error) => error.message.includes(`did you mean public/writing-assets/${slug}/assets/a%1B[2K.svg?`) && !controls.test(error.message),
+    );
+  } finally {
+    removeArticle(slug);
+  }
+});
+
+test('a file added between getArticles() calls is seen, because each call lists public/ afresh', () => {
+  const slug = '002-late';
+  try {
+    write(`content/writing/${slug}/README.md`, '---\ntitle: Late\ndate: 2026-11-08\n---\n\n![Late](assets/late.svg)\n');
+    assert.throws(() => getArticle(slug), /late\.svg is not a file/);
+    write(`public/writing-assets/${slug}/assets/late.svg`, svg('width="1" height="2"'));
+    assert.match(getArticle(slug).html, /src="\/writing-assets\/002-late\/assets\/late\.svg"/);
+  } finally {
+    removeArticle(slug);
+  }
+});
+
+test('a decomposed name on disk ships under its own bytes', () => {
+  const slug = '002-nfd';
+  const decomposed = '지연'.normalize('NFD');
+  try {
+    write(`public/writing-assets/${slug}/assets/${decomposed}.svg`, svg('width="3" height="4"'));
+    write(`content/writing/${slug}/README.md`, `---\ntitle: NFD\ndate: 2026-11-08\n---\n\n![Composed](<assets/${'지연'.normalize('NFC')}.svg>)\n`);
+    const [tag] = imgTags(getArticle(slug).html);
+    assert.equal(attr(tag, 'src'), `/writing-assets/${slug}/assets/${encodeURIComponent(decomposed)}.svg`);
+    assert.deepEqual([attr(tag, 'width'), attr(tag, 'height')], ['3', '4']);
+  } finally {
+    removeArticle(slug);
   }
 });
 

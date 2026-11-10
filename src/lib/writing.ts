@@ -91,7 +91,7 @@ function extractArticle(markdown: string): {
   // validated so a typo cannot silently place an op-ed in the wrong section.
   const category = data.category?.toLowerCase() || 'research';
   if (!isWritingCategory(category)) {
-    throw new Error(`Unknown writing category: ${data.category}`);
+    throw new Error(`Unknown writing category: ${excerpt(data.category ?? '')}`);
   }
 
   return {
@@ -241,17 +241,28 @@ function excerpt(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, encodeURIComponent).slice(0, EXCERPT_LENGTH);
 }
 
-/** A URL for an error message: percent-decoded where the escapes are well formed. */
+/**
+ * A URL for an error message: each run of escapes decoded where it is well
+ * formed, so one stray "%" leaves the rest readable, and reserved ones such
+ * as %2F kept as written.
+ */
 function readable(url: string): string {
-  try {
-    return excerpt(decodeURI(url));
-  } catch {
-    return excerpt(url);
-  }
+  return excerpt(
+    url.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+      try {
+        return decodeURI(run);
+      } catch {
+        return run;
+      }
+    }),
+  );
 }
 
 /** A stand-in origin, to resolve an image path the way a browser does. */
 const ARTICLE_ORIGIN = 'https://article.invalid';
+
+/** A character reference (&#x20;, &nbsp;) that marked leaves in an image source and a browser would decode. */
+const CHARACTER_REFERENCE = /&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i;
 
 /**
  * Directory listings under public/ for one getArticles() call: every page
@@ -292,26 +303,19 @@ function caseVariant(entries: Set<string>, name: string): string | undefined {
 }
 
 /**
- * The names on disk of the file under public/ that a URL path leads to,
- * with `pick` choosing the entry for each decoded segment; or null. Each
- * segment is percent-decoded, as the server reads it. "." and ".." are
- * never entries, so the walk cannot leave public/, and an encoded "/" names
- * no single entry.
+ * The names on disk of the file under public/ that decoded path segments
+ * lead to, with `pick` choosing the entry for each; or null. "." and ".."
+ * are never entries, so the walk cannot leave public/, and an encoded "/"
+ * names no single entry.
  */
 function walkPublic(
-  pathname: string,
+  segments: string[],
   pick: (entries: Set<string>, name: string) => string | undefined,
 ): string[] | null {
   const names: string[] = [];
   let dir = PUBLIC_DIR;
-  for (const segment of pathname.slice(1).split('/')) {
-    let name: string;
-    try {
-      name = decodeURIComponent(segment);
-    } catch {
-      return null; // A malformed escape such as "100%.png" names no file.
-    }
-    const entry = pick(directoryEntries(dir), name);
+  for (const segment of segments) {
+    const entry = pick(directoryEntries(dir), segment);
     if (entry === undefined) return null;
     names.push(entry);
     dir = path.join(dir, entry);
@@ -325,14 +329,14 @@ function walkPublic(
  * Anything else fails the build and names the article: a missing file would
  * ship as a broken image, the site's CSP (img-src 'self') blocks an image
  * from another site, and a page shows only an image file. Names must match
- * exactly, because 1six.tech answers 404 for a name that differs only in
- * case, which a Mac's disk would still open.
+ * exactly, case included, because 1six.tech answers 404 for a name that
+ * differs only in case, which a Mac's disk would still open; only a
+ * difference in Unicode normalization, invisible on screen, is let through.
  *
  * The src is rebuilt from the file's own names, each encoded in full: the
  * form Next's static server matches (it misses, for one, "R&D's%20chart.svg"),
- * and one that decodes back to exactly those names. The source is read as
- * written, so a character reference marked leaves in it (&#47;) cannot be
- * decoded into a path other than the one that ships.
+ * and one that decodes back to exactly those names. So the page asks for the
+ * file that was checked, whatever form the source took.
  */
 function articleImage(slug: string, written: string, local: string): { file: string; src: string } {
   const failure = (reason: string) =>
@@ -347,19 +351,33 @@ function articleImage(slug: string, written: string, local: string): { file: str
   // The origin check still holds if marked stops encoding "\", which a browser reads as "/".
   if (/^(?:https?:|\/\/)/i.test(local) || url?.origin !== ARTICLE_ORIGIN) {
     throw failure(
-      " from a web address; an article image must be a file in its folder (the site's content security policy blocks other sites)",
+      " from a web address; an article image must be one of the site's own files, normally in its article's folder (the site's content security policy blocks other sites)",
     );
   }
+  // A browser would decode it, but here its "#" would start a fragment and cut the path short.
+  const reference = written.match(CHARACTER_REFERENCE)?.[0];
+  if (reference) throw failure(`, which spells a character as ${excerpt(reference)}: type the character itself`);
+  // Next's static server collapses "//" and drops a trailing "/", so an empty segment names nothing.
+  let segments: string[];
+  try {
+    segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    throw failure(', but a "%" in its path starts no valid escape (write a literal % as %25)');
+  }
   const shown = `public${readable(url.pathname)}`;
-  const names = walkPublic(url.pathname, sameName);
+  const names = walkPublic(segments, sameName);
   if (!names) {
-    const variant = walkPublic(url.pathname, caseVariant);
+    const variant = walkPublic(segments, caseVariant);
     const hint = variant ? ` (names are case-sensitive: did you mean public/${excerpt(variant.join('/'))}?)` : '';
     throw failure(`, but ${shown} is not a file${hint}`);
   }
   const name = names[names.length - 1];
-  // Next's static server ignores a dotfile, as its send module does by default.
+  // Next's static server ignores a dotfile, as its send module does by default,
+  // and indexes public/ with "\" in a name read as "/".
   if (name.startsWith('.')) throw failure(`, but the site does not serve ${shown}: its name starts with "."`);
+  if (names.some((part) => part.includes('\\'))) {
+    throw failure(`, but the site does not serve ${shown}: a name in it holds "\\"`);
+  }
   if (!ASSET_EXTENSIONS.has(path.extname(name).toLowerCase())) {
     throw failure(`, but ${shown} is not an allowed type (${[...ASSET_EXTENSIONS].join(', ')})`);
   }
@@ -368,7 +386,7 @@ function articleImage(slug: string, written: string, local: string): { file: str
 
 /** The intrinsic size of an SVG file, read from its root element. */
 function svgSize(file: string): { width: string; height: string } | null {
-  if (!file.endsWith('.svg')) return null;
+  if (path.extname(file).toLowerCase() !== '.svg') return null;
   const root = readFileSync(file, 'utf8').match(/<svg\b[^>]*>/)?.[0];
   const width = root?.match(/\swidth="(\d+(?:\.\d+)?)"/)?.[1];
   const height = root?.match(/\sheight="(\d+(?:\.\d+)?)"/)?.[1];
