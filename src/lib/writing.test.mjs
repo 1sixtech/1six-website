@@ -17,11 +17,15 @@ const svg = (attributes) => `<svg xmlns="http://www.w3.org/2000/svg" ${attribute
 write(`public/writing-assets/${SLUG}/assets/chart.svg`, svg('viewBox="0 0 760 330" width="760" height="330"'));
 write(`public/writing-assets/${SLUG}/assets/stroked.svg`, svg('stroke-width="2" width="12.5" height="40"'));
 write(`public/writing-assets/${SLUG}/assets/fluid.svg`, svg('viewBox="0 0 10 10" width="100%" height="100%"'));
+write(`public/writing-assets/${SLUG}/assets/photo.png`, 'not read: only an SVG is sized');
 write(`public/writing-assets/${SLUG}/top.svg`, svg('width="10" height="20"'));
-// Outside public/: a ../ path in the article must not reach it.
+// Outside public/: a ../ path in an article, plain or encoded, must not reach it.
 write('outside.svg', svg('width="1234" height="5678"'));
-// A directory named like an SVG is not a file to read.
+// A directory named like an SVG is not a file to show.
 mkdirSync(path.join(root, `public/writing-assets/${SLUG}/assets/folder.svg`), { recursive: true });
+// Files under public/ that no page can show as an article image.
+write(`public/writing-assets/${SLUG}/assets/.hidden.svg`, svg('width="1" height="1"'));
+write('public/clip.mp4', 'not an image');
 write(
   `content/writing/${SLUG}/README.md`,
   `---
@@ -44,8 +48,6 @@ date: 2026-01-02
 
 ![Photo](assets/photo.png)
 
-![Gone](assets/missing.svg)
-
 ![Top](/writing-assets/${SLUG}/top.svg)
 
 ![Say "hi"](assets/chart.svg)
@@ -53,10 +55,6 @@ date: 2026-01-02
 <img src="assets/chart.svg" width="50" alt="Sized">
 
 <img src=x onerror="alert(1)"><script>alert(2)</script>
-
-![Escape](../../../outside.svg)
-
-![Folder](assets/folder.svg)
 
 Links: [the dataset](javascript:alert(document.domain)), <javascript:alert(2)>, [a ref][bad],
 [tabbed](java&#x09;script:alert(4)), [coded](&#106;avascript:alert(5)), [named](java&Tab;script:alert(11)),
@@ -109,11 +107,8 @@ test('an image alone in its paragraph becomes a figure that links to its own fil
       [`${base}/assets/stroked.svg`, 'Enlarge figure'],
       [`${base}/assets/fluid.svg`, 'Enlarge figure: Fluid'],
       [`${base}/assets/photo.png`, 'Enlarge figure: Photo'],
-      [`${base}/assets/missing.svg`, 'Enlarge figure: Gone'],
       [`${base}/top.svg`, 'Enlarge figure: Top'],
       [`${base}/assets/chart.svg`, 'Enlarge figure: Say &quot;hi&quot;'],
-      [`${base}/../../../outside.svg`, 'Enlarge figure: Escape'],
-      [`${base}/assets/folder.svg`, 'Enlarge figure: Folder'],
     ],
   );
   for (const { href, img, target, hint } of found) {
@@ -146,9 +141,147 @@ test('a local SVG reserves its box from its root width and height; anything else
   assert.deepEqual(size('Top'), ['10', '20'], 'absolute public paths');
   assert.deepEqual(size('Fluid'), [undefined, undefined], 'percentages are not a size');
   assert.deepEqual(size('Photo'), [undefined, undefined], 'only SVGs are read');
-  assert.deepEqual(size('Gone'), [undefined, undefined], 'a missing file');
-  assert.deepEqual(size('Escape'), [undefined, undefined], 'a path that leaves public/ is not read');
-  assert.deepEqual(size('Folder'), [undefined, undefined], 'a directory is not read (and does not throw)');
+});
+
+const removeArticle = (slug) => {
+  rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
+  rmSync(path.join(root, 'public/writing-assets', slug), { recursive: true, force: true });
+};
+
+test('an image source names its file as the server reads it', () => {
+  const slug = '002-paths';
+  try {
+    write(`public/writing-assets/${slug}/assets/지연 차트.svg`, svg('width="30" height="40"'));
+    write(`public/writing-assets/${slug}/assets/R&D's chart.svg`, svg('width="50" height="60"'));
+    write(`public/writing-assets/${slug}/assets/q3 chart #1?.svg`, svg('width="70" height="90"'));
+    write(`public/writing-assets/${slug}/assets/Shot.PNG`, 'an image type in capitals');
+    write(
+      `content/writing/${slug}/README.md`,
+      `---\ntitle: Paths\ndate: 2026-11-08\n---\n\n` +
+        [
+          '![Spaced](<assets/지연 차트.svg>)',
+          '![Encoded](assets/%EC%A7%80%EC%97%B0%20%EC%B0%A8%ED%8A%B8.svg)',
+          '![Query](assets/지연%20차트.svg?v=2#top)',
+          '![Dotted](./assets/../assets/./지연%20차트.svg)',
+          `![Decomposed](<assets/${'지연 차트'.normalize('NFD')}.svg>)`,
+          `![Sibling](../${SLUG}/assets/chart.svg)`,
+          `![Absolute](/writing-assets/${SLUG}/top.svg)`,
+          "![Escaped](<assets/R&D's chart.svg>)",
+          '![Reserved](assets/q3%20chart%20%231%3F.svg)',
+          '![Capitals](assets/Shot.PNG)',
+        ].join('\n\n'),
+    );
+    const tags = imgTags(getArticle(slug).html);
+    const found = Object.fromEntries(tags.map((tag) => [attr(tag, 'alt'), [attr(tag, 'width'), attr(tag, 'height')]]));
+    assert.deepEqual(found, {
+      Spaced: ['30', '40'],
+      Encoded: ['30', '40'],
+      Query: ['30', '40'],
+      Dotted: ['30', '40'],
+      Decomposed: ['30', '40'],
+      Sibling: ['760', '330'],
+      Absolute: ['10', '20'],
+      Escaped: ['50', '60'],
+      Reserved: ['70', '90'],
+      Capitals: [undefined, undefined],
+    });
+    // The src names the file by its own name on disk, each segment encoded in full, whatever form the
+    // source took: Next's static server matches only that form for a name such as R&D's chart.svg.
+    const assets = `/writing-assets/${slug}/assets`;
+    const korean = `${assets}/%EC%A7%80%EC%97%B0%20%EC%B0%A8%ED%8A%B8.svg`;
+    const srcs = Object.fromEntries(tags.map((tag) => [attr(tag, 'alt'), attr(tag, 'src')]));
+    assert.deepEqual(srcs, {
+      Spaced: korean,
+      Encoded: korean,
+      Query: korean,
+      Dotted: korean,
+      Decomposed: korean,
+      Sibling: `/writing-assets/${SLUG}/assets/chart.svg`,
+      Absolute: `/writing-assets/${SLUG}/top.svg`,
+      Escaped: `${assets}/R%26D's%20chart.svg`,
+      Reserved: `${assets}/q3%20chart%20%231%3F.svg`,
+      Capitals: `${assets}/Shot.PNG`,
+    });
+  } finally {
+    removeArticle(slug);
+  }
+});
+
+test('an image with no file under public/, or from a web address, fails the build and names the article', () => {
+  const slug = '002-broken-figure';
+  const fixture = `/writing-assets/${SLUG}`;
+  const missing = [
+    ['assets/missing.svg', `public/writing-assets/${slug}/assets/missing.svg`],
+    [`${fixture}/assets/folder.svg`, `public${fixture}/assets/folder.svg`, 'a directory'],
+    ['..%2F..%2F..%2Foutside.svg', `public/writing-assets/${slug}/..%2F..%2F..%2Foutside.svg`, 'an encoded ../ names no entry'],
+    [`${fixture}/top.svg/inner.svg`, `public${fixture}/top.svg/inner.svg`, 'a path through a file'],
+    ['assets/없는 차트.svg', `public/writing-assets/${slug}/assets/없는 차트.svg`, 'a missing name is shown as written, not percent-encoded'],
+    ['../../../outside.svg', 'public/outside.svg', 'a ../ path stops at the site root, as in a browser'],
+    [`${fixture}/assets%2Fchart.svg`, `public${fixture}/assets%2Fchart.svg`, 'an encoded slash'],
+    [`${fixture}/100%.png`, `public${fixture}/100%.png`, 'a malformed escape'],
+    [`${fixture}/`, `public${fixture}/`, 'a folder path'],
+    ['', `public/writing-assets/${slug}/`, 'an empty source'],
+    ['data:image/png;base64,AAAA', `public/writing-assets/${slug}/data:image/png;base64,AAAA`, 'a data URL'],
+  ];
+  const external = [
+    'https://example.com/chart.png',
+    'http://example.com/chart.png',
+    'HTTPS://EXAMPLE.COM/CHART.PNG',
+    '//example.com/chart.png',
+    `https://1six.tech${fixture}/assets/chart.svg`,
+  ];
+  const fails = (markdown, expected, label) => {
+    try {
+      write(`content/writing/${slug}/README.md`, `---\ntitle: Broken\ndate: 2026-11-08\n---\n\nText.\n\n${markdown}\n`);
+      assert.throws(
+        () => getArticle(slug),
+        (error) => error.message.startsWith(`writing: ${slug} shows the image `) && error.message.includes(expected) && error.message.endsWith('; refusing to publish it.'),
+        label,
+      );
+    } finally {
+      removeArticle(slug);
+    }
+  };
+  for (const [source, file, label = source] of missing) {
+    // No file differs from these only in case, so the message offers no other name.
+    fails(`![Figure](<${source}>)`, `"${source}", but ${file} is not a file; refusing to publish it.`, label);
+  }
+  const meant = (source, file) =>
+    `"${source}", but public${source} is not a file (names are case-sensitive: did you mean public${file}?)`;
+  fails(`![Figure](${fixture}/assets/Chart.svg)`, meant(`${fixture}/assets/Chart.svg`, `${fixture}/assets/chart.svg`), 'a name differing only in case');
+  fails('![Figure](/Writing-Assets/001-FIXTURE/top.svg)', meant('/Writing-Assets/001-FIXTURE/top.svg', `${fixture}/top.svg`), 'folders differing only in case');
+  fails(`![Figure](${fixture}/assets/.hidden.svg)`, `but the site does not serve public${fixture}/assets/.hidden.svg: its name starts with "."`, 'a dotfile');
+  fails('![Figure](/clip.mp4)', 'but public/clip.mp4 is not an allowed type (.avif, .gif, .jpeg, .jpg, .png, .svg, .webp)', 'a file that is not an image');
+  for (const source of external) {
+    fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be a file in its folder`, source);
+  }
+  fails('An inline ![icon](assets/missing.svg) image.', `"assets/missing.svg", but public/writing-assets/${slug}/assets/missing.svg`, 'an inline image');
+  fails('![Figure][chart]\n\n[chart]: https://example.com/chart.png', '"https://example.com/chart.png" from a web address', 'a reference image');
+  const long = `assets/${'a'.repeat(300)}.svg`;
+  const cut = (text) => text.slice(0, 160);
+  fails(`![Figure](${long})`, `"${cut(long)}", but public${cut(`/writing-assets/${slug}/${long}`)} is not a file`, 'a long name is cut short');
+});
+
+test('a build error quotes an article with its control characters still encoded', () => {
+  const slug = '002-control';
+  const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+  const cases = [
+    // Decoded raw, %0A would start a line the Actions log reads as a command, and %1B a terminal escape.
+    ['Date: 2026-11-08\n\n![Figure](<assets/a%0A::error title=x::y%1B[2K.svg>)', '"assets/a%0A::error title=x::y%1B[2K.svg"'],
+    ['Date: 2026-11-08\u001b]0;title\u0007', 'needs a date like 2026-11-08, found "2026-11-08%1B]0;title%07"'],
+  ];
+  for (const [line, quoted] of cases) {
+    try {
+      write(`content/writing/${slug}/README.md`, `# Control\n\n${line}\n\nText.\n`);
+      assert.throws(
+        () => getArticle(slug),
+        (error) => error.message.startsWith(`writing: ${slug} `) && error.message.includes(quoted) && !controls.test(error.message),
+        quoted,
+      );
+    } finally {
+      removeArticle(slug);
+    }
+  }
 });
 
 test('raw HTML in an article (synced from another repository) is shown as text, never run', () => {
@@ -274,8 +407,6 @@ test('publication metadata connects categories and authors and orders newest wri
     }
   }
 });
-
-const removeArticle = (slug) => rmSync(path.join(root, 'content/writing', slug), { recursive: true, force: true });
 
 test('a draft date keeps an article off the site in every header form', async () => {
   const { getArticles } = await import('./writing.ts');
