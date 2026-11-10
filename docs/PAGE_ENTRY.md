@@ -30,7 +30,7 @@ a newer entry. Navigation removes masks and entry locks.
 Each route mounts its own `IntroOverlay` and `IntroOrchestrator`. Both keys follow
 the pathname and must differ from each other: with one shared key, React removed
 only the old orchestrator, and every client navigation left the previous route's
-full-screen overlay in the page (fixed in v0.3.9.1). A section hash on the same
+full-screen overlay in the page (fixed in v0.3.10.1). A section hash on the same
 route keeps both mounted.
 
 `IntroOrchestrator` controls only `intro-lock` and the site logo. Writing does not
