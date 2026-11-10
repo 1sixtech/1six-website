@@ -82,4 +82,9 @@ test('About: one screen per section, with the contact last, every onward link la
   // The phone's first screen is two boxes, the mark and the statement. Without a
   // stop at the statement's end, a short phone could never rest on what is below the fold.
   assert.match(css, /\.crossing-band--statement \.crossing-band__body \{\s*scroll-snap-align: end;/);
+
+  // Every section has its own screen, so a rule above a title separates nothing:
+  // the rule sits under the title and divides it from its content.
+  assert.match(css, /\.crossing-heading \{\s*padding-bottom: var\(--crossing-rule-gap\);\s*border-bottom: 1px solid var\(--color-text\);/);
+  assert.doesNotMatch(css, /\.crossing-band__body \{[^}]*border-top/);
 });

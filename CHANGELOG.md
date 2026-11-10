@@ -3,7 +3,7 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
-## [0.3.9.1] - 2026-11-10
+## [0.3.10.1] - 2026-11-10
 
 ### Fixed
 
@@ -12,6 +12,13 @@ All notable changes to the 1SIX website are recorded here. Versions follow
 ### Documentation
 
 - The release QA checklist has a page-entry check that counts loading screens across client navigation (LOAD-7), and changes to the loading screen itself now route to the page-entry checks.
+
+## [0.3.10.0] - 2026-11-10
+
+### Changed
+
+- About's section rules sit under each title instead of above it, on phones and desktop, with more space between the rule and the content. The title and its content now read as two parts at a glance.
+- On the light theme, the unfilled part of the ASCII 16 is a little lighter again, so the filled share stands out while the whole mark still reads.
 
 ## [0.3.9.0] - 2026-11-10
 
