@@ -28,7 +28,7 @@ build and only the Vercel dashboard shows it.
 
 The check builds the website's `main` with the pull request's articles. It is the production build
 itself, so the rules cannot drift apart: folder names, allowed files, size limits, dates, categories,
-and the HTML safety check are all the ones the site enforces.
+figure paths, and the HTML safety check are all the ones the site enforces.
 
 Add `.github/workflows/validate.yml`:
 
@@ -91,7 +91,9 @@ What to expect:
 - **It checks the merge as of the last push.** A re-run uses the same merge commit, so to include
   later article merges, update the pull request's branch. If article pull requests start to overlap,
   also turn on **Require branches to be up to date before merging**.
-- **It does not catch a figure path with a typo.** The site renders a broken image instead of failing.
+- **It catches a figure path with a typo.** An image that is not a file in the article's folder, or under
+  the website's `public/`, fails the check, and so does an `http(s)` image, which the site's security policy
+  blocks. Names must match exactly, including case.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
 
@@ -205,6 +207,7 @@ at the token's expiry. Removing the variable returns the build to anonymous acce
 | Claim | Evidence |
 |-------|----------|
 | The check goes red on the original bad article | A real `next build` with `Date: 2026-11-8 (draft)` exited 1 and named the article |
+| The check goes red on a figure path with a typo | A real `next build` with `assets/Fig3-who-first.svg` for `fig3-who-first.svg` exited 1 on macOS and named the article; 1six.tech answers 404 for that name |
 | The check's commands work from nothing | `pnpm install --frozen-lockfile` and `pnpm build` at the head of article PR 2, from a clean copy on Node 22, took 10 seconds on a laptop with a warm pnpm store |
 | The check can read a merge commit | Commit lookup, listing, contents API, and raw host all answered for a fork pull request's merge commit on `actions/checkout` |
 | A token works for every request | A real authenticated sync used 14 API calls and matched the anonymous sync byte for byte |

@@ -128,6 +128,11 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 - Synced Markdown is untrusted: raw HTML is escaped, unsafe links lose their target, and unexpected
   rendered tags or attributes fail the build. Figures open at full size. `/writing-assets/:path*`
   has a sandboxed CSP for standalone assets; article and author pages keep the site's normal policy.
+- Every article image must be an image file under `public/` (the types in `writingAssets.mjs`, shared with the sync),
+  matched by exact name as 1six.tech serves it, and its src is rebuilt from that name. A missing, miscased, hidden
+  (`.name`), or non-image file, or an `http(s)` image the CSP (`img-src 'self' blob: data:`) would block, fails the
+  build and names the article; a miscased name gets a "did you mean". A name differing only in Unicode
+  normalization (NFD from Finder) is accepted.
 
 ### Theme System
 
