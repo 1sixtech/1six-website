@@ -1,6 +1,7 @@
 # About mobile composition
 
-Current direction, v0.3.4.0 with one section per screen (2026-11-09). Review scope
+Current direction, v0.3.4.0 with one section per screen (2026-11-09), section heads
+revised 2026-11-10. Review scope
 is About on phones. The existing Pretendard, orange/monochrome palette, lowercase
 voice, ASCII 16, factual copy, and desktop paired-column composition remain.
 
@@ -23,8 +24,8 @@ and the footer rewrapped between nearby phone widths.
 | Mark | 58vw, up to 260px | 48vw, bounded 184–208px |
 | H1 at 390px | 44.07px, y362 | 42.12px, y277 |
 | First product cue | Hidden on mobile | 44px touch target, y614–658 |
-| Section heading | 32px | 28px/1.14, medium weight |
-| Product name | 36px | 42px, grouped with domain/description/action |
+| Section heading | 32px | 34px/1.1, medium weight (28px in v0.3.4.0; see below) |
+| Product name | 36px | 42px in the logo red, grouped with domain/description/action |
 | Lead and credentials | 20px | 19px; comfortable leading and tracking |
 | Backer/firm names | 20px | 24px with 15px supporting roles |
 | Body | 17px/1.55 | Preserved |
@@ -60,6 +61,30 @@ moves exactly one section. The mark and statement share the first screen on a ph
 - WebKit has open reports of mandatory snapping losing momentum, and fast flicks are
   worth rechecking on a device after layout changes. It behaved on iOS 26.5 and 27.0
   simulators. `scroll-snap-stop: always` is what limits a flick to one section.
+
+## Section heads (2026-11-10)
+
+The owner found that a section's heading and its content were hard to tell apart on
+phones. Measured at 390 × 844, the heading was 28px/500 over 24px/400 backer names
+and closing line (1.17×, same ink), and 0.67× the 42px product name. It sat 20px under
+its rule and 20px above the first entry, while list rows were 33px apart, so it read as
+the first row. Centring also moved it between 214px and 338px down each screen.
+
+- The heading is 34px/1.1, at least 1.4× any entry under it and a weight above.
+- Space ties it to its rule and sets it off from the content: 12px under the rule,
+  36px to the first entry. The statement keeps its 20px lead step.
+- Sections other than the statement start from the top, `header + clamp(32px, 12svh, 112px)`,
+  so the rule lands at the same height on every screen (y155 at 844, y134 at 667).
+  Every section still fits its screen wherever snapping applies (375 × 667 to 430 × 932);
+  at 320 × 568 snapping is off and Backers scrolls.
+- The product name carries the logo red, which separates it from the black heading
+  by color as well as size. Hover underlines the name instead of recoloring it.
+- List hairlines are `--color-text` at 16% (about 1.46:1 on light), still far
+  below the section rule.
+
+Independent design review and detector/browser evidence ran in isolation again. The
+design review scored 23/32 before the change, with grouping and visual hierarchy as
+the failing cognitive-load checks. The detector found no About component findings.
 
 ## Scope and implementation
 

@@ -30,8 +30,9 @@
   /* Strong ease-out: fast response, long settle. */
   --crossing-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --crossing-header: var(--site-header-h);
-  /* Ink strength of the mark above the fill level. */
-  --crossing-dim: 0.26;
+  /* Ink strength of the mark above the fill level: enough for the whole 16
+     to read on the light ground (2.6:1) while the filled share stays darker. */
+  --crossing-dim: 0.5;
   --crossing-fill: 16;
   /* Mobile meter strip under the header (no strip on desktop). */
   --crossing-meter-h: 30px;
@@ -263,8 +264,19 @@
   line-height: 1.04;
   font-weight: 500;
   letter-spacing: -0.04em;
-  color: var(--color-text);
-  transition: color 160ms ease-out;
+  /* The product carries the logo's red, which also sets it apart from the
+     section title above it. Large text: 3.2:1 on light, 4.7:1 on dark. */
+  color: var(--color-accent);
+}
+
+/* Already red, so hover draws an underline under the name's own line; the
+   domain beneath it stays gray. */
+.crossing-product__name > span:first-child {
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.04em;
+  text-underline-offset: 0.12em;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 160ms ease-out;
 }
 
 .crossing-product__name > span:last-child {
@@ -329,7 +341,10 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .crossing-product__name:hover,
+  .crossing-product__name:hover > span:first-child {
+    text-decoration-color: currentColor;
+  }
+
   .crossing-product__visit:hover {
     color: var(--color-accent);
   }
@@ -794,14 +809,37 @@
 /* Phone composition: preserve the mark, but put the message and product cue
    inside a real Safari content viewport. Desktop remains the paired-column story. */
 @media (max-width: 767px) {
+  /* Without the desktop's columns, space alone has to tie a title to its
+     rule and set it apart from what follows: 12px under the rule, 36px to
+     the first entry, wider than the 33px between list rows. */
   .crossing {
     --crossing-meter-h: 0px;
-    --crossing-rule-gap: 20px;
-    --crossing-head-gap: 20px;
+    --crossing-rule-gap: 12px;
+    --crossing-head-gap: 36px;
     --crossing-aside-gap: 20px;
     --crossing-mark-m: clamp(184px, 48vw, 208px);
   }
 
+  /* The statement's lead is the h1's own continuation, not a section's
+     content, so it keeps the closer step. */
+  .crossing-band--statement {
+    --crossing-head-gap: 20px;
+  }
+
+  /* Every section's rule and title land at the same height on its screen,
+     so the title is a landmark rather than wherever centring puts it. The
+     offset shrinks on short screens, where each section still fits. */
+  .crossing-band:not(.crossing-band--statement) {
+    justify-content: flex-start;
+    padding-top: calc(var(--crossing-header) + clamp(32px, 12svh, 112px));
+  }
+
+  /* Rows stay a tier below the section rule, but read outdoors. */
+  .crossing-ledger__row,
+  .crossing-backer,
+  .crossing-firms {
+    border-top-color: color-mix(in srgb, var(--color-text) 16%, transparent);
+  }
 
   .crossing-meter {
     top: 0;
@@ -861,10 +899,13 @@
     letter-spacing: -0.03em;
   }
 
+  /* A title outranks every entry under it: 1.4x the 24px backer names and
+     closing line, a weight above them, and set apart in color from the red
+     product name. */
   .crossing-heading {
-    font-size: 28px;
-    line-height: 1.14;
-    letter-spacing: -0.02em;
+    font-size: 34px;
+    line-height: 1.1;
+    letter-spacing: -0.026em;
   }
 
   .crossing-lead {
