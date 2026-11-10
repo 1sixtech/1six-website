@@ -302,7 +302,8 @@ articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
   stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
-  writer profile output, and actual crossing, intro, mobile capture, and header navigation effects
+  writer profile output, page metadata and the shared tab title, the icons against `favicon.svg` and
+  their pinned digests, and actual crossing, intro, mobile capture, and header navigation effects
   with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
@@ -318,7 +319,7 @@ articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and
 | @gsap/react | ^2.1.2 | GSAP React integration (useGSAP) |
 | use-scramble | ^2.2.15 | Character scramble text effects |
 | tailwindcss | ^4.0.0 | Utility-first CSS (v4 with @theme) |
-| sharp | ^0.35.3 | Image optimization |
+| sharp | ^0.35.3 | Image optimization; renders the glyph sheets and PNG icons in `scripts/` |
 | marked | ^18.1.2 | Article Markdown parsing with a constrained renderer |
 | swiper | ^12.1.3 | Mobile thesis slides |
 
