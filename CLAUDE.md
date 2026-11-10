@@ -73,6 +73,7 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
+    writingAssets.mjs         # Article image types, shared by the site and the sync script
     writingDraft.mjs          # Draft marker rule, shared by the site and the sync script
     writingSlug.mjs           # Article folder-name rule, shared by the site and the sync script
     themeInit.ts              # Theme + site entrance / Thesis scramble bootstrap, inlined in <head>
