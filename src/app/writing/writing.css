@@ -83,15 +83,15 @@
 }
 
 .writing-body a:hover {
-  color: var(--color-accent-text);
-  text-decoration-color: var(--color-accent-text);
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
 }
 
 /* Press feedback on touch, where hover does not exist (the tap highlight is
    off site-wide). Figures give their own (below). */
 .writing-body a:not(.writing-figure):active {
-  color: var(--color-accent-text);
-  text-decoration-color: var(--color-accent-text);
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
 }
 
 .writing-body strong {
@@ -426,7 +426,7 @@ html:has(.figure-viewer[open]) {
 .writing-entry__category {
   font-size: 13px;
   line-height: 1.4;
-  color: var(--color-accent-text);
+  color: var(--color-accent);
 }
 
 .writing-entry__title {
@@ -529,7 +529,7 @@ html:has(.figure-viewer[open]) {
   .writing-read-more:hover,
   .writing-author-link:hover,
   .writing-category-link:hover {
-    color: var(--color-accent-text);
+    color: var(--color-accent);
   }
 }
 

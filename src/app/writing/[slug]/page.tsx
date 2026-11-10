@@ -57,7 +57,7 @@ export default async function WritingArticlePage({ params }: Props) {
   return (
     <article>
       <p className="writing-meta text-[13px] tracking-[0.01em]">
-        <Link href="/writing" className="transition-colors hover:text-[var(--color-accent-text)] active:text-[var(--color-accent-text)]">
+        <Link href="/writing" className="transition-colors hover:text-[var(--color-accent)] active:text-[var(--color-accent)]">
           Writing
         </Link>
         <span aria-hidden="true"> · </span>
@@ -89,7 +89,7 @@ export default async function WritingArticlePage({ params }: Props) {
               <li key={heading.id}>
                 <a
                   href={`#${heading.id}`}
-                  className="text-[15px] leading-[1.4] underline decoration-[color-mix(in_srgb,var(--color-text)_35%,transparent)] underline-offset-[3px] transition-colors hover:text-[var(--color-accent-text)] hover:decoration-[var(--color-accent-text)] active:text-[var(--color-accent-text)] active:decoration-[var(--color-accent-text)]"
+                  className="text-[15px] leading-[1.4] underline decoration-[color-mix(in_srgb,var(--color-text)_35%,transparent)] underline-offset-[3px] transition-colors hover:text-[var(--color-accent)] hover:decoration-[var(--color-accent)] active:text-[var(--color-accent)] active:decoration-[var(--color-accent)]"
                 >
                   {heading.text}
                 </a>
