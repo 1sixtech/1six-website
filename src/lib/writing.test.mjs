@@ -274,7 +274,7 @@ test('an image with no file under public/, or from a web address, fails the buil
       write(`content/writing/${slug}/README.md`, `---\ntitle: Broken\ndate: 2026-11-08\n---\n\nText.\n\n${markdown}\n`);
       assert.throws(
         () => getArticle(slug),
-        (error) => error.message.startsWith(`writing: ${slug} `) && error.message.includes(expected) && error.message.endsWith('; refusing to publish it.'),
+        (error) => error.message.startsWith(`writing: ${slug} shows the image `) && error.message.includes(expected) && error.message.endsWith('; refusing to publish it.'),
         label,
       );
     } finally {
@@ -298,16 +298,10 @@ test('an image with no file under public/, or from a web address, fails the buil
   fails(`![Figure](<${fixture}/assets/${'Café'.normalize('NFD')}.svg>)`, `did you mean public${fixture}/assets/${'café'.normalize('NFC')}.svg?`, 'case and normalization both differ');
   // marked leaves numeric references for the browser to decode into a name the check would not look up.
   for (const [source, reference] of [['assets/a&#x20;b.svg', '&#x20;'], ['/&#47;example.com/x.png', '&#47;']]) {
-    fails(`![Figure](${source})`, `"${source}", which a browser reads as the character reference ${reference}: type the character itself, or write a literal & as %26`, reference);
+    fails(`![Figure](${source})`, `"${source}", which a browser reads as the character reference ${reference}: type the character itself, or write a literal & as %26 and # as %23`, reference);
   }
   // A named one is looked up as written (a browser decodes only real names); a miss says what it may mean.
   fails('![Figure](assets/a&nbsp;b.svg)', `"assets/a&nbsp;b.svg", but public/writing-assets/${slug}/assets/a&nbsp;b.svg is not a file (if &nbsp; is meant as a character, type the character itself)`, '&nbsp;');
-  // A figure marked cannot read would ship as its own Markdown text.
-  const unread = (markdown, quoted, label) =>
-    fails(markdown, `has a figure marked cannot read, "${quoted}" (put a path holding a space in <angle brackets>, and define a [label] it names)`, label);
-  unread('![Figure 3](assets/chart 2.svg)', '![Figure 3](assets/chart 2.svg)', 'a space outside angle brackets');
-  unread('![Figure 3][fig-3]\n\n[fig3]: assets/chart.svg', '![Figure 3][fig-3]', 'a label with no definition');
-  unread('> See ![Figure 3](assets/chart 2.svg) here.', '![Figure 3](assets/chart 2.svg) here.', 'inside a quote, after other text');
   for (const source of external) {
     fails(`![Figure](${source})`, `"${source}" from a web address; an article image must be one of the site's own files`, source);
   }

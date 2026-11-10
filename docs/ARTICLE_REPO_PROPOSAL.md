@@ -96,8 +96,8 @@ What to expect:
   the website's `public/`, fails the check, and so does an `http(s)` image, even one on 1six.tech: an article
   image must be a file the site holds. Names must match exactly, including case. Only a difference in how
   Unicode composes a name, which cannot be seen (as when a Korean name is copied from Finder), is accepted.
-  A figure Markdown cannot read at all (a path with a space outside `<angle brackets>`, a `[label]` with no
-  definition) fails too, instead of publishing as its own Markdown text.
+  It does not catch a figure Markdown cannot read at all (a path with a space outside `<angle brackets>`, or a
+  reference label with no definition): that still publishes as its own text, as it did before.
 
 Add `.gitignore` too, because one stray file in a published folder stops every website build:
 

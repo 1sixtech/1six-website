@@ -133,8 +133,7 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   miscased, hidden (`.name`), or non-image file fails the build and names the article, as does any image given by
   URL (`http(s)`, `//`, or `data:`), even one the CSP (`img-src 'self' blob: data:`) would allow; a miscased name
   gets a "did you mean". A name differing only in Unicode normalization (NFD from Finder) is accepted. A figure
-  marked cannot read (a path with a space outside `<…>`, an undefined `[label]`) fails too, instead of publishing
-  its Markdown text.
+  marked cannot parse at all (a path with a space outside `<…>`) is not an image, and still publishes as text.
 
 ### Theme System
 

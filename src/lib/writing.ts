@@ -366,7 +366,7 @@ function articleImage(slug: string, written: string, local: string): { file: str
   const reference = written.match(NUMERIC_REFERENCE)?.[0];
   if (reference) {
     throw failure(
-      `, which a browser reads as the character reference ${excerpt(reference)}: type the character itself, or write a literal & as %26`,
+      `, which a browser reads as the character reference ${excerpt(reference)}: type the character itself, or write a literal & as %26 and # as %23`,
     );
   }
   // Next's static server collapses "//" and drops a trailing "/", so an empty segment names nothing.
@@ -468,19 +468,7 @@ export function unsafeArticleHtml(html: string): string | null {
 }
 
 function renderBody(slug: string, body: string): { html: string; headings: WritingHeading[] } {
-  const tokens = markdown.lexer(body);
-  // marked keeps a figure it cannot read (a space outside <angle brackets>, a
-  // [label] with no definition) as text, which would ship as "![...](...)". An
-  // escaped "\![" or a code span is a separate token, and so is not matched.
-  markdown.walkTokens(tokens, (token) => {
-    if (token.type !== 'text' || ('tokens' in token && token.tokens) || ('escaped' in token && token.escaped)) return;
-    const start = token.raw.search(/!\[[^\]]*\][([]/);
-    if (start < 0) return;
-    throw new Error(
-      `writing: ${slug} has a figure marked cannot read, "${excerpt(token.raw.slice(start))}" (put a path holding a space in <angle brackets>, and define a [label] it names); refusing to publish it.`,
-    );
-  });
-  const parsed = markdown.parser(tokens) as string;
+  const parsed = markdown.parse(body) as string;
   const headings: WritingHeading[] = [];
   const used = new Set<string>();
 
