@@ -54,10 +54,11 @@ function entryHarness({ seen = false, reduced = false, warmed = false, saveData 
     '@/lib/videoPool': { teardownVideoPool: () => teardowns++ },
   };
   const exports = {};
+  const location = { hash };
   new vm.Script(code, { filename: file.pathname }).runInContext(vm.createContext({
     exports, document, navigator: { connection: { saveData } },
     require(name) { assert.ok(Object.hasOwn(dependencies, name), name); return dependencies[name]; },
-    window: { matchMedia: () => ({ matches: reduced }), location: { hash } },
+    window: { matchMedia: () => ({ matches: reduced }), location },
   }));
   function find(node) {
     if (Array.isArray(node)) return node.map(find).find(Boolean);
@@ -65,7 +66,7 @@ function entryHarness({ seen = false, reduced = false, warmed = false, saveData 
     return node.props?.onWarmup ? node : find(node.props?.children);
   }
   return {
-    html, main, document, sharedWarmups, routes,
+    html, main, document, location, sharedWarmups, routes,
     get locked() { return classes.has('intro-lock'); },
     get textLocked() { return classes.has('thesis-entry-lock'); },
     get teardowns() { return teardowns; },
@@ -205,13 +206,14 @@ test('page entry: every route change replaces both the overlay and its orchestra
   }
 });
 
-test('page entry: a re-render on the same route keeps the overlay and orchestrator mounted', (t) => {
-  // A section hash or a Writing category filter re-renders without changing the pathname.
-  for (const path of ['/thesis', '/writing']) {
+test('page entry: a new section hash on the same route keeps the overlay and orchestrator mounted', (t) => {
+  // The keys follow the pathname only. A section link must not remount the full-screen overlay.
+  for (const [path, hash] of [['/thesis', '#products'], ['/', '#origins']]) {
     const entry = entryHarness(); t.after(() => entry.cleanup());
     const first = introParts(entry.enter(path));
+    entry.location.hash = hash;
     const again = introParts(entry.rerender());
-    assert.equal(again.overlay.key, first.overlay.key, path);
-    assert.equal(again.orchestrator.key, first.orchestrator.key, path);
+    assert.equal(again.overlay.key, first.overlay.key, path + hash);
+    assert.equal(again.orchestrator.key, first.orchestrator.key, path + hash);
   }
 });
