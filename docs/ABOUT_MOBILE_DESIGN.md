@@ -2,7 +2,7 @@
 
 Current direction, v0.3.4.0 with one section per screen (2026-11-09), section heads
 revised 2026-11-10. Review scope
-is About on phones. The existing Pretendard, orange/monochrome palette, lowercase
+is About on phones. The existing Pretendard, red/monochrome palette, lowercase
 voice, ASCII 16, factual copy, and desktop paired-column composition remain.
 
 ## Diagnosis
@@ -34,7 +34,7 @@ and the footer rewrapped between nearby phone widths.
 
 The first-screen cue is visible at 375/390/402/430 × 714. A 320px narrow check has no
 horizontal overflow; screens under 640px tall scroll naturally, without smaller body text. The dark mark is slightly brighter on mobile;
-completion still applies the orange treatment. The large email remains the final
+completion still applies the red treatment. The large email remains the final
 primary action and fits the inspected widths.
 
 The mobile product kicker is hidden because the description already states its
