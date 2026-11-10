@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { inspect } from 'node:util';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { getArticle } from './writing.ts';
@@ -34,9 +35,11 @@ const networkError = (code, message) => new TypeError('fetch failed', { cause: O
 const dropped = () => networkError('ECONNRESET', 'read ECONNRESET');
 // What AbortSignal.timeout rejects with, in fetch() or, once the headers are in, in the body read.
 const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+// What a body read rejects with when the connection closes mid-transfer.
+const terminated = () => new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
 
-/** A 200 whose body breaks after its first bytes, as when a connection resets or times out mid-download. */
-function brokenBody(reason) {
+/** An answer (a 200 unless `init` says otherwise) whose body breaks after its first bytes. */
+function brokenBody(reason, init) {
   let pulls = 0;
   return new Response(new ReadableStream({
     pull(controller) {
@@ -44,8 +47,11 @@ function brokenBody(reason) {
       if (pulls === 1) controller.enqueue(new TextEncoder().encode('<svg>par'));
       else controller.error(reason);
     },
-  }));
+  }), init);
 }
+
+/** An answer whose connection dropped before its body could be read or released. */
+const unreadable = (status, headers) => new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status, headers });
 
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
@@ -53,11 +59,12 @@ function brokenBody(reason) {
  * [status, headers], an error the request rejects with, or a Response to return as is;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
  * whole answer. Waits are recorded and not slept; `now` fixes the clock the script reads.
- * `signals` lists each request's signal, and `peak` the most requests that were open at once.
+ * `signals` lists each request's signal, `peak` the most requests that were open at once, and
+ * `warnings` the lines the sync printed before retrying.
  */
 function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, now } = {}) {
   return new Promise((resolve) => {
-    const result = { requests: [], headers: new Map(), signals: [], peak: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], errors: [], exit: undefined };
+    const result = { requests: [], headers: new Map(), signals: [], peak: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], warnings: [], errors: [], exit: undefined };
     let open = 0;
     const fileAt = (url) => {
       const { pathname } = new URL(url);
@@ -101,6 +108,7 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       },
       console: {
         log(line) { result.logged.push(line); resolve(result); },
+        warn(line) { result.warnings.push(line); },
         error(error) { result.errors.push(error); },
       },
       async fetch(url, init) {
@@ -584,7 +592,7 @@ test('a request that stalls is abandoned at its timeout and sent again, whether 
 test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
   const run = await runSync(
     { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
-    { replies: { 'chart.svg': [brokenBody(new TypeError('terminated')), brokenBody(new TypeError('terminated'))] } },
+    { replies: { 'chart.svg': [brokenBody(terminated()), brokenBody(terminated())] } },
   );
   assert.equal(run.exit, undefined);
   assert.deepEqual(run.waits, [1000, 2000]);
@@ -656,7 +664,7 @@ test('a download that fails after the first eight have started still stops the s
 });
 
 test('a lookup or a listing whose body breaks partway is read again, so part of a commit or a listing is never used', async () => {
-  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [brokenBody(new TypeError('terminated'))] } });
+  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [brokenBody(terminated())] } });
   assert.equal(lookup.exit, undefined);
   assert.deepEqual(lookup.waits, [1000]);
   assert.equal(lookup.requests[2], `https://api.github.com/repos/${REPO}/git/trees/${COMMIT}?recursive=1`, 'the listing reads the whole commit');
@@ -674,16 +682,78 @@ test('a listing that answers with something other than JSON fails the sync, unre
   assert.deepEqual(run.waits, [], 'a complete answer is not an outage');
 });
 
-test('a refusal with no body, or one whose connection drops before its body is released, is still retried', async () => {
+test('a refusal whose body is missing or cannot be read keeps the wait GitHub named, and one past the budget still fails at once', async () => {
   const empty = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(null, { status: 429, headers: { 'retry-after': '30' } })] } });
   assert.equal(empty.exit, undefined);
   assert.deepEqual(empty.waits, [30_000], 'nothing to release, so the wait GitHub named still holds');
 
-  const broken = new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status: 429, headers: { 'retry-after': '30' } });
-  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [broken] } });
+  const broken = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(429, { 'retry-after': '30' })] } });
+  assert.equal(broken.exit, undefined);
+  assert.equal(broken.requests.filter((url) => url.includes('/commits/')).length, 2);
+  assert.deepEqual(broken.waits, [30_000], 'a body that will not release does not shorten the wait');
+
+  const pastBudget = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(429, { 'retry-after': '3600' })] } });
+  assert.equal(pastBudget.exit, 1);
+  assert.equal(pastBudget.requests.length, 1, 'a wait past the budget is not attempted');
+  assert.deepEqual(pastBudget.waits, []);
+  assert.match(pastBudget.errors[0].message, /GitHub commit lookup failed for main: 429 .*Set WRITING_GITHUB_TOKEN/);
+
+  const missing = await runSync({ ...LIVE }, { replies: { '/commits/': [unreadable(404)] } });
+  assert.equal(missing.exit, 1);
+  assert.equal(missing.requests.length, 1, 'a refusal is its own answer, body or not');
+  assert.match(missing.errors[0].message, /GitHub commit lookup failed for main: 404/);
+});
+
+test('refusals and network failures share one budget of three retries', async () => {
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
+  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [[503], dropped(), [503], dropped()] } });
+  assert.equal(run.exit, 1);
+  assert.deepEqual(run.requests, [lookup, lookup, lookup, lookup]);
+  assert.deepEqual(run.waits, [1000, 2000, 4000]);
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${lookup}`);
+});
+
+test('a request the client cannot even build fails at once, not after three retries as if GitHub were down', async () => {
+  const invalid = new TypeError('Headers.append: "x" is an invalid header value.');
+  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [invalid] } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.requests.length, 1);
+  assert.deepEqual(run.waits, []);
+  assert.equal(run.errors[0].message, 'Headers.append: "x" is an invalid header value.');
+});
+
+test('a token with a space, line break, or non-ASCII character fails before any request and is never printed', async () => {
+  for (const token of ['ghp_secret\nghp_more', 'ghp_secret…', 'ghp secret']) {
+    const run = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: token } });
+    assert.equal(run.exit, 1, JSON.stringify(token));
+    assert.deepEqual(run.requests, [], 'fetch would quote the whole header in its error');
+    assert.match(run.errors[0].message, /WRITING_GITHUB_TOKEN has a space, line break, or non-ASCII character in it/);
+    assert.doesNotMatch(inspect(run.errors[0]), /secret/);
+  }
+});
+
+test('a request waiting to retry gives up its place, so the downloads queued behind it carry on', async () => {
+  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+  const at = (name) => `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/${name}`;
+  const run = await runSync({ ...LIVE, ...figures }, { replies: { '/f0.svg': [[429, { 'retry-after': '30' }]] } });
   assert.equal(run.exit, undefined);
-  assert.equal(run.requests.filter((url) => url.includes('/commits/')).length, 2);
-  assert.equal(run.waits.length, 1);
+  assert.equal(run.peak, 8);
+  assert.ok(run.requests.lastIndexOf(at('f0.svg')) > run.requests.indexOf(at('f19.svg')), 'the retry joins the back of the queue');
+  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/f0.svg'), '<svg>0</svg>');
+});
+
+test('every retry prints one line with its number, wait, reason, and request, and never the token', async () => {
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
+  const run = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'secret-token' }, replies: { '/commits/': [[503], dropped(), timedOut()] } });
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.warnings, [
+    `Retry 1 of 3 in 1 s after 503: ${lookup}`,
+    `Retry 2 of 3 in 2 s after ECONNRESET: ${lookup}`,
+    `Retry 3 of 3 in 4 s after TimeoutError: ${lookup}`,
+  ]);
+
+  const quiet = await runSync({ ...LIVE });
+  assert.deepEqual(quiet.warnings, [], 'a sync with nothing to retry prints only its summary');
 });
 
 test('a token GitHub rejects fails the sync at once and names the variable, because it would fail every build', async () => {

@@ -42,13 +42,22 @@ const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
 const BACKOFF_BASE_MS = 1000;
 const RESET_MARGIN_MS = 1000;
-// Covers the body too. Every request is a GET, so a stalled one is safe to abandon and send
-// again; a file at the 5 MB cap needs only about 175 KB/s to arrive in time.
+// A deadline for the whole request, body included, not a stall detector. Every request is a GET,
+// so one abandoned at the deadline is safe to send again. Eight files at the 5 MB cap, arriving
+// together, need about 11 Mbit/s between them to finish in time.
 const REQUEST_TIMEOUT_MS = 30_000;
 // GitHub allows 100 concurrent REST requests, and a token build reads every file there.
-const MAX_DOWNLOADS = 8;
+const MAX_OPEN_REQUESTS = 8;
+// A header cannot carry a line break or a non-ASCII character, and fetch quotes the whole
+// rejected header in its error, which would print the token in the build log.
+const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
 
 const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
+
+// Node's fetch gives a network failure or a cut-off body the socket or DNS error as its cause,
+// and a stall its signal's TimeoutError. A request it could not even build has neither, and
+// would fail the same way every time.
+const isNetworkFailure = (error) => error?.name === 'TimeoutError' || error?.cause !== undefined;
 
 /** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
 function retryDelay(response, retriesUsed) {
@@ -62,47 +71,70 @@ function retryDelay(response, retriesUsed) {
   return MAX_RETRY_WAIT_MS;
 }
 
+let openRequests = 0;
+const waitingForSlot = [];
+
+/** Runs one request once fewer than MAX_OPEN_REQUESTS are open. A request waiting to retry holds no slot. */
+async function inSlot(request) {
+  if (openRequests < MAX_OPEN_REQUESTS) openRequests += 1;
+  else await new Promise((resolve) => waitingForSlot.push(resolve));
+  try {
+    return await request();
+  } finally {
+    // Hand the slot straight to the next request, or give it back.
+    const next = waitingForSlot.shift();
+    if (next) next();
+    else openRequests -= 1;
+  }
+}
+
+/**
+ * Reads a final answer within its attempt, so a connection that drops or stalls mid-body fails
+ * here and is retried. A refusal's status is its answer even when its body cannot be read.
+ */
+async function readAnswer(response) {
+  const { ok, status } = response;
+  try {
+    return { ok, status, body: Buffer.from(await response.arrayBuffer()) };
+  } catch (error) {
+    if (ok) throw error;
+    return { ok, status, body: Buffer.alloc(0) };
+  }
+}
+
+/** One request: its final answer, or how long to wait before the next try, and why. */
+async function attempt(url, headers, retriesUsed) {
+  // A fresh signal each time, so a retry does not inherit a spent timeout.
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const transient = response.status === 403 || response.status === 429 || response.status >= 500;
+  const delay = transient && retriesUsed < MAX_RETRIES ? retryDelay(response, retriesUsed) : undefined;
+  // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
+  if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response) };
+  // Released so it does not hold a connection; a body that already broke keeps the wait above.
+  await response.body?.cancel().catch(() => {});
+  return { delay, reason: response.status };
+}
+
 /**
  * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
  * on the way: no connection, a reset, or a stall. The caller judges the final status.
  */
 async function githubFetch(url, headers) {
   for (let retriesUsed = 0; ; retriesUsed += 1) {
-    let delay;
+    let outcome;
     try {
-      // A fresh signal each time, so a retry does not inherit a spent timeout.
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-      const transient = response.status === 403 || response.status === 429 || response.status >= 500;
-      if (transient && retriesUsed < MAX_RETRIES) delay = retryDelay(response, retriesUsed);
-      // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
-      if (delay === undefined || delay > MAX_RETRY_WAIT_MS) {
-        // Read within the attempt: a connection that drops or stalls mid-body fails here, not in fetch().
-        return { ok: response.ok, status: response.status, body: Buffer.from(await response.arrayBuffer()) };
-      }
-      await response.body?.cancel();
+      outcome = await inSlot(() => attempt(url, headers, retriesUsed));
     } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
       if (retriesUsed === MAX_RETRIES) {
         throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
       }
-      delay = backoff(retriesUsed);
+      outcome = { delay: backoff(retriesUsed), reason: error.cause?.code ?? error.name };
     }
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (outcome.answer) return outcome.answer;
+    console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
+    await new Promise((resolve) => setTimeout(resolve, outcome.delay));
   }
-}
-
-/** Runs `task` over `items` with at most `limit` in flight, keeping their order. */
-async function mapWithLimit(items, limit, task) {
-  const results = [];
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 function tokenHint(response) {
@@ -220,6 +252,9 @@ function refuse(commit, problems) {
 }
 
 async function main() {
+  if (TOKEN && !TOKEN_CHARACTERS.test(TOKEN)) {
+    throw new Error('WRITING_GITHUB_TOKEN has a space, line break, or non-ASCII character in it: copy the token again.');
+  }
   const commit = await resolveCommit();
   const listing = await listFiles(commit);
   const entries = listing.filter((entry) => entry.type === 'blob');
@@ -230,10 +265,9 @@ async function main() {
   const readmes = entries.filter((entry) => folders.some((folder) => entry.path === `${folder}/README.md`));
   refuse(commit, [...folders.flatMap((folder) => folderProblems(folder, entries)), ...totalProblems('READMEs', readmes)]);
 
-  const articles = await mapWithLimit(folders, MAX_DOWNLOADS, async (slug) => ({
-    slug,
-    bytes: await fetchFile(commit, `${slug}/README.md`),
-  }));
+  const articles = await Promise.all(
+    folders.map(async (slug) => ({ slug, bytes: await fetchFile(commit, `${slug}/README.md`) })),
+  );
   // Skipped here, not only when pages are built: anything under public/ has a
   // URL, so a draft's figures must never reach it.
   const published = articles.filter(({ bytes }) => !isDraftArticle(bytes.toString('utf8')));
@@ -248,13 +282,13 @@ async function main() {
 
   // Everything arrives before anything is removed, so a failed download leaves
   // the last good sync in place.
-  const downloads = [
+  const downloads = await Promise.all([
     ...published.map(({ slug, bytes }) => ({ destination: path.join(contentRoot, slug, 'README.md'), bytes })),
-    ...(await mapWithLimit(assets, MAX_DOWNLOADS, async ({ path: file }) => ({
+    ...assets.map(async ({ path: file }) => ({
       destination: path.join(publicRoot, file),
       bytes: await fetchFile(commit, file),
-    }))),
-  ];
+    })),
+  ]);
 
   await rm(contentRoot, { recursive: true, force: true });
   await rm(publicRoot, { recursive: true, force: true });

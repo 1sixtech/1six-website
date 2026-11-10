@@ -120,9 +120,10 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   files of at most 5 MB each and 200 MB in total, again naming every problem. A draft's other files are not checked.
 - GitHub 403, 429, and 5xx answers are retried three times, honoring `Retry-After` and the rate-limit reset. A wait longer
   than a minute is not attempted: the sync fails at once. A request that cannot connect, drops, or takes over 30 seconds
-  (its body included) is retried three times after 1, 2, and 4 seconds. At most eight downloads run at once. With
-  `WRITING_GITHUB_TOKEN` every request uses the REST API; without it files come from `raw.githubusercontent.com`. A token
-  GitHub rejects fails the build.
+  (its body included) is retried after 1, 2, and 4 seconds, within the same three retries, and each retry prints a line to
+  the build log. At most eight requests are open at once; one waiting to retry holds no place. With `WRITING_GITHUB_TOKEN`
+  every request uses the REST API; without it files come from `raw.githubusercontent.com`. A token GitHub rejects fails
+  the build, and so does one with a space, line break, or non-ASCII character in it, before any request and unprinted.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
   omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
   Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
