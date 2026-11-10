@@ -42,12 +42,19 @@ const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
 const BACKOFF_BASE_MS = 1000;
 const RESET_MARGIN_MS = 1000;
+// Covers the body too. Every request is a GET, so a stalled one is safe to abandon and send
+// again; a file at the 5 MB cap needs only about 175 KB/s to arrive in time.
+const REQUEST_TIMEOUT_MS = 30_000;
+// GitHub allows 100 concurrent REST requests, and a token build reads every file there.
+const MAX_DOWNLOADS = 8;
+
+const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
 
 /** How long to wait: Retry-After if given; else a growing backoff for a server error, or for a refusal the limit's reset, or a minute. */
 function retryDelay(response, retriesUsed) {
   const retryAfter = Number(response.headers.get('retry-after'));
   if (retryAfter > 0) return retryAfter * 1000;
-  if (response.status >= 500) return BACKOFF_BASE_MS * 2 ** retriesUsed;
+  if (response.status >= 500) return backoff(retriesUsed);
   const resetAt = Number(response.headers.get('x-ratelimit-reset'));
   if (response.headers.get('x-ratelimit-remaining') === '0' && resetAt > 0) {
     return Math.max(resetAt * 1000 - Date.now(), 0) + RESET_MARGIN_MS;
@@ -55,18 +62,47 @@ function retryDelay(response, retriesUsed) {
   return MAX_RETRY_WAIT_MS;
 }
 
-/** Fetches, retrying a refusal or server error; the caller reads the final answer. */
+/**
+ * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
+ * on the way: no connection, a reset, or a stall. The caller judges the final status.
+ */
 async function githubFetch(url, headers) {
   for (let retriesUsed = 0; ; retriesUsed += 1) {
-    const response = await fetch(url, { headers });
-    const transient = response.status === 403 || response.status === 429 || response.status >= 500;
-    if (!transient || retriesUsed === MAX_RETRIES) return response;
-    // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
-    const delay = retryDelay(response, retriesUsed);
-    if (delay > MAX_RETRY_WAIT_MS) return response;
-    await response.body?.cancel();
+    let delay;
+    try {
+      // A fresh signal each time, so a retry does not inherit a spent timeout.
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      const transient = response.status === 403 || response.status === 429 || response.status >= 500;
+      if (transient && retriesUsed < MAX_RETRIES) delay = retryDelay(response, retriesUsed);
+      // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
+      if (delay === undefined || delay > MAX_RETRY_WAIT_MS) {
+        // Read within the attempt: a connection that drops or stalls mid-body fails here, not in fetch().
+        return { ok: response.ok, status: response.status, body: Buffer.from(await response.arrayBuffer()) };
+      }
+      await response.body?.cancel();
+    } catch (error) {
+      if (retriesUsed === MAX_RETRIES) {
+        throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
+      }
+      delay = backoff(retriesUsed);
+    }
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
+}
+
+/** Runs `task` over `items` with at most `limit` in flight, keeping their order. */
+async function mapWithLimit(items, limit, task) {
+  const results = [];
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await task(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function tokenHint(response) {
@@ -85,11 +121,9 @@ async function resolveCommit() {
     Accept: 'application/vnd.github.sha',
   });
   if (!response.ok) {
-    throw new Error(
-      `GitHub commit lookup failed for ${REF}: ${response.status} ${await response.text()}${tokenHint(response)}`,
-    );
+    throw new Error(`GitHub commit lookup failed for ${REF}: ${response.status} ${response.body}${tokenHint(response)}`);
   }
-  return (await response.text()).trim();
+  return response.body.toString().trim();
 }
 
 async function listFiles(commit) {
@@ -98,11 +132,9 @@ async function listFiles(commit) {
     Accept: 'application/vnd.github+json',
   });
   if (!response.ok) {
-    throw new Error(
-      `GitHub tree fetch failed: ${response.status} ${await response.text()}${tokenHint(response)}`,
-    );
+    throw new Error(`GitHub tree fetch failed: ${response.status} ${response.body}${tokenHint(response)}`);
   }
-  const tree = await response.json();
+  const tree = JSON.parse(response.body.toString());
   // Past 100,000 entries or 7 MB GitHub returns part of the tree, and the missing
   // articles would leave the site without an error.
   if (tree.truncated) {
@@ -128,7 +160,7 @@ async function fetchFile(commit, file) {
   if (!response.ok) {
     throw new Error(`Failed to download ${file}: ${response.status}${tokenHint(response)}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  return response.body;
 }
 
 async function save(bytes, destination) {
@@ -198,9 +230,10 @@ async function main() {
   const readmes = entries.filter((entry) => folders.some((folder) => entry.path === `${folder}/README.md`));
   refuse(commit, [...folders.flatMap((folder) => folderProblems(folder, entries)), ...totalProblems('READMEs', readmes)]);
 
-  const articles = await Promise.all(
-    folders.map(async (slug) => ({ slug, bytes: await fetchFile(commit, `${slug}/README.md`) })),
-  );
+  const articles = await mapWithLimit(folders, MAX_DOWNLOADS, async (slug) => ({
+    slug,
+    bytes: await fetchFile(commit, `${slug}/README.md`),
+  }));
   // Skipped here, not only when pages are built: anything under public/ has a
   // URL, so a draft's figures must never reach it.
   const published = articles.filter(({ bytes }) => !isDraftArticle(bytes.toString('utf8')));
@@ -215,13 +248,13 @@ async function main() {
 
   // Everything arrives before anything is removed, so a failed download leaves
   // the last good sync in place.
-  const downloads = await Promise.all([
+  const downloads = [
     ...published.map(({ slug, bytes }) => ({ destination: path.join(contentRoot, slug, 'README.md'), bytes })),
-    ...assets.map(async ({ path: file }) => ({
+    ...(await mapWithLimit(assets, MAX_DOWNLOADS, async ({ path: file }) => ({
       destination: path.join(publicRoot, file),
       bytes: await fetchFile(commit, file),
-    })),
-  ]);
+    }))),
+  ];
 
   await rm(contentRoot, { recursive: true, force: true });
   await rm(publicRoot, { recursive: true, force: true });

@@ -26,18 +26,39 @@ const code = ts.transpileModule(
 const COMMIT = 'a1b2c3d'.padEnd(40, '0');
 const REPO = '1sixtech/1six-researchs';
 
-// A real Response, so a body released too early cannot be read, as in production.
+// Every answer is a real Response, so a body released too early cannot be read, as in production.
 const refusal = (status, text = '', headers = {}) => new Response(text, { status, headers });
+
+// How Node's fetch rejects when a request never gets an answer: a TypeError whose cause names the reason.
+const networkError = (code, message) => new TypeError('fetch failed', { cause: Object.assign(new Error(message), { code }) });
+const dropped = () => networkError('ECONNRESET', 'read ECONNRESET');
+// What AbortSignal.timeout rejects with, in fetch() or, once the headers are in, in the body read.
+const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
+/** A 200 whose body breaks after its first bytes, as when a connection resets or times out mid-download. */
+function brokenBody(reason) {
+  let pulls = 0;
+  return new Response(new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      if (pulls === 1) controller.enqueue(new TextEncoder().encode('<svg>par'));
+      else controller.error(reason);
+    },
+  }));
+}
 
 /**
  * Runs the sync over `files` (path -> text), failing the downloads listed in `failing`.
- * `replies` maps part of a URL to the refusals [status, headers] GitHub gives it before answering;
+ * `replies` maps part of a URL to what GitHub gives it before answering normally: a refusal
+ * [status, headers], an error the request rejects with, or a Response to return as is;
  * `sizes` overrides the size the listing reports for a path, and `listing` rewrites the listing's
  * whole answer. Waits are recorded and not slept; `now` fixes the clock the script reads.
+ * `signals` lists each request's signal, and `peak` the most requests that were open at once.
  */
 function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMMIT}\n`, treeStatus = 200, offline = false, env = {}, truncated = false, sizes = {}, replies = {}, listing = (answer) => answer, now } = {}) {
   return new Promise((resolve) => {
-    const result = { requests: [], headers: new Map(), refusals: [], waits: [], operations: [], written: new Map(), logged: [], errors: [], exit: undefined };
+    const result = { requests: [], headers: new Map(), signals: [], peak: 0, refusals: [], waits: [], operations: [], written: new Map(), logged: [], errors: [], exit: undefined };
+    let open = 0;
     const fileAt = (url) => {
       const { pathname } = new URL(url);
       return decodeURIComponent(pathname.split('/').slice(url.includes('/contents/') ? 5 : 4).join('/'));
@@ -64,6 +85,8 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       exports: {},
       Buffer,
       ...(now === undefined ? {} : { Date: class extends Date { static now() { return now; } } }),
+      // Never fires: a stall is scripted as the error the real signal would raise.
+      AbortSignal: { timeout: (delay) => ({ timeout: delay }) },
       setTimeout(callback, delay) {
         result.waits.push(delay);
         callback();
@@ -83,15 +106,23 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
       async fetch(url, init) {
         result.requests.push(url);
         result.headers.set(url, { ...init.headers });
-        if (offline) throw new Error('getaddrinfo ENOTFOUND api.github.com');
-        const refused = scripted(url);
-        if (refused) {
-          result.refusals.push(refusal(refused[0], 'busy', refused[1]));
+        result.signals.push(init.signal);
+        // A real request is answered later, never at once; the gap shows how many are open together.
+        open += 1;
+        result.peak = Math.max(result.peak, open);
+        await new Promise((resolve) => setImmediate(resolve));
+        open -= 1;
+        if (offline) throw networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com');
+        const reply = scripted(url);
+        if (reply instanceof Error) throw reply;
+        if (reply instanceof Response) return reply;
+        if (reply) {
+          result.refusals.push(refusal(reply[0], 'busy', reply[1]));
           return result.refusals.at(-1);
         }
         if (url.includes('/commits/')) {
           if (commitStatus !== 200) return refusal(commitStatus, 'Not Found');
-          return { ok: true, status: 200, text: async () => commitBody };
+          return new Response(commitBody);
         }
         if (url.includes('/git/trees/')) {
           // Like GitHub, the tree exists only at a real commit.
@@ -99,11 +130,11 @@ function runSync(files, { failing = [], commitStatus = 200, commitBody = `${COMM
           if (status !== 200) return refusal(status, 'tree unavailable');
           const size = (file) => (Object.hasOwn(sizes, file) ? sizes[file] : new TextEncoder().encode(files[file]).length);
           const tree = [{ type: 'tree', path: 'a-folder' }, ...Object.keys(files).map((file) => ({ type: 'blob', mode: '100644', path: file, size: size(file) }))];
-          return { ok: true, status: 200, json: async () => listing({ tree, truncated }) };
+          return Response.json(listing({ tree, truncated }));
         }
         const file = fileAt(url);
         if (failing.includes(file)) return refusal(500);
-        return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(files[file]).buffer };
+        return new Response(files[file]);
       },
     }));
   });
@@ -209,11 +240,14 @@ test('a commit that cannot be resolved fails the sync before anything is listed 
   assert.deepEqual(run.operations, [], 'the last good sync stays in place');
 });
 
-test('a network failure fails the sync before anything is listed or touched', async () => {
+test('a network failure that persists is retried three times, then fails the sync before anything is listed or touched', async () => {
   const run = await runSync({ '001-live/README.md': PUBLISHED }, { offline: true });
+  const lookup = `https://api.github.com/repos/${REPO}/commits/main`;
   assert.equal(run.exit, 1);
-  assert.match(run.errors[0].message, /ENOTFOUND/);
-  assert.equal(run.requests.length, 1, 'no listing and no download follow a failed lookup');
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${lookup}`);
+  assert.equal(run.errors[0].cause.cause.code, 'ENOTFOUND', "Node's own reason stays attached for the build log");
+  assert.deepEqual(run.requests, [lookup, lookup, lookup, lookup], 'no listing and no download follow a failed lookup');
+  assert.deepEqual(run.waits, [1000, 2000, 4000], 'the server-error backoff');
   assert.deepEqual(run.operations, [], 'the last good sync stays in place');
 });
 
@@ -511,6 +545,145 @@ test('anything else is an answer, not an outage, and is not retried', async () =
     assert.equal(run.requests.length, 1, `${status} is final`);
     assert.deepEqual(run.waits, []);
   }
+});
+
+test('a request that fails on the way is retried with the server-error backoff, on the API and on file downloads', async () => {
+  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [dropped(), networkError('ENOTFOUND', 'getaddrinfo ENOTFOUND api.github.com')] } });
+  assert.equal(lookup.exit, undefined);
+  assert.deepEqual(lookup.waits, [1000, 2000]);
+  assert.equal(lookup.requests.filter((url) => url.includes('/commits/')).length, 3);
+
+  const listing = await runSync({ ...LIVE }, { replies: { '/git/trees/': [dropped()] } });
+  assert.equal(listing.exit, undefined);
+  assert.deepEqual(listing.waits, [1000]);
+
+  const download = await runSync({ ...LIVE }, { replies: { 'raw.githubusercontent.com': [dropped()] } });
+  assert.equal(download.exit, undefined);
+  assert.deepEqual(download.waits, [1000]);
+  assert.equal(download.written.get('/repo/content/writing/001-live/README.md'), PUBLISHED);
+
+  const authenticated = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'tok' }, replies: { '/contents/': [dropped()] } });
+  assert.equal(authenticated.exit, undefined);
+  assert.deepEqual(authenticated.waits, [1000]);
+});
+
+test('a request that stalls is abandoned at its timeout and sent again, whether it stalls before the answer or in the body', async () => {
+  const beforeAnswer = await runSync({ ...LIVE }, { replies: { '/commits/': [timedOut()] } });
+  assert.equal(beforeAnswer.exit, undefined);
+  assert.deepEqual(beforeAnswer.waits, [1000]);
+
+  const inBody = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
+    { replies: { 'chart.svg': [brokenBody(timedOut())] } },
+  );
+  assert.equal(inBody.exit, undefined);
+  assert.deepEqual(inBody.waits, [1000]);
+  assert.equal(inBody.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
+});
+
+test('a body cut off partway is downloaded again in full, so part of a file is never saved', async () => {
+  const run = await runSync(
+    { ...LIVE, '001-live/assets/chart.svg': '<svg>public</svg>' },
+    { replies: { 'chart.svg': [brokenBody(new TypeError('terminated')), brokenBody(new TypeError('terminated'))] } },
+  );
+  assert.equal(run.exit, undefined);
+  assert.deepEqual(run.waits, [1000, 2000]);
+  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/chart.svg'), '<svg>public</svg>');
+});
+
+test('every attempt has its own 30-second timeout, so a retry does not start on a spent one', async () => {
+  for (const env of [{}, { WRITING_GITHUB_TOKEN: 'tok' }]) {
+    const run = await runSync(
+      { ...LIVE, '001-live/assets/chart.svg': '<svg/>' },
+      { env, replies: { '/commits/': [[503]], 'chart.svg': [dropped()] } },
+    );
+    assert.equal(run.exit, undefined);
+    assert.equal(run.requests.length, 6, 'two lookups, the listing, the README, and the figure twice');
+    assert.equal(run.signals.length, run.requests.length);
+    for (const signal of run.signals) assert.deepEqual(signal, { timeout: 30_000 });
+    assert.equal(new Set(run.signals).size, run.signals.length);
+  }
+});
+
+test('a download that keeps failing on the way fails the sync, names the request, and leaves the last good sync in place', async () => {
+  const always = () => [dropped(), dropped(), dropped(), dropped()];
+  const figure = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/chart.svg`;
+  const run = await runSync({ ...LIVE, '001-live/assets/chart.svg': '<svg/>' }, { replies: { 'chart.svg': always() } });
+  assert.equal(run.exit, 1);
+  assert.equal(run.errors[0].message, `GitHub request failed after 3 retries: ${figure}`);
+  assert.equal(run.requests.filter((url) => url === figure).length, 4);
+  assert.deepEqual(run.waits, [1000, 2000, 4000]);
+  assert.deepEqual(run.operations, [], 'nothing is deleted until every file has arrived');
+
+  const cutOff = await runSync({ ...LIVE }, { replies: { 'raw.githubusercontent.com': Array.from({ length: 4 }, () => brokenBody(timedOut())) } });
+  assert.equal(cutOff.exit, 1);
+  assert.equal(cutOff.errors[0].cause.name, 'TimeoutError');
+  assert.deepEqual(cutOff.operations, []);
+
+  const authenticated = await runSync({ ...LIVE }, { env: { WRITING_GITHUB_TOKEN: 'secret-token' }, replies: { '/contents/': always() } });
+  assert.equal(authenticated.exit, 1);
+  assert.match(authenticated.errors[0].message, /contents\/001-live\/README\.md\?ref=/);
+  assert.doesNotMatch(authenticated.errors[0].message, /secret-token/, 'the token travels in a header, never in the message');
+});
+
+test('downloads run eight at a time, READMEs and figures alike, and every file still arrives', async () => {
+  const folders = Array.from({ length: 20 }, (_, index) => `0${String(index).padStart(2, '0')}-article`);
+  const readmes = await runSync(Object.fromEntries(folders.map((folder) => [`${folder}/README.md`, `# ${folder}\n\nDate: 2026-11-01\n`])));
+  assert.equal(readmes.exit, undefined);
+  assert.equal(readmes.peak, 8);
+  assert.equal(readmes.written.size, 20);
+  for (const folder of folders) assert.equal(readmes.written.get(`/repo/content/writing/${folder}/README.md`), `# ${folder}\n\nDate: 2026-11-01\n`);
+
+  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+  const assets = await runSync({ ...LIVE, ...figures });
+  assert.equal(assets.exit, undefined);
+  assert.equal(assets.peak, 8);
+  for (const [file, text] of Object.entries(figures)) assert.equal(assets.written.get(`/repo/public/writing-assets/${file}`), text);
+
+  const few = await runSync({ ...LIVE, '001-live/assets/a.svg': '<svg/>', '001-live/assets/b.svg': '<svg/>' });
+  assert.equal(few.peak, 2, 'fewer files than the limit still download together');
+});
+
+test('a download that fails after the first eight have started still stops the sync before anything is removed', async () => {
+  const figures = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`001-live/assets/f${index}.svg`, `<svg>${index}</svg>`]));
+  const late = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/001-live/assets/f15.svg`;
+  const run = await runSync({ ...LIVE, ...figures }, { failing: ['001-live/assets/f15.svg'] });
+  assert.equal(run.exit, 1);
+  assert.match(run.errors[0].message, /Failed to download 001-live\/assets\/f15\.svg: 500/);
+  assert.ok(run.requests.filter((url) => url.includes('/assets/')).indexOf(late) >= 8, 'the file waited for a free slot');
+  assert.equal(run.peak, 8);
+  assert.deepEqual(run.operations, [], 'nothing is deleted until every file has arrived');
+});
+
+test('a lookup or a listing whose body breaks partway is read again, so part of a commit or a listing is never used', async () => {
+  const lookup = await runSync({ ...LIVE }, { replies: { '/commits/': [brokenBody(new TypeError('terminated'))] } });
+  assert.equal(lookup.exit, undefined);
+  assert.deepEqual(lookup.waits, [1000]);
+  assert.equal(lookup.requests[2], `https://api.github.com/repos/${REPO}/git/trees/${COMMIT}?recursive=1`, 'the listing reads the whole commit');
+
+  const listing = await runSync({ ...LIVE }, { replies: { '/git/trees/': [brokenBody(timedOut())] } });
+  assert.equal(listing.exit, undefined);
+  assert.deepEqual(listing.waits, [1000]);
+  assert.equal(listing.written.get('/repo/content/writing/001-live/README.md'), PUBLISHED);
+});
+
+test('a listing that answers with something other than JSON fails the sync, unretried, before anything is downloaded or touched', async () => {
+  const run = await runSync({ ...LIVE }, { replies: { '/git/trees/': [new Response('<html>Unicorn!</html>')] } });
+  assertRefusedAtListing(run, []);
+  assert.equal(run.errors[0].name, 'SyntaxError');
+  assert.deepEqual(run.waits, [], 'a complete answer is not an outage');
+});
+
+test('a refusal with no body, or one whose connection drops before its body is released, is still retried', async () => {
+  const empty = await runSync({ ...LIVE }, { replies: { '/commits/': [new Response(null, { status: 429, headers: { 'retry-after': '30' } })] } });
+  assert.equal(empty.exit, undefined);
+  assert.deepEqual(empty.waits, [30_000], 'nothing to release, so the wait GitHub named still holds');
+
+  const broken = new Response(new ReadableStream({ start(controller) { controller.error(dropped()); } }), { status: 429, headers: { 'retry-after': '30' } });
+  const run = await runSync({ ...LIVE }, { replies: { '/commits/': [broken] } });
+  assert.equal(run.exit, undefined);
+  assert.equal(run.requests.filter((url) => url.includes('/commits/')).length, 2);
+  assert.equal(run.waits.length, 1);
 });
 
 test('a token GitHub rejects fails the sync at once and names the variable, because it would fail every build', async () => {
