@@ -71,7 +71,7 @@ src/
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, ICON_VERSION, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
-    favicon.ts                # Favicon hrefs per color scheme and faviconHref(), the swap rule FaviconSync applies
+    favicon.ts                # The adaptive favicon href and each color scheme's fixed-copy href
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     writingAssets.mjs         # Article image types, shared by the site and the sync script
@@ -301,11 +301,11 @@ per-page titles. With one title, screen readers name no page on navigation (acce
 The favicon's mark is black on light and white on dark. `public/favicon.svg` is the one hand-edited
 source and carries a `prefers-color-scheme` rule; `scripts/make-icons.mjs` derives the fixed-color
 `favicon-light.svg` and `favicon-dark.svg` from it and renders the PNGs from the light one. Chrome and
-Firefox draw an SVG favicon once, in the scheme it loaded in, so `FaviconSync` reads the scheme on the
-media query's change event, when the tab is shown, and every second. Once the scheme differs from the
-load scheme, it points the icon link at the current scheme's fixed copy (`faviconHref()` in
-`src/lib/favicon.ts`). The root layout renders that link in `<head>`, not through `metadata.icons`, so a
-client navigation never adds a second SVG icon. Safari keeps the black mark (accepted, see PRODUCT.md).
+Firefox draw an SVG favicon once, and Chrome shows its stored image of an icon URL again on later visits,
+so `favicon.svg` may be in the wrong scheme. Once mounted, `FaviconSync` points the icon link at the
+current scheme's fixed copy (`SCHEME_FAVICONS` in `src/lib/favicon.ts`) and follows the scheme on the
+media query's change event, when the tab is shown, and every second. The root layout renders that link
+in `<head>`, not through `metadata.icons`, so a client navigation never adds a second SVG icon. Safari keeps the black mark (accepted, see PRODUCT.md).
 After editing `favicon.svg`, run `node scripts/make-icons.mjs`, bump `ICON_VERSION` in `site.ts` (every
 icon URL carries `?v=ICON_VERSION`), and record the five icon files' SHA-256 in `ICON_DIGESTS`
 (`src/app/icons.test.mjs`). Every favicon SVG gets a sandboxed CSP. Each page supplies its canonical

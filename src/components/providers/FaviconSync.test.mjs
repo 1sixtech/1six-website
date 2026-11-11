@@ -17,7 +17,7 @@ const LIGHT = `/favicon-light.svg?v=${ICON_VERSION}`;
 const DARK = `/favicon-dark.svg?v=${ICON_VERSION}`;
 
 /** FaviconSync mounted against a stand-in icon link, OS color scheme, and timer. */
-function mount({ dark = false } = {}) {
+function mount({ dark = false, icon = true } = {}) {
   const attributes = { href: ADAPTIVE };
   const writes = [];
   const link = {
@@ -30,7 +30,7 @@ function mount({ dark = false } = {}) {
   const query = Object.assign(new EventTarget(), { matches: dark });
   const document = Object.assign(new EventTarget(), {
     hidden: false,
-    head: { querySelector: (selector) => (selector === 'link[rel="icon"][type="image/svg+xml"]' ? link : null) },
+    head: { querySelector: (selector) => (icon && selector === 'link[rel="icon"][type="image/svg+xml"]' ? link : null) },
   });
   let timer = null;
   const window = {
@@ -70,26 +70,26 @@ function mount({ dark = false } = {}) {
   };
 }
 
-test('FaviconSync: leaves favicon.svg at load, then follows each scheme change event', () => {
+test('FaviconSync: points the tab at the current scheme\'s fixed copy at once, then follows each change event', () => {
+  // favicon.svg may come from Chrome's favicon store drawn in the other scheme.
   const tab = mount({ dark: false });
+  assert.deepEqual(tab.writes, [LIGHT], 'the fixed copy replaces favicon.svg on mount');
   tab.tick();
-  assert.deepEqual(tab.writes, [], 'nothing written while the load scheme holds');
+  tab.change();
+  assert.deepEqual(tab.writes, [LIGHT], 'a repeated sync writes nothing');
 
   tab.osScheme('dark');
   tab.change();
   assert.equal(tab.href, DARK);
-  tab.change();
-  tab.tick();
-  assert.deepEqual(tab.writes, [DARK], 'a repeated sync writes nothing');
-
   tab.osScheme('light');
   tab.change();
-  assert.deepEqual(tab.writes, [DARK, LIGHT]);
+  assert.deepEqual(tab.writes, [LIGHT, DARK, LIGHT]);
   tab.unmount();
 });
 
 test('FaviconSync: a page that missed the change event catches up on the next tick, or when shown', () => {
   const tab = mount({ dark: true });
+  assert.equal(tab.href, DARK);
   assert.equal(tab.timer.ms, 1000);
 
   tab.osScheme('light'); // flipped while the window rendered no frame: no change event
@@ -111,5 +111,18 @@ test('FaviconSync: unmounting removes its listeners and its timer', () => {
   tab.osScheme('dark');
   tab.change();
   tab.visibility(false);
+  assert.deepEqual(tab.writes, [LIGHT], 'only the write on mount');
+});
+
+// Value: protects=FaviconSync on a page with no SVG icon link does nothing and
+// throws nothing; fails_when=the missing-link guard is removed or moved after
+// the listeners; why_new=the other cases always mount with the link; seam=none;
+// no_claim=real DOM and matchMedia (stand-ins; unit only)
+test('FaviconSync: with no SVG icon link it adds no listener and no timer', () => {
+  const tab = mount({ icon: false });
+  assert.equal(tab.timer, null);
+  tab.osScheme('dark');
+  tab.change();
   assert.deepEqual(tab.writes, []);
+  tab.unmount();
 });
