@@ -3,6 +3,12 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.16.0] - 2026-11-11
+
+### Changed
+
+- The favicon's 16 mark follows the browser's color scheme: black on a light tab bar, white on a dark one. In Chrome and Firefox it changes while the tab is open when the system theme changes, with no reload, even in a background tab. A later visit in the other theme gets the right mark once the page has loaded. Safari keeps the black mark; the owner accepted this.
+
 ## [0.3.15.0] - 2026-11-11
 
 ### Fixed
