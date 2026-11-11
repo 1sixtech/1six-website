@@ -3,6 +3,20 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.14.0] - 2026-11-10
+
+### Added
+
+- The article sync has 10 minutes. When GitHub keeps refusing, failing, or crawling past that, the build fails before anything is written and says why: what the sync was doing, how many files had arrived, where the time went (rate-limit holds, waits to retry, slow or missing answers), and which requests were still waiting for an answer. It used to run on into Vercel's 45-minute build limit and print nothing about the cause.
+
+### Changed
+
+- A download that keeps arriving is no longer cut off at 30 seconds. A request is given up on only after 30 seconds with nothing arriving, before its answer or partway through its body. Eight 5 MB files downloading together used to need about 11 Mbit/s to beat the old limit. A refusal's error body still gets 30 seconds from its answer.
+
+### Fixed
+
+- A step in the build machine's clock can no longer cut a GitHub rate-limit pause short, or let a shorter limit replace a longer one.
+
 ## [0.3.13.0] - 2026-11-10
 
 ### Changed
