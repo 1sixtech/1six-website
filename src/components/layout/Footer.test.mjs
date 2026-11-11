@@ -55,7 +55,7 @@ function links(node, found = []) {
 test('footer: site links go through FooterLink, and mail and external links stay plain anchors', () => {
   const rendered = links(renderFooter());
   const hrefs = (type) => rendered.filter((link) => link.type === type).map((link) => link.props.href);
-  const siteLinks = [...site.NAV_ITEMS.map(({ href }) => href), '/#investors'];
+  const siteLinks = site.NAV_ITEMS.map(({ href }) => href);
   const plainLinks = [`mailto:${site.CONTACT_EMAIL}`, 'https://x.com/1sixtech'];
 
   // The phone and desktop layouts each render their own copy of the columns.

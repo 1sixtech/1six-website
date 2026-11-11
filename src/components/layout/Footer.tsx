@@ -7,10 +7,7 @@ interface FooterLinkItem {
   href: string;
 }
 
-const COMPANY_LINKS: FooterLinkItem[] = [
-  ...NAV_ITEMS,
-  { label: 'Investors', href: '/#investors' },
-];
+const COMPANY_LINKS: FooterLinkItem[] = [...NAV_ITEMS];
 
 const CONTACT_LINKS: FooterLinkItem[] = [
   { label: CONTACT_EMAIL, href: `mailto:${CONTACT_EMAIL}` },
