@@ -123,13 +123,17 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   files of at most 5 MB each and 200 MB in total, again naming every problem. A draft's other files are not checked.
 - GitHub 403, 429, and 5xx answers are retried three times, honoring `Retry-After` and the rate-limit reset; a 403 or
   429 holds every request until then. A wait longer than a minute is not attempted: the sync fails at once. A request that
-  cannot connect, drops, or sends nothing for 30 seconds (no answer yet, or no more of its body) is retried after 1, 2, and
-  4 seconds, within the same three retries, and each retry prints a line to the build log; a slow download that keeps
-  arriving is not cut off. At most eight files download at once, each keeping its place through its retries, so a lasting
-  outage fails as fast however many files are queued. The sync has 10 minutes in all: past that the build fails before
-  anything is written, naming what the sync was doing, where the time went (rate-limit holds, retry waits, slow or
-  missing answers), and the requests still waiting for an answer, instead of running into Vercel's 45-minute build
-  limit. With `WRITING_GITHUB_TOKEN` every request uses the REST API; without it files come from
+  cannot connect, drops, sends nothing for 30 seconds (no answer yet, or no more of its body), or sends a body of the wrong
+  size is retried after 1, 2, and 4 seconds, within the same three retries, and each retry prints a line to the build log;
+  a slow download that keeps arriving is not cut off. Bytes are counted as they arrive, after fetch decodes any gzip: a file
+  must arrive at exactly the size the listing gives it and is given up on as soon as it passes that size, the commit lookup
+  may send at most 1 KB, the listing 32 MB (one GitHub cut off at its limit measured 17.6 MB), and a refusal's body 4 KB
+  (past that, the refusal's status still stands, unretried). A file still the wrong size after its retries fails the
+  build, naming the file and both sizes. At most eight files download at once, each keeping its place through its
+  retries, so a lasting outage fails as fast however many files are queued. The sync has 10 minutes in all: past that
+  the build fails before anything is written, naming what the sync was doing, where the time went (rate-limit holds,
+  retry waits, slow or missing answers), and the requests still waiting for an answer, instead of running into Vercel's
+  45-minute build limit. With `WRITING_GITHUB_TOKEN` every request uses the REST API; without it files come from
   `raw.githubusercontent.com`. A token GitHub rejects fails the build, and so does one with a space, line break, or
   non-ASCII character inside it (surrounding whitespace is trimmed), before any request and without printing it.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile

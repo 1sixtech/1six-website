@@ -37,9 +37,20 @@ const MAX_ASSET_MB = 5;
 const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a
 // repeated file once, so many small entries in the listing can still be many gigabytes.
-// SYNC_DEADLINE_MS is sized for this cap.
+// Each download is held to its listed size as it arrives, so this caps what is held too; a body of the wrong
+// size is dropped and retried (see readBody), so a misbehaving host can have each file read four times, each
+// time up to its size and the part that took it past.
+// SYNC_DEADLINE_MS is sized for this cap, with no such retries.
 const MAX_TOTAL_MB = 200;
 const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
+// The lookup answers with a commit SHA, 40 characters (64 in a SHA-256 repository). A listing is cut off at
+// 100,000 entries or GitHub's 7 MB limit, which is not the size of its JSON: one cut off there measured 17.6 MB
+// (71,474 entries, 2026-11-10), and a cut-off listing fails the sync. Anything longer than these is not
+// GitHub's answer: it is given up on as soon as it passes them, and retried. A refusal's body only adds to the
+// error message, so it has a cap of its own, whatever its request allows an answer.
+const MAX_COMMIT_BYTES = 1024;
+const MAX_LISTING_BYTES = 32 * 1024 * 1024;
+const MAX_REFUSAL_BYTES = 4096;
 
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
@@ -86,10 +97,11 @@ let runningFetches = 0;
 const waitingForSlot = [];
 
 // What the sync has done so far, for the report a missed deadline prints. `held` and `waiting` are spans
-// [start, end) of the time a rate limit held every request and of each wait to retry after a server error
-// or a network failure, on the monotonic clock, so a step in the wall clock cannot bend them. `silences`
-// counts the requests the watchdog gave up on, and `asking` holds the requests waiting for an answer.
-const progress = { step: 'looking up the commit', files: 0, downloaded: 0, refusals: 0, held: [], waiting: [], silences: 0, asking: new Set() };
+// [start, end) of the time a rate limit held every request and of each wait to retry after a server error,
+// a network failure, or a body of the wrong size, on the monotonic clock, so a step in the wall clock cannot
+// bend them. `silences` counts the requests the watchdog gave up on, `wrongSizes` the retries after a body of
+// the wrong size, and `asking` holds the requests waiting for an answer.
+const progress = { step: 'looking up the commit', files: 0, downloaded: 0, refusals: 0, held: [], waiting: [], silences: 0, wrongSizes: 0, asking: new Set() };
 
 /** The span of the next `length` ms, on the monotonic clock. */
 function spanFromNow(length) {
@@ -129,34 +141,60 @@ async function inSlot(task) {
   }
 }
 
-/** Reads a body to its end, calling `arrived` each time more of it comes in. */
-async function readBody(response, arrived) {
-  const parts = [];
+/**
+ * A body that ran past the most its request allows, or a file's that ended short of the size the listing gave
+ * it. Its attempt failed, as if the connection had broken, and is retried. A refusal's body is the exception:
+ * its status stands, unretried (see readAnswer).
+ */
+class WrongSize extends Error {
+  constructor(received, size) {
+    super(received > size ? `a body over ${size} bytes` : `a body of ${received} bytes, not ${size}`);
+    this.name = 'WrongSize';
+    this.received = received;
+    this.size = size;
+  }
+}
+
+/**
+ * Reads a body to its end, calling `arrived` each time more of it comes in. It is given up on as soon as it holds
+ * more than `size` bytes, and with `exact` it fails if it ends with fewer. Bytes are counted as fetch hands them
+ * over, after it has decoded any gzip, so a host sending without end cannot fill the build's memory first.
+ */
+async function readBody(response, arrived, { size, exact = false }) {
+  // Each part is copied into one buffer of the most the body may hold and let go. Kept as they came, the parts
+  // of a body sent a byte at a time would cost hundreds of bytes of memory for each byte of it, and run the build
+  // out of memory far below any of these limits.
+  const body = Buffer.allocUnsafe(size);
+  let received = 0;
   for await (const part of response.body ?? []) {
-    parts.push(part);
+    if (received + part.length > size) throw new WrongSize(received + part.length, size);
+    body.set(part, received);
+    received += part.length;
     arrived();
   }
-  return Buffer.concat(parts);
+  if (exact && received !== size) throw new WrongSize(received, size);
+  return body.subarray(0, received);
 }
 
 /**
  * Reads a final answer within its attempt, so a connection that drops mid-body, or a body that stops
- * arriving, fails here and is retried. A refusal's status is its answer even when its body cannot be read.
- * Its body only adds to the message, so it gets 30 seconds from the answer however it trickles in, and
- * a slow one cannot hold the sync until its deadline and hide the refusal.
+ * arriving or arrives at the wrong size, fails here and is retried. A refusal's status is its answer even when
+ * its body cannot be read. Its body only adds to the message, so it gets 30 seconds from the answer however it
+ * trickles in, and a slow one cannot hold the sync until its deadline and hide the refusal. It may hold
+ * MAX_REFUSAL_BYTES, whatever the request allows an answer.
  */
-async function readAnswer(response, arrived) {
+async function readAnswer(response, arrived, expected) {
   const { ok, status } = response;
   try {
-    return { ok, status, body: await readBody(response, ok ? arrived : () => {}) };
+    return { ok, status, body: await readBody(response, ok ? arrived : () => {}, ok ? expected : { size: MAX_REFUSAL_BYTES }) };
   } catch (error) {
     if (ok) throw error;
-    return { ok, status, body: Buffer.from('(body unreadable)') };
+    return { ok, status, body: Buffer.from(error instanceof WrongSize ? `(body over ${error.size} bytes)` : '(body unreadable)') };
   }
 }
 
 /** One request: its final answer, or how long to wait before the next try, and why. */
-async function attempt(url, headers, retriesUsed) {
+async function attempt(url, headers, expected, retriesUsed) {
   // A fresh watchdog each time, so a retry does not start on a spent one. The answer starts its wait
   // again, and so does each part of its body, unless it is a refusal (see readAnswer).
   const abandon = new AbortController();
@@ -180,7 +218,7 @@ async function attempt(url, headers, retriesUsed) {
     }
     const delay = retriesUsed < MAX_RETRIES ? wait : undefined;
     // An exhausted hourly limit can be most of an hour away; waiting would only slow the failure.
-    if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response, arrived) };
+    if (delay === undefined || delay > MAX_RETRY_WAIT_MS) return { answer: await readAnswer(response, arrived, expected) };
     // Released so it does not hold a connection; a body that already broke keeps the wait above.
     await response.body?.cancel().catch(() => {});
     return { delay, reason: response.status, paused: limited };
@@ -192,11 +230,12 @@ async function attempt(url, headers, retriesUsed) {
 
 /**
  * Fetches and reads one answer, retrying a refusal, a server error, or a request that fails
- * on the way: no connection, a reset, or nothing arriving. The caller judges the final status.
+ * on the way: no connection, a reset, nothing arriving, or a body of the wrong size (`expected`,
+ * see readBody). The caller judges the final status.
  * A request keeps its slot through its retries, so a failing one uses them up before the files
  * queued behind it start, and a lasting outage fails as fast however many files are waiting.
  */
-function githubFetch(url, headers) {
+function githubFetch(url, headers, expected) {
   return inSlot(async () => {
     for (let retriesUsed = 0; ; retriesUsed += 1) {
       // Waits out the rate-limit pause, including one that grows longer meanwhile. The last check
@@ -207,13 +246,16 @@ function githubFetch(url, headers) {
       }
       let outcome;
       try {
-        outcome = await attempt(url, headers, retriesUsed);
+        outcome = await attempt(url, headers, expected, retriesUsed);
       } catch (error) {
-        if (!isNetworkFailure(error)) throw error;
+        const wrongSize = error instanceof WrongSize;
+        if (!wrongSize && !isNetworkFailure(error)) throw error;
         if (retriesUsed === MAX_RETRIES) {
-          throw new Error(`GitHub request failed after ${MAX_RETRIES} retries: ${url}`, { cause: error });
+          const failure = wrongSize ? `sent ${error.message}` : 'request failed';
+          throw new Error(`GitHub ${failure} after ${MAX_RETRIES} retries: ${url}`, { cause: error });
         }
-        outcome = { delay: backoff(retriesUsed), reason: error.cause?.code ?? error.name };
+        if (wrongSize) progress.wrongSizes += 1;
+        outcome = { delay: backoff(retriesUsed), reason: wrongSize ? error.message : error.cause?.code ?? error.name };
       }
       if (outcome.answer) return outcome.answer;
       console.warn(`Retry ${retriesUsed + 1} of ${MAX_RETRIES} in ${outcome.delay / 1000} s after ${outcome.reason}: ${url}`);
@@ -241,7 +283,7 @@ async function resolveCommit() {
   const answer = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github.sha',
-  });
+  }, { size: MAX_COMMIT_BYTES });
   if (!answer.ok) {
     throw new Error(`GitHub commit lookup failed for ${REF}: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
@@ -252,7 +294,7 @@ async function listFiles(commit) {
   const answer = await githubFetch(`https://api.github.com/repos/${REPO}/git/trees/${commit}?recursive=1`, {
     ...GITHUB_API_HEADERS,
     Accept: 'application/vnd.github+json',
-  });
+  }, { size: MAX_LISTING_BYTES });
   if (!answer.ok) {
     throw new Error(`GitHub tree fetch failed: ${answer.status} ${answer.body}${tokenHint(answer)}`);
   }
@@ -277,9 +319,19 @@ function fileRequest(commit, file) {
     : [`https://raw.githubusercontent.com/${REPO}/${commit}/${encoded}`, { 'User-Agent': '1six-website' }];
 }
 
-async function fetchFile(commit, file) {
+/** Downloads a listed file, which must arrive at exactly the size the listing gave it. */
+async function fetchFile(commit, { path: file, size }) {
   progress.files += 1;
-  const answer = await githubFetch(...fileRequest(commit, file));
+  let answer;
+  try {
+    answer = await githubFetch(...fileRequest(commit, file), { size, exact: true });
+  } catch (error) {
+    // A file whose last attempt arrived at the wrong size is named, with both sizes, rather than by its URL.
+    if (!(error?.cause instanceof WrongSize)) throw error;
+    const { received } = error.cause;
+    const sent = received > size ? `at least ${received}` : received;
+    throw new Error(`Failed to download ${file} after ${MAX_RETRIES} retries: the listing gives it ${size} bytes, and GitHub sent ${sent}`, { cause: error.cause });
+  }
   if (!answer.ok) {
     throw new Error(`Failed to download ${file}: ${answer.status}${tokenHint(answer)}`);
   }
@@ -300,18 +352,38 @@ function numberedFolders(listing) {
   return [...new Set(folders)].filter((folder) => NUMBERED_FOLDER.test(folder));
 }
 
+/**
+ * The files under each top-level folder, in listing order. Built once, so the checks below take time in
+ * proportion to the listing rather than to its folders times its files, which on a listing of hundreds of
+ * thousands of entries would hold the build past its deadline, unable to fire while they ran.
+ */
+function filesByFolder(entries) {
+  const byFolder = new Map();
+  for (const entry of entries) {
+    const slash = entry.path.indexOf('/');
+    if (slash < 0) continue;
+    const folder = entry.path.slice(0, slash);
+    if (!byFolder.has(folder)) byFolder.set(folder, []);
+    byFolder.get(folder).push(entry);
+  }
+  return byFolder;
+}
+
 function sizeProblems(file, size) {
-  if (!Number.isInteger(size)) return [`${file}: the GitHub listing gave no size`];
+  // A negative size would lower the total checked below while the files beside it still arrive in full.
+  if (!Number.isInteger(size) || size < 0) return [`${file}: the GitHub listing gave no valid size`];
   return size > MAX_ASSET_BYTES ? [`${file}: is over the ${MAX_ASSET_MB} MB limit (${size} bytes)`] : [];
 }
 
-function folderProblems(folder, entries) {
-  const inFolder = entries.filter((entry) => entry.path.startsWith(`${folder}/`));
+/** The README a folder is checked and downloaded by: the first the listing gives. */
+const readmeOf = (folder, inFolder) => inFolder.find((entry) => entry.path === `${folder}/README.md`);
+
+function folderProblems(folder, inFolder) {
   const problems = [];
   if (!isArticleSlug(folder)) {
     problems.push(`${folder}: a folder name must be three digits, a hyphen, then lowercase letters, digits, or hyphens`);
   }
-  const readme = inFolder.find((entry) => entry.path === `${folder}/README.md`);
+  const readme = readmeOf(folder, inFolder);
   if (!readme) problems.push(`${folder}: has no README.md`);
   else problems.push(...sizeProblems(readme.path, readme.size));
   for (const entry of inFolder) {
@@ -371,7 +443,7 @@ function covered(spans, until) {
  * at all. Then the requests still waiting for an answer, so a slow one is named.
  */
 function lateReport() {
-  const { step, files, downloaded, refusals, held: holds, waiting, silences, asking } = progress;
+  const { step, files, downloaded, refusals, held: holds, waiting, silences, wrongSizes, asking } = progress;
   const now = performance.now();
   // Whole seconds, so the lines add up as printed. A hold or a wait still running counts only as far as now.
   const seconds = (spans) => Math.round(covered(spans, now) / 1000) * 1000;
@@ -385,7 +457,11 @@ function lateReport() {
   }
   if (waiting.length > 0) {
     const wait = waited > 0 ? `, and waiting to retry took ${duration(waited)}${held > 0 ? ' more' : ''}` : '';
-    lines.push(`Server errors and network failures cost ${plural(waiting.length, 'retry', 'retries')}${wait}.`);
+    // Each wrong-size retry is one of these waits, so a body the wrong size is named as the cause.
+    const causes = wrongSizes === 0
+      ? 'Server errors and network failures'
+      : wrongSizes === waiting.length ? 'Bodies of the wrong size' : 'Server errors, network failures, and bodies of the wrong size';
+    lines.push(`${causes} cost ${plural(waiting.length, 'retry', 'retries')}${wait}.`);
   }
   if (rest >= NOTABLE_SHARE_MS) {
     const how = silences > 0 ? 'slowly, or not at all,' : 'slowly';
@@ -426,12 +502,18 @@ async function download() {
   // Read from the whole listing, so a submodule in a numbered folder's place is still found.
   // A misnamed folder would otherwise publish its figures without its article.
   const folders = numberedFolders(listing);
-  const readmes = entries.filter((entry) => folders.some((folder) => entry.path === `${folder}/README.md`));
-  refuse(commit, [...folders.flatMap((folder) => folderProblems(folder, entries)), ...totalProblems('READMEs', readmes)]);
+  const byFolder = filesByFolder(entries);
+  const inFolder = (folder) => byFolder.get(folder) ?? [];
+  // One README per folder, the one checked and downloaded, so the total counts exactly what will arrive.
+  const readmes = folders.map((folder) => readmeOf(folder, inFolder(folder)));
+  refuse(commit, [
+    ...folders.flatMap((folder) => folderProblems(folder, inFolder(folder))),
+    ...totalProblems('READMEs', readmes.filter(Boolean)),
+  ]);
 
   progress.step = 'downloading READMEs';
   const articles = await Promise.all(
-    folders.map(async (slug) => ({ slug, bytes: await fetchFile(commit, `${slug}/README.md`) })),
+    folders.map(async (slug, index) => ({ slug, bytes: await fetchFile(commit, readmes[index]) })),
   );
   // Skipped here, not only when pages are built: anything under public/ has a
   // URL, so a draft's figures must never reach it.
@@ -440,17 +522,15 @@ async function download() {
     throw new Error(`No published articles found in ${REPO}@${REF}`);
   }
 
-  const assets = published.flatMap(({ slug }) =>
-    entries.filter((entry) => entry.path.startsWith(`${slug}/`) && entry.path !== `${slug}/README.md`),
-  );
+  const assets = published.flatMap(({ slug }) => inFolder(slug).filter((entry) => entry.path !== `${slug}/README.md`));
   refuse(commit, [...assets.flatMap(assetProblems), ...totalProblems('published assets', assets)]);
 
   progress.step = 'downloading assets';
   const downloads = await Promise.all([
     ...published.map(({ slug, bytes }) => ({ destination: path.join(contentRoot, slug, 'README.md'), bytes })),
-    ...assets.map(async ({ path: file }) => ({
-      destination: path.join(publicRoot, file),
-      bytes: await fetchFile(commit, file),
+    ...assets.map(async (entry) => ({
+      destination: path.join(publicRoot, entry.path),
+      bytes: await fetchFile(commit, entry),
     })),
   ]);
   return { commit, downloads, published: published.length, drafts: articles.length - published.length };

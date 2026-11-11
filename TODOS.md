@@ -34,18 +34,6 @@ The article repository's publishing gate is recorded under Completed.
 **Priority:** P1
 **Depends on:** The sync hardening (merged in v0.3.8.0) and the figure check merged to the website's `main`
 
-### Count each download's bytes against the size the listing gives it
-
-**What:** In `scripts/sync-writing.mjs`, count each body as it arrives: give up on a file once it passes the size the listing gave it, retry one that ends short, and cap the commit lookup and the listing (about 1 KB and 8 MB).
-
-**Why:** The sync checks only the sizes the listing claims. Since the idle timeout (v0.3.14.0), a body that keeps arriving runs until the 10-minute deadline instead of 30 seconds, so a host sending far more than it listed could fill memory and kill the build before the deadline's report prints. A body that ends early without a length header would also be saved cut short.
-
-**Context:** GitHub serves a pinned commit's files at their exact size (undici decodes gzip first), so an equality check is safe; it needs a CDN or proxy fault to trigger. Deferred from the v0.3.14.0 pre-landing review by the owner, to get its own review.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
-
 ## Site-wide
 
 ### Leave the CJK font declarations out of the critical CSS
@@ -63,6 +51,18 @@ The article repository's publishing gate is recorded under Completed.
 ## Completed
 
 The original problem statements below describe the earlier release; each resolution records the current behavior.
+
+### Count each download's bytes against the size the listing gives it
+
+**What:** In `scripts/sync-writing.mjs`, count each body as it arrives: give up on a file once it passes the size the listing gave it, retry one that ends short, and cap the commit lookup and the listing (about 1 KB and 8 MB).
+
+**Why:** The sync checks only the sizes the listing claims. Since the idle timeout (v0.3.14.0), a body that keeps arriving runs until the 10-minute deadline instead of 30 seconds, so a host sending far more than it listed could fill memory and kill the build before the deadline's report prints. A body that ends early without a length header would also be saved cut short.
+
+**Context:** GitHub serves a pinned commit's files at their exact size (undici decodes gzip first), so an equality check is safe; it needs a CDN or proxy fault to trigger. Deferred from the v0.3.14.0 pre-landing review by the owner, to get its own review.
+
+**Resolution:** Every body is counted as fetch hands it over, after it decodes gzip, and each part is copied into one buffer of the most the body may hold and let go: kept as they came, parts a byte long cost hundreds of bytes each (eight bodies sent a byte at a time held 367 MB of heap after 1.85 MB had arrived, against 20 MB this way). A file must arrive at exactly the size the listing gives it: it is given up on as soon as it passes that size, and one that ends short is retried like a dropped connection, within the same three retries. A file still the wrong size then fails the build, naming the file and both sizes. The commit lookup may send at most 1 KB and the listing 32 MB, not the 8 MB proposed: GitHub's 7 MB tree limit is not the size of its JSON, and a listing it cut off (torvalds/linux, 71,474 entries) measured 17.6 MB. A refusal's body, which only feeds the error message, may hold 4 KB; past that its status still stands, unretried. A listed size below zero is refused with the other size checks, before the files it covers download, and the README total counts only the one README per folder that is checked and downloaded. The listing is checked in time proportional to its size, so a huge one cannot hold the build past its deadline. A sync that runs out of time names bodies of the wrong size as the cause of their retries. Checked on 2026-11-10 against the article repository: `raw.githubusercontent.com` serves gzip with a `Content-Length` of the compressed size, and both it and the REST API deliver exactly the listed bytes once decoded.
+
+**Completed:** v0.3.15.0 (2026-11-11)
 
 ### Pin the writing sync to a reviewed commit
 
