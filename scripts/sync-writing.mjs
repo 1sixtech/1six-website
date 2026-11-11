@@ -38,7 +38,8 @@ const MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 // Every download is held in memory until the last one arrives, and Git stores a
 // repeated file once, so many small entries in the listing can still be many gigabytes.
 // Each download is held to its listed size as it arrives, so this caps what is held too; a body of the wrong
-// size is dropped and retried (see readBody), so a misbehaving host can send up to four times as much.
+// size is dropped and retried (see readBody), so a misbehaving host can have each file read four times, each
+// time up to its size and the part that took it past.
 // SYNC_DEADLINE_MS is sized for this cap, with no such retries.
 const MAX_TOTAL_MB = 200;
 const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
@@ -46,7 +47,7 @@ const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 // 100,000 entries or GitHub's 7 MB limit, which is not the size of its JSON: one cut off there measured 17.6 MB
 // (71,474 entries, 2026-11-10), and a cut-off listing fails the sync. Anything longer than these is not
 // GitHub's answer: it is given up on as soon as it passes them, and retried. A refusal's body only adds to the
-// error message, so it may hold far less.
+// error message, so it has a cap of its own, whatever its request allows an answer.
 const MAX_COMMIT_BYTES = 1024;
 const MAX_LISTING_BYTES = 32 * 1024 * 1024;
 const MAX_REFUSAL_BYTES = 4096;

@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
+import v8 from 'node:v8';
 import vm from 'node:vm';
 import { gzipSync } from 'node:zlib';
 import ts from 'typescript';
@@ -681,8 +682,10 @@ test('READMEs are capped in total before any is downloaded, and one with no list
   const over = await runSync(files, { sizes });
   assertRefusedAtListing(over, [/READMEs total 214958080 bytes, over the 200 MB limit for one build/]);
 
-  const unsized = await runSync({ ...LIVE }, { sizes: { '001-live/README.md': undefined } });
-  assertRefusedAtListing(unsized, [/001-live\/README\.md: the GitHub listing gave no valid size/]);
+  for (const size of [undefined, -1]) {
+    const unsized = await runSync({ ...LIVE }, { sizes: { '001-live/README.md': size } });
+    assertRefusedAtListing(unsized, [/001-live\/README\.md: the GitHub listing gave no valid size/]);
+  }
 
   // A second entry for a README, which Git never lists, is neither downloaded nor counted, so whatever size it
   // gives cannot lower the total below what the first entries bring.
@@ -2091,4 +2094,36 @@ test('a file at the top level is never part of a folder, even one whose name it 
   assert.equal(run.exit, undefined);
   assert.equal(run.requests.some((url) => url.includes('001-livex') || url.includes('001-live.md')), false);
   assert.deepEqual([...run.written.keys()], ['/repo/content/writing/001-live/README.md']);
+});
+
+test('a body sent a byte at a time holds about its own size in memory, not an object for each byte', async () => {
+  // Kept as they came, parts a byte long cost hundreds of bytes each (see readBody): this 64 KB body would hold
+  // megabytes of heap at its last byte. Garbage is collected before each reading, so only what is still held counts.
+  v8.setFlagsFromString('--expose-gc');
+  const collect = vm.runInNewContext('gc');
+  const text = `<svg>${'x'.repeat(64 * 1024 - 11)}</svg>`;
+  const bytes = new TextEncoder().encode(text);
+  let at = 0;
+  let before;
+  let held;
+  const byteAtATime = new Response(new ReadableStream({
+    pull(controller) {
+      if (at === 0) {
+        collect();
+        before = process.memoryUsage().heapUsed;
+      }
+      if (at === bytes.length) {
+        collect();
+        held = process.memoryUsage().heapUsed - before;
+        controller.close();
+        return;
+      }
+      controller.enqueue(Uint8Array.of(bytes[at]));
+      at += 1;
+    },
+  }, { highWaterMark: 0 }));
+  const run = await runSync({ ...LIVE, '001-live/assets/big.svg': text }, { replies: { 'big.svg': [byteAtATime] } });
+  assert.equal(run.exit, undefined);
+  assert.equal(run.written.get('/repo/public/writing-assets/001-live/assets/big.svg'), text);
+  assert.ok(held < 3 * 1024 * 1024, `held ${held} bytes of heap for a ${bytes.length}-byte body`);
 });
