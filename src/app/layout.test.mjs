@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import sharp from 'sharp';
 import ts from 'typescript';
 import { APPLE_ICON_SIZE, FAVICON_SIZE } from '../../scripts/make-icons.mjs';
+import * as favicon from '../lib/favicon.ts';
 import * as site from '../lib/site.ts';
 
 // Only the metadata is read here, so every component a module imports is a stand-in.
@@ -16,11 +17,13 @@ const dependencies = {
   'react-dom': { preload() {} },
   './fonts/pretendard-variable.css': {},
   './globals.css': {},
+  '@/components/providers/FaviconSync': { FaviconSync: Symbol('FaviconSync') },
   '@/components/providers/ThemeProvider': { ThemeProvider: Symbol('ThemeProvider') },
   '@/components/layout/Header': { Header: Symbol('Header') },
   '@/components/layout/Footer': { Footer: Symbol('Footer') },
   '@vercel/analytics/next': { Analytics: Symbol('Analytics') },
   '@/components/intro/PageEntry': { PageEntry: Symbol('PageEntry') },
+  '@/lib/favicon': favicon,
   '@/lib/site': site,
   '@/lib/themeInit': { THEME_INIT_SCRIPT: '' },
   '@/components/about/AboutCrossing': { AboutCrossing: Symbol('AboutCrossing') },
@@ -155,16 +158,24 @@ test('favicon: every icon URL carries ICON_VERSION, and every icon is the size i
   const fallback = `${FAVICON_SIZE}x${FAVICON_SIZE}`;
   // Copied out field by field: the list comes from the vm's realm.
   assert.deepEqual(Array.from(icons.icon, ({ url, type, sizes }) => [url, type, sizes]), [
-    [`/favicon.svg${version}`, 'image/svg+xml', 'any'],
     [`/favicon.png${version}`, 'image/png', fallback],
   ]);
   assert.equal(icons.apple, `/apple-icon.png${version}`);
-  assert.ok(existsSync(new URL('./favicon.svg', PUBLIC)), 'public/favicon.svg is missing');
+
+  // The SVG icon is the head's first child, outside the metadata Next re-renders
+  // on a client navigation, so FaviconSync's href change is never duplicated.
+  const html = moduleOf('./layout.tsx').default({ children: null });
+  const head = find(html, ({ type }) => type === 'head');
+  const [first] = [head.props.children].flat();
+  assert.deepEqual([first.type, { ...first.props }], ['link', { rel: 'icon', href: `/favicon.svg${version}`, type: 'image/svg+xml', sizes: 'any' }]);
+  for (const href of [`/favicon.svg${version}`, ...Object.values(favicon.SCHEME_FAVICONS)]) {
+    assert.ok(href.endsWith(version), href);
+    assert.ok(existsSync(new URL(`.${href.slice(0, -version.length)}`, PUBLIC)), `public${href} is missing`);
+  }
 
   // The web app manifest and the Organization logo share the versioned fallback.
   const manifest = moduleOf('./manifest.ts').default();
   assert.deepEqual(Array.from(manifest.icons, ({ src, sizes, type }) => [src, sizes, type]), [[`/favicon.png${version}`, fallback, 'image/png']]);
-  const html = moduleOf('./layout.tsx').default({ children: null });
   const jsonLd = find(html, ({ props }) => props?.type === 'application/ld+json');
   assert.equal(JSON.parse(jsonLd.props.dangerouslySetInnerHTML.__html).logo, `https://1six.tech/favicon.png${version}`);
 

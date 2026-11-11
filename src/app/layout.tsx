@@ -2,11 +2,13 @@ import { preload } from 'react-dom';
 import type { Metadata, Viewport } from 'next';
 import './fonts/pretendard-variable.css';
 import './globals.css';
+import { FaviconSync } from '@/components/providers/FaviconSync';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Analytics } from '@vercel/analytics/next';
 import { PageEntry } from '@/components/intro/PageEntry';
+import { ADAPTIVE_FAVICON } from '@/lib/favicon';
 import { ICON_VERSION } from '@/lib/site';
 import { THEME_INIT_SCRIPT } from '@/lib/themeInit';
 
@@ -95,10 +97,11 @@ export const metadata: Metadata = {
     canonical: 'https://1six.tech',
   },
 
-  // favicon.svg is the source; scripts/make-icons.mjs renders the PNGs from it.
+  // favicon.svg is the source: scripts/make-icons.mjs derives its light and
+  // dark copies and renders the PNGs from the light one. The SVG icon itself
+  // is a <link> in RootLayout's <head>.
   icons: {
     icon: [
-      { url: `/favicon.svg?v=${ICON_VERSION}`, type: 'image/svg+xml', sizes: 'any' },
       { url: `/favicon.png?v=${ICON_VERSION}`, type: 'image/png', sizes: '192x192' },
     ],
     apple: `/apple-icon.png?v=${ICON_VERSION}`,
@@ -133,6 +136,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Here, not in metadata.icons: a client navigation re-renders the
+            metadata, and React would add a second SVG icon beside this one
+            once FaviconSync has changed its href. */}
+        <link rel="icon" href={ADAPTIVE_FAVICON} type="image/svg+xml" sizes="any" />
         {/* Must run before the first paint (theme, Safari's status bar tint,
             the Home intro lock): see THEME_INIT_SCRIPT. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
@@ -157,6 +164,7 @@ export default function RootLayout({
           <Footer />
         </ThemeProvider>
         <PageEntry />
+        <FaviconSync />
         <Analytics />
       </body>
     </html>

@@ -9,7 +9,7 @@ export const COPYRIGHT = '© 2026 - 2027 1SIX Technologies Inc.';
  * engines keep an icon by its URL, so bump it whenever an icon file changes;
  * src/app/icons.test.mjs pins each version's file digests.
  */
-export const ICON_VERSION = '2';
+export const ICON_VERSION = '3';
 
 export const NAV_ITEMS = [
   { label: 'About', href: '/' },

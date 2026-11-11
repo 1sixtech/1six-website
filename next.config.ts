@@ -94,14 +94,14 @@ const nextConfig: NextConfig = {
         },
       ],
     },
-    {
-      // The favicon opened as a document by its URL runs nothing, should a
-      // future export carry a script; as an icon it never runs one anyway.
-      source: '/favicon.svg',
+    // A favicon SVG opened as a document by its URL runs nothing, should a
+    // future export carry a script; as an icon it never runs one anyway.
+    ...['/favicon.svg', '/favicon-light.svg', '/favicon-dark.svg'].map((source) => ({
+      source,
       headers: [
         { key: 'Content-Security-Policy', value: "default-src 'none'; style-src 'unsafe-inline'; sandbox" },
       ],
-    },
+    })),
   ],
 };
 

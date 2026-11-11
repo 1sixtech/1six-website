@@ -2099,22 +2099,27 @@ test('a file at the top level is never part of a folder, even one whose name it 
 test('a body sent a byte at a time holds about its own size in memory, not an object for each byte', async () => {
   // Kept as they came, parts a byte long cost hundreds of bytes each (see readBody): this 64 KB body would hold
   // megabytes of heap at its last byte. Garbage is collected before each reading, so only what is still held counts.
+  // Node's test runner keeps an entry for every promise a test creates until a destroy hook removes it, a turn after
+  // the collection that frees the promise; read at once, that map alone can pass 3 MB. So each reading waits a turn
+  // and collects again.
   v8.setFlagsFromString('--expose-gc');
   const collect = vm.runInNewContext('gc');
+  const heapUsed = async () => {
+    collect();
+    await new Promise((resolve) => setImmediate(resolve));
+    collect();
+    return process.memoryUsage().heapUsed;
+  };
   const text = `<svg>${'x'.repeat(64 * 1024 - 11)}</svg>`;
   const bytes = new TextEncoder().encode(text);
   let at = 0;
   let before;
   let held;
   const byteAtATime = new Response(new ReadableStream({
-    pull(controller) {
-      if (at === 0) {
-        collect();
-        before = process.memoryUsage().heapUsed;
-      }
+    async pull(controller) {
+      if (at === 0) before = await heapUsed();
       if (at === bytes.length) {
-        collect();
-        held = process.memoryUsage().heapUsed - before;
+        held = (await heapUsed()) - before;
         controller.close();
         return;
       }
