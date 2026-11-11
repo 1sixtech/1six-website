@@ -3,6 +3,12 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.16.1] - 2026-11-11
+
+### Removed
+
+- The footer's company column no longer lists "Investors" beside About, Thesis and Writing, so it holds only the site's pages. The backers are still on About, reached from its "who backs us" link or at `/#investors`.
+
 ## [0.3.16.0] - 2026-11-11
 
 ### Changed
