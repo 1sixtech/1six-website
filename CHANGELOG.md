@@ -3,6 +3,20 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.15.0] - 2026-11-11
+
+### Fixed
+
+- The article sync now counts every download's bytes as they arrive. A host that sends far more than GitHub listed can no longer run the build out of memory before the sync's 10-minute report prints, even when it sends a byte at a time.
+- Each article file must arrive at exactly the size GitHub lists. One that runs long is cut off at that size, and one that ends early, which used to be saved cut short, is fetched again. A file still the wrong size after three retries fails the build with its name and both sizes, and the articles already on the site stay in place.
+- A file listing that gives a file a negative size, or lists an article's README twice, can no longer slip past the 200 MB limits.
+
+### Changed
+
+- The commit lookup may send at most 1 KB and the file listing 32 MB, well above the 17.6 MB of a listing GitHub cut off at its own limit. An error message from GitHub longer than 4 KB is replaced by a note of its size.
+- A huge file listing is checked in time proportional to its size, so it can no longer hold the build past the sync's deadline.
+- When the sync runs out of time, its report names bodies of the wrong size as the cause of their retries, not server errors or network failures.
+
 ## [0.3.14.0] - 2026-11-10
 
 ### Added
