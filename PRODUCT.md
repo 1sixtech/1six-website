@@ -41,6 +41,7 @@ web
 
 - Name: 1SIX in the wordmark and social-card titles, written "1six" in lowercase body copy; lowercase manifesto voice. Every page's browser tab title is "1six" (owner, 2026-11-10).
 - Favicon: the 16 mark in black on a slightly rounded #FF3700 square (owner, 2026-11-10). `public/favicon.svg` is the source; `scripts/make-icons.mjs` renders the PNGs, and the iOS home-screen icon is the same square full-bleed. Icon URLs carry a version so browsers and search engines fetch a changed icon.
+- Favicon color scheme (owner, 2026-11-11): the mark follows the browser's color scheme, black on light and white on dark, and in Chrome and Firefox it switches while the tab is open when the OS theme changes, with no reload. Safari reads neither the SVG's color-scheme rule nor a favicon changed after load, so Safari keeps the black mark; accepted.
 - The home team story is collective. Writing names confirmed authors and links to their profiles; Dean N.'s profile is authorized by the November 2026 brief and the owner's credential correction; Henry P.'s profile by the owner (2026-11-09).
 - Accent #FF3700, the logo's red, on warm off-white and charcoal grounds; Pretendard Variable; light and dark themes. It is the site's only red, at every text size and in both themes (owner, 2026-11-10); the darker small-text red is retired.
 - ASCII-mosaic WebGL imagery (desert, graph, "16" symbol, world map) is the visual signature.

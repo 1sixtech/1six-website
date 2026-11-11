@@ -64,13 +64,14 @@ src/
     team/                     # CareersSection.tsx (parked, not rendered)
     layout/                   # Header.tsx, Footer.tsx, FooterLink.tsx
     ui/                       # Reusable: ScrollRevealWrapper, RollingNumber, ThemeToggle, Logo
-    providers/                # ThemeProvider.tsx
+    providers/                # ThemeProvider.tsx, FaviconSync.tsx (the tab icon follows the OS color scheme)
   hooks/
     useScrollReveal.ts        # One-shot first-scroll detection
     useReducedMotion.ts       # Respects prefers-reduced-motion
     useDevicePixelRatio.ts    # Current device pixel ratio (re-renders on a monitor move or zoom)
   lib/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, ICON_VERSION, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
+    favicon.ts                # Favicon hrefs per color scheme and faviconHref(), the swap rule FaviconSync applies
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     writingAssets.mjs         # Article image types, shared by the site and the sync script
@@ -86,10 +87,11 @@ content/writing/              # Downloaded article Markdown (gitignored)
 public/
   resource/                   # Videos (MP4), textures (PNG), images (WebP)
   writing-assets/             # Downloaded article assets (gitignored)
-  favicon.svg                 # Favicon source: the 16 mark, black on a rounded #FF3700 square
+  favicon.svg                 # Favicon source: the 16 mark on a rounded #FF3700 square, black, or white in dark mode
+  favicon-light.svg, favicon-dark.svg # Fixed-color copies of favicon.svg, written by make-icons
 scripts/sync-writing.mjs       # Sync from 1sixtech/1six-researchs
 scripts/bake-mosaic-atlases.mjs # Cell-sized glyph sheets from the 16 MP exports
-scripts/make-icons.mjs        # favicon.png and apple-icon.png from public/favicon.svg
+scripts/make-icons.mjs        # favicon-light.svg, favicon-dark.svg, favicon.png, apple-icon.png from public/favicon.svg
 vercel.json                   # Repository-owned buildCommand: pnpm build
 ```
 
@@ -296,10 +298,19 @@ Thesis anchors: `/thesis#thesis`, `/thesis#products`. The header and footer Thes
 
 SEO: every page's tab title is `1six` (the root layout's; pages set none), while Open Graph cards keep
 per-page titles. With one title, screen readers name no page on navigation (accepted, see PRODUCT.md).
-Icon URLs carry `?v=ICON_VERSION`: after `scripts/make-icons.mjs` writes new icons, bump it in `site.ts`
-and record the files' SHA-256 in `ICON_DIGESTS` (`src/app/icons.test.mjs`). `/favicon.svg` gets a
-sandboxed CSP. Each page supplies its canonical URL; `sitemap.ts` includes the root, Thesis, Writing,
-articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and PWA metadata.
+The favicon's mark is black on light and white on dark. `public/favicon.svg` is the one hand-edited
+source and carries a `prefers-color-scheme` rule; `scripts/make-icons.mjs` derives the fixed-color
+`favicon-light.svg` and `favicon-dark.svg` from it and renders the PNGs from the light one. Chrome and
+Firefox draw an SVG favicon once, in the scheme it loaded in, so `FaviconSync` reads the scheme on the
+media query's change event, when the tab is shown, and every second. Once the scheme differs from the
+load scheme, it points the icon link at the current scheme's fixed copy (`faviconHref()` in
+`src/lib/favicon.ts`). The root layout renders that link in `<head>`, not through `metadata.icons`, so a
+client navigation never adds a second SVG icon. Safari keeps the black mark (accepted, see PRODUCT.md).
+After editing `favicon.svg`, run `node scripts/make-icons.mjs`, bump `ICON_VERSION` in `site.ts` (every
+icon URL carries `?v=ICON_VERSION`), and record the five icon files' SHA-256 in `ICON_DIGESTS`
+(`src/app/icons.test.mjs`). Every favicon SVG gets a sandboxed CSP. Each page supplies its canonical
+URL; `sitemap.ts` includes the root, Thesis, Writing, articles, and author profiles. `robots.ts` and
+`manifest.ts` provide crawler and PWA metadata.
 
 ## Deployment
 
@@ -310,8 +321,8 @@ articles, and author profiles. `robots.ts` and `manifest.ts` provide crawler and
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
   stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
   writer profile output, page metadata and the shared tab title, the icons against `favicon.svg` and
-  their pinned digests, and actual crossing, intro, mobile capture, and header navigation effects
-  with controlled dependencies.
+  their pinned digests, the favicon's color-scheme swap, and actual crossing, intro, mobile capture,
+  and header navigation effects with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
   for desktop/mobile navigation, themes, reduced motion, scroll capture, and figure checks.
 

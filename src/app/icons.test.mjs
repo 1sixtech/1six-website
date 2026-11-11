@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { APPLE_ICON_SIZE, FAVICON_SIZE, isMain, renderIcons } from '../../scripts/make-icons.mjs';
+import { APPLE_ICON_SIZE, FAVICON_SIZE, isMain, renderIcons, schemeSvg } from '../../scripts/make-icons.mjs';
+import { SCHEME_FAVICONS } from '../lib/favicon.ts';
 import { ICON_VERSION } from '../lib/site.ts';
 
 const PUBLIC = new URL('../../public/', import.meta.url);
@@ -14,9 +15,24 @@ const SVG = readFileSync(new URL('favicon.svg', PUBLIC), 'utf8');
 // The logo red (PRODUCT.md), which favicon.svg alone sets for the icons.
 const RED = '#FF3700';
 const RED_RGB = [255, 55, 0];
+// Every icon file the site serves, and the SVG ones among them.
+const ICON_FILES = readdirSync(PUBLIC).filter((name) => /^(favicon|apple-icon)\b/.test(name));
+const FAVICON_SVGS = ICON_FILES.filter((name) => name.endsWith('.svg'));
+const publicFile = (href) => new URL(new URL(href, 'https://1six.tech').pathname.slice(1), PUBLIC);
 
 const pixels = async (input) => sharp(input).raw().toBuffer({ resolveWithObject: true });
 const at = ({ data, info }, x, y) => [...data.subarray((y * info.width + x) * info.channels, (y * info.width + x + 1) * info.channels)];
+// How many opaque pixels are black, and how many white: the mark's two colors.
+function markPixels({ data, info }) {
+  const count = { black: 0, white: 0 };
+  for (let i = 0; i < data.length; i += info.channels) {
+    if (info.channels === 4 && data[i + 3] < 255) continue;
+    const rgb = [data[i], data[i + 1], data[i + 2]];
+    if (rgb.every((value) => value < 16)) count.black++;
+    if (rgb.every((value) => value > 239)) count.white++;
+  }
+  return count;
+}
 
 // The share of channels more than 8/255 apart. Rasterizers differ by a step or
 // two along antialiased edges between platforms, which the 8/255 absorbs; an
@@ -31,10 +47,32 @@ const radius = (svg) => Number(/ rx="([\d.]+)"/.exec(svg)[1]);
 const withRadius = (svg, r) => svg.replace(/ rx="[\d.]+"/, ` rx="${r}"`);
 const viewBoxWidth = (svg) => Number(/viewBox="\s*-?[\d.]+\s+-?[\d.]+\s+([\d.]+)/.exec(svg)[1]);
 
-test('favicon.svg is the source: the shipped PNGs are what make-icons renders from it', async () => {
-  assert.match(SVG, new RegExp(`fill="${RED}"`), 'the square is the logo red');
-  assert.match(SVG, /fill="#000"/, 'the mark is black');
+test('favicon.svg: a logo red square whose mark follows the browser\'s color scheme', () => {
+  assert.match(SVG, new RegExp(`<rect [^>]*fill="${RED}"`), 'the square is the logo red');
+  assert.match(SVG, /<style>[^<]*@media \(prefers-color-scheme:\s*dark\)[^<]*<\/style>/, 'a dark-mode rule in the SVG\'s own style');
+});
 
+test('favicon.svg is the source: the light and dark copies are what make-icons derives from it', () => {
+  assert.deepEqual(Object.keys(SCHEME_FAVICONS).sort(), ['dark', 'light']);
+  for (const [scheme, href] of Object.entries(SCHEME_FAVICONS)) {
+    const shipped = readFileSync(publicFile(href), 'utf8');
+    assert.equal(shipped, schemeSvg(SVG, scheme), `${href} differs from favicon.svg: run node scripts/make-icons.mjs`);
+    assert.doesNotMatch(shipped, /@media/, `${href} draws one scheme`);
+  }
+});
+
+test('favicon copies: the mark is black on light and white on dark, and the PNGs carry the light one', async () => {
+  const light = markPixels(await pixels(fileURLToPath(publicFile(SCHEME_FAVICONS.light))));
+  const dark = markPixels(await pixels(fileURLToPath(publicFile(SCHEME_FAVICONS.dark))));
+  assert.ok(light.black > 0 && light.white === 0, `light: ${JSON.stringify(light)}`);
+  assert.ok(dark.white > 0 && dark.black === 0, `dark: ${JSON.stringify(dark)}`);
+  for (const name of ['favicon.png', 'apple-icon.png']) {
+    const png = markPixels(await pixels(fileURLToPath(new URL(name, PUBLIC))));
+    assert.ok(png.black > 0 && png.white === 0, `${name}: ${JSON.stringify(png)}`);
+  }
+});
+
+test('favicon.svg is the source: the shipped PNGs are what make-icons renders from it', async () => {
   const rendered = await renderIcons(SVG);
   for (const [name, buffer] of [['favicon.png', rendered.favicon], ['apple-icon.png', rendered.appleIcon]]) {
     const expected = await pixels(fileURLToPath(new URL(name, PUBLIC)));
@@ -79,6 +117,15 @@ test('make-icons: the radius is the SVG\'s to set, but the square must be rounde
   await assert.rejects(renderIcons(SVG.replace('<g ', '<rect rx="5"/><g ')), /expected one rounded square \(rx\), found 2/);
 });
 
+test('make-icons: the copies resolve favicon.svg\'s one dark-mode block and keep no media query', () => {
+  const block = /@media \(prefers-color-scheme:dark\)\{[^]*?\}\}/;
+  assert.match(SVG, block);
+  const [rules] = SVG.match(block);
+  assert.throws(() => schemeSvg(SVG.replace(block, ''), 'dark'), /expected one @media \(prefers-color-scheme:dark\) block, found 0/);
+  assert.throws(() => schemeSvg(SVG.replace(block, rules + rules), 'dark'), /found 2/);
+  assert.throws(() => schemeSvg(SVG.replace(block, `${rules}@media (min-width:32px){.m{fill:red}}`), 'light'), /only the prefers-color-scheme:dark media query/);
+});
+
 test('make-icons: writes the PNGs only when run as the script, also through a symlink', () => {
   const script = fileURLToPath(new URL('../../scripts/make-icons.mjs', import.meta.url));
   const scriptUrl = pathToFileURL(script).href;
@@ -105,16 +152,19 @@ test('make-icons: a radius written as rx and ry still gives iOS a full-bleed ico
   assert.deepEqual(at(await pixels(appleIcon), 0, 0), RED_RGB, 'the iOS corner is red, not black');
 });
 
-test('favicon.svg: opened by its URL, it gets the sandboxed policy, not the site\'s', async () => {
+test('favicon SVGs: opened by their URLs, each gets the sandboxed policy, not the site\'s', async () => {
   const { default: config } = await import('../../next.config.ts');
   const rules = await config.headers();
   const at = (source) => rules.findIndex((rule) => rule.source === source);
-  // A header's last matching rule wins, so the favicon's comes after the site-wide one.
-  assert.ok(at('/favicon.svg') > at('/(.*)'), 'the favicon rule follows the site-wide rule');
-  const csp = rules[at('/favicon.svg')].headers.find(({ key }) => key === 'Content-Security-Policy').value;
-  assert.match(csp, /default-src 'none'/);
-  assert.match(csp, /\bsandbox\b/);
-  assert.doesNotMatch(csp, /script-src/);
+  assert.deepEqual([...FAVICON_SVGS].sort(), ['favicon-dark.svg', 'favicon-light.svg', 'favicon.svg']);
+  for (const name of FAVICON_SVGS) {
+    // A header's last matching rule wins, so the favicon's comes after the site-wide one.
+    assert.ok(at(`/${name}`) > at('/(.*)'), `a rule for /${name} follows the site-wide rule`);
+    const csp = rules[at(`/${name}`)].headers.find(({ key }) => key === 'Content-Security-Policy').value;
+    assert.match(csp, /default-src 'none'/, name);
+    assert.match(csp, /\bsandbox\b/, name);
+    assert.doesNotMatch(csp, /script-src/, name);
+  }
 });
 
 // The SHA-256 of every icon file served under each ICON_VERSION. Browsers and
@@ -126,10 +176,17 @@ const ICON_DIGESTS = {
     'favicon.png': '6dc7117340ce6824745a3bdd4b495ca60ab13c6fc194f5b68a056cb90e852cf1',
     'apple-icon.png': '35368d457f955073c6c17a811d4e82701c390916d2c2270a01038d1e1ffaa8b6',
   },
+  3: {
+    'favicon.svg': 'a43f32839402bbfd073beaf316c172c9bd57da0ea123a7cb701969919b8bf0d8',
+    'favicon-light.svg': 'dc9c7d55acd51dc4f576a16fd504a1a0d499cad679c363b7cfd2da5b641c348f',
+    'favicon-dark.svg': '29942c582281e966a0e90401661235a990ee4aa2a88550815a675acac47e5e62',
+    'favicon.png': '6dc7117340ce6824745a3bdd4b495ca60ab13c6fc194f5b68a056cb90e852cf1',
+    'apple-icon.png': '35368d457f955073c6c17a811d4e82701c390916d2c2270a01038d1e1ffaa8b6',
+  },
 };
 
-test('ICON_VERSION: changed icon files ship under a new version', () => {
-  const digests = Object.fromEntries(Object.keys(ICON_DIGESTS[2]).map((name) => [
+test('ICON_VERSION: changed or added icon files ship under a new version', () => {
+  const digests = Object.fromEntries(ICON_FILES.map((name) => [
     name,
     createHash('sha256').update(readFileSync(new URL(name, PUBLIC))).digest('hex'),
   ]));
