@@ -20,7 +20,7 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 ## Writing
 
-The article repository's publishing gate is recorded under Completed.
+The private article publishing workflow is recorded under Completed.
 
 ## Site-wide
 
@@ -71,7 +71,7 @@ protection and allowed Preview access to all articles on 2026-11-16. See [publis
 
 **Why:** Every build pulls the articles from that repository's `main`, so an unreviewed push there reaches the site at the next deploy.
 
-**Resolution:** Not pinned: a fixed commit would stop new articles from appearing, and articles now publish automatically. `main` in `1sixtech/1six-researchs` requires a pull request but no approval, so one account can publish alone, and repository admins can bypass the pull request. The owner accepted that risk on 2026-11-09. Requiring one approval, re-approval after new pushes, and enforcing the rule for admins would close it.
+**Resolution:** Not pinned: a fixed commit would stop new articles from appearing, and articles now publish automatically. On 2026-11-09, `main` in `1sixtech/1six-researchs` required a pull request but no approval, with an admin bypass. The owner subsequently chose to remove branch protection on 2026-11-16. PR validation is advisory; direct pushes to `main` can publish. See the private article publishing item above for the current workflow.
 
 **Completed:** v0.3.5.0 (2026-11-09)
 

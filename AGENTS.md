@@ -137,8 +137,8 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   may send at most 1 KB, the listing 32 MB (one GitHub cut off at its limit measured 17.6 MB), and a refusal's body 4 KB
   (past that, the refusal's status still stands, unretried). A file still the wrong size after its retries fails the
   build, naming the file and both sizes. At most eight files download at once, each keeping its place through its
-  retries, so a lasting outage fails as fast however many files are queued. The sync has 10 minutes in all: past that
-  the build fails before anything is written, naming what the sync was doing, where the time went (rate-limit holds,
+  retries, so a lasting outage fails as fast however many files are queued. The content sync has 10 minutes after
+  authentication: past that the build fails before anything is written, naming what the sync was doing, where the time went (rate-limit holds,
   retry waits, slow or missing answers), and the requests still waiting for an answer, instead of running into Vercel's
   45-minute build limit. `writingAuth.mjs` mints a Contents: read token restricted to the article repository
   using `WRITING_GITHUB_APP_ID`, `WRITING_GITHUB_INSTALLATION_ID`, and `WRITING_GITHUB_PRIVATE_KEY`. An explicit
@@ -326,8 +326,8 @@ URL; `sitemap.ts` includes the root, Thesis, Writing, articles, and author profi
 - **Analytics**: `@vercel/analytics/next` in root layout
 - No CI/CD workflows in repo (no `.github/` directory)
 - Tests: `pnpm test` runs Node's built-in test runner over `src/**/*.test.mjs` (Node 22.15+; TypeScript is
-  stripped natively). Tests cover pure logic, article safety, the article sync against a fake GitHub,
-  writer profile output, page metadata and the shared tab title, the icons against `favicon.svg` and
+  stripped natively). Tests cover pure logic, article safety, GitHub App authentication, the article sync against
+  a fake GitHub, writer profile output, page metadata and the shared tab title, the icons against `favicon.svg` and
   their pinned digests, the favicon's color-scheme swap, and actual crossing, intro, mobile capture,
   and header navigation effects with controlled dependencies.
   There is no DOM test package or in-repo browser runner; use gstack `/browse`
