@@ -1,8 +1,9 @@
 # Private writing and publication
 
-The article source is `1sixtech/1six-researchs`. Its published articles and figures remain public on
+The article source is `1sixtech/1six-researchs`, and the website source is `1sixtech/1six-website`.
+Both can operate as private repositories while published pages and figures remain public on
 1six.tech. Repository privacy protects access to the source, history, drafts and internal review;
-it does not make the website private or retract copies that were already public.
+it does not make the website or its Preview deployments private or retract copies already public.
 
 The owner approved private operation without branch protection and with Preview access to the whole
 article repository on 2026-11-16. The PR validation workflow is advisory, not a required merge gate.
@@ -70,10 +71,35 @@ credential, draft text or private filename is included.
 
 ## Validation and result checking
 
-The article repository's `Validate articles` workflow runs on pull requests without a path filter.
-It checks out the public website's `main`, supplies the proposed article merge SHA, and runs the
-actual production build. It also runs the publication monitor's tests. It uses `pull_request`,
-read-only repository permissions and no stored App key. It is deliberately not required on `main`.
+The article repository's `Validate articles` workflow runs on same-repository pull requests without
+a path filter. It checks out the website's `main`, supplies the proposed article merge SHA,
+and runs the actual production build. It also runs the publication monitor's tests. It uses
+`pull_request` and read-only repository permissions. It is deliberately not required on `main`.
+
+The workflow's `github.token` reads only the article repository. Website checkout uses the article
+repository's `WEBSITE_READ_SSH_KEY` Actions secret, paired with a **read-only deploy key** on
+`1six-website`. The key cannot write website code or read another private repository. Both checkouts
+set `persist-credentials: false`; checkout removes its credentials before tests and builds. A missing
+key fails the job explicitly, even if the website is still public. Never copy this key to the runner's
+global SSH configuration or use a developer's personal token instead. To rotate it, add a new read-only
+deploy key, replace the Actions secret, verify validation, then delete the previous deploy key.
+
+Both article workflows use the organization runner `1six-macmini-macos` with labels
+`[self-hosted, macOS, ARM64, 1six-ci]`. Its runner group allows selected private repositories only;
+public repository access is disabled. Register replacements to `https://github.com/1sixtech` and
+keep automatic runner updates enabled. The service has baseline Node.js and npm; workflows select
+Node.js 22 and pnpm 10.12.3 themselves. Failure reporting uses pinned `actions/github-script`.
+The private article README documents the dedicated account, installation, logs, terminal-based
+service start/stop and recovery after reboot. Keep the Mac awake and connected: an offline runner
+queues validation and publication instead of moving work to GitHub-hosted runners.
+
+The rollout was verified on 2026-11-16: article PR #6 validation passed on the organization runner,
+and its merged `main` push completed publication. The live revision endpoint returned the exact
+article merge commit `d345a67abe22ddca30feeede43555ca27cd1e6e3`. Newer publications can advance it.
+
+Use a dedicated runner account with no personal credentials or unrelated workspaces. Validation
+executes same-repository PR code, so repository write access is limited to trusted maintainers.
+Fork article PRs are excluded by the article validation workflow. The owner retains the decision not to require branch protection.
 
 After the Deploy Hook, the publish job polls the revision on **https://1six.tech**, at most once every
 30 seconds for 20 minutes. It succeeds only when that domain serves the requested SHA or a descendant
@@ -82,8 +108,17 @@ deployment, active rollback, or older `WRITING_GIT_REF` pin cannot alone turn th
 
 On failure the workflow opens an issue in the article repository, assigned to the publisher where
 possible, with a link to the Actions run. The full job has 25 minutes, including checkout, the hook
-request and observation. Private Actions consumes the organization's included compute usage; check
-its budget if jobs stop starting.
+request and observation. Self-hosted execution does not consume GitHub-hosted runner compute usage;
+artifact and cache storage remain separate. A queued job should first be checked against the runner's
+online status and labels. Older runs targeting `ubuntu-latest` can still show the previous billing error.
+
+## Private website deployment
+
+Vercel's GitHub App reads website code independently of both writing credentials above. Keep it
+installed with access to `1six-website`; the project stays on the `1six` Pro team and deploys `main`.
+For private organization repositories, commit authors also need access to the Vercel team/project
+through their linked GitHub account. GitHub repository access alone does not grant deployment access.
+Source privacy does not change domain routing, public assets, or Vercel Deployment Protection settings.
 
 If an article breaks the build while a website fix must ship, set `WRITING_GIT_REF` in Vercel to a
 known good article SHA and deploy. Newer article publishing jobs will correctly fail to confirm

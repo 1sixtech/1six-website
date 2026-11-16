@@ -3,6 +3,13 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.17.1] - 2026-11-16
+
+### Changed
+
+- Document private website checkout using a repository-scoped, read-only deploy key and article validation/publication on the owner's self-hosted Mac mini. Record runner setup, key rotation, fork exclusions, and the separate GitHub and Vercel access requirements.
+- Record the completed organization runner rollout and verified article PR validation, main-push publication and live production revision. Website visibility remains a separate operation.
+
 ## [0.3.17.0] - 2026-11-16
 
 ### Changed
