@@ -20,7 +20,18 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 ## Writing
 
-The private article publishing workflow is recorded under Completed.
+### Finish the self-hosted publication rollout
+
+**What:** Register the owner's Mac mini runner for `1six-researchs` with the `1six-writing` label,
+run PR #6 validation, merge it and confirm its publication job on 1six.tech, then make the website
+repository private and verify fresh Vercel and private-checkout builds.
+
+**Status:** The read-only website deploy key and article Actions secret are configured. The workflow
+changes pass local tests and actionlint. Runner registration and live workflow verification remain
+pending; repository visibility must not change before those checks succeed.
+
+**Priority:** P1
+**Depends on:** Owner registering and starting the Mac mini runner.
 
 ## Site-wide
 
@@ -41,15 +52,15 @@ The private article publishing workflow is recorded under Completed.
 The original problem statements below describe the earlier release; each resolution records the current behavior.
 
 
-### Private article publishing
+### Private article reads and publication revision
 
-**What:** Authenticate private article reads and confirm publication on the production domain.
+**What:** Authenticate private article reads and expose the production article revision.
 
 **Resolution:** The website uses the organization-owned read-only GitHub App in Production and Preview;
 article Actions supplies its own repository token. The sync publishes a revision stamp after saving all
-files. The article repository validates PRs with a real website build and waits for the expected live
-revision (or a verified descendant), opening an issue on failure. The owner explicitly chose no branch
-protection and allowed Preview access to all articles on 2026-11-16. See [publishing operations](docs/WRITING_PUBLISHING.md).
+files. The owner explicitly chose no branch protection and allowed Preview access to all articles
+on 2026-11-16. Article PR validation and live publication monitoring are tracked in the rollout above.
+See [publishing operations](docs/WRITING_PUBLISHING.md).
 
 **Completed:** v0.3.17.0 (2026-11-16)
 
