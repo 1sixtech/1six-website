@@ -20,19 +20,7 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 ## Writing
 
-The article repository's publishing gate is recorded under Completed.
-
-### Apply the article repository proposal
-
-**What:** Add the required `Validate articles` check and the build-result wait to `1sixtech/1six-researchs`, and set `WRITING_GITHUB_TOKEN` in Vercel.
-
-**Why:** A malformed article is still found only by the production build after it merges, and a failed hook-triggered build tells no one.
-
-**Context:** The workflows, rollout order, evidence, and what is still unverified are in [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md). It changes another repository and needs the owner's approval. Since v0.3.14.0 the sync alone may take up to 10 minutes before it fails, so the proposal's 12-minute wait for a build result should cover that plus install and `next build` before it is applied.
-
-**Effort:** S
-**Priority:** P1
-**Depends on:** The sync hardening (merged in v0.3.8.0) and the figure check merged to the website's `main`
+The private article publishing workflow is recorded under Completed.
 
 ## Site-wide
 
@@ -52,6 +40,19 @@ The article repository's publishing gate is recorded under Completed.
 
 The original problem statements below describe the earlier release; each resolution records the current behavior.
 
+
+### Private article publishing
+
+**What:** Authenticate private article reads and confirm publication on the production domain.
+
+**Resolution:** The website uses the organization-owned read-only GitHub App in Production and Preview;
+article Actions supplies its own repository token. The sync publishes a revision stamp after saving all
+files. The article repository validates PRs with a real website build and waits for the expected live
+revision (or a verified descendant), opening an issue on failure. The owner explicitly chose no branch
+protection and allowed Preview access to all articles on 2026-11-16. See [publishing operations](docs/WRITING_PUBLISHING.md).
+
+**Completed:** v0.3.17.0 (2026-11-16)
+
 ### Count each download's bytes against the size the listing gives it
 
 **What:** In `scripts/sync-writing.mjs`, count each body as it arrives: give up on a file once it passes the size the listing gave it, retry one that ends short, and cap the commit lookup and the listing (about 1 KB and 8 MB).
@@ -70,7 +71,7 @@ The original problem statements below describe the earlier release; each resolut
 
 **Why:** Every build pulls the articles from that repository's `main`, so an unreviewed push there reaches the site at the next deploy.
 
-**Resolution:** Not pinned: a fixed commit would stop new articles from appearing, and articles now publish automatically. `main` in `1sixtech/1six-researchs` requires a pull request but no approval, so one account can publish alone, and repository admins can bypass the pull request. The owner accepted that risk on 2026-11-09. Requiring one approval, re-approval after new pushes, and enforcing the rule for admins would close it.
+**Resolution:** Not pinned: a fixed commit would stop new articles from appearing, and articles now publish automatically. On 2026-11-09, `main` in `1sixtech/1six-researchs` required a pull request but no approval, with an admin bypass. The owner subsequently chose to remove branch protection on 2026-11-16. PR validation is advisory; direct pushes to `main` can publish. See the private article publishing item above for the current workflow.
 
 **Completed:** v0.3.5.0 (2026-11-09)
 

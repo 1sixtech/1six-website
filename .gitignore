@@ -30,3 +30,4 @@ vite.config.ts.timestamp-*
 # Fetched from 1six-researchs during the build
 /content/writing/
 /public/writing-assets/
+/public/writing-revision.json
