@@ -20,18 +20,17 @@ The crossing performance and reduced-motion items are recorded under Completed.
 
 ## Writing
 
-### Finish the self-hosted publication rollout
+### Complete the separately planned website privacy transition
 
-**What:** Register the owner's Mac mini runner for `1six-researchs` with the `1six-writing` label,
-run PR #6 validation, merge it and confirm its publication job on 1six.tech, then make the website
-repository private and verify fresh Vercel and private-checkout builds.
+**What:** Change the website repository visibility in the owner's website privacy rollout, then
+verify fresh Vercel and private-checkout builds. This is separate from the shared CI runner rollout.
 
-**Status:** The read-only website deploy key and article Actions secret are configured. The workflow
-changes pass local tests and actionlint. Runner registration and live workflow verification remain
-pending; repository visibility must not change before those checks succeed.
+**Status:** The read-only website deploy key and article Actions secret are configured. Organization
+runner registration, PR #6 validation, merge and actual production publication succeeded on
+2026-11-16. Website visibility has not been changed by the shared runner rollout.
 
 **Priority:** P1
-**Depends on:** Owner registering and starting the Mac mini runner.
+**Depends on:** The owner's separate website privacy rollout.
 
 ## Site-wide
 
@@ -59,7 +58,8 @@ The original problem statements below describe the earlier release; each resolut
 **Resolution:** The website uses the organization-owned read-only GitHub App in Production and Preview;
 article Actions supplies its own repository token. The sync publishes a revision stamp after saving all
 files. The owner explicitly chose no branch protection and allowed Preview access to all articles
-on 2026-11-16. Article PR validation and live publication monitoring are tracked in the rollout above.
+on 2026-11-16. Article PR #6 validation succeeded on `1six-macmini-macos`; the merged main push's
+publication run succeeded and the public revision matched `d345a67abe22ddca30feeede43555ca27cd1e6e3`.
 See [publishing operations](docs/WRITING_PUBLISHING.md).
 
 **Completed:** v0.3.17.0 (2026-11-16)

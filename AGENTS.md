@@ -114,7 +114,7 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 - A push to that repository's `main` that changes a numbered folder deploys the site: its
   `.github/workflows/publish.yml` calls a Vercel Deploy Hook (the `VERCEL_DEPLOY_HOOK_URL` Actions secret).
   The job confirms `/writing-revision.json` on the production domain before reporting success and opens an
-  issue on failure. Both article workflows use the self-hosted macOS runner labeled `1six-writing`.
+  issue on failure. Both article workflows use the organization runner with labels `[self-hosted, macOS, ARM64, 1six-ci]`.
   Validation checks out the website with the article repo's `WEBSITE_READ_SSH_KEY` secret, a read-only
   deploy key for this repository; its own Actions token reads articles. Fork PRs do not run on this runner.
   Pinning `WRITING_GIT_REF` to an older commit stops newer articles from appearing and their jobs from
