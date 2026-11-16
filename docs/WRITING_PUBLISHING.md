@@ -99,7 +99,7 @@ article merge commit `d345a67abe22ddca30feeede43555ca27cd1e6e3`. Newer publicati
 
 Use a dedicated runner account with no personal credentials or unrelated workspaces. Validation
 executes same-repository PR code, so repository write access is limited to trusted maintainers.
-Fork PRs never run on this machine. The owner retains the decision not to require branch protection.
+Fork article PRs are excluded by the article validation workflow. The owner retains the decision not to require branch protection.
 
 After the Deploy Hook, the publish job polls the revision on **https://1six.tech**, at most once every
 30 seconds for 20 minutes. It succeeds only when that domain serves the requested SHA or a descendant
