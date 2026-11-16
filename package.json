@@ -1,11 +1,11 @@
 {
   "name": "1six-website",
   "private": true,
-  "version": "0.3.16",
+  "version": "0.3.17",
   "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "node scripts/sync-writing.mjs && next build",
+    "build": "node --env-file-if-exists=.env.local scripts/sync-writing.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -37,6 +37,8 @@
     }
   },
   "devDependencies": {
+    "@octokit/auth-app": "^8.3.1",
+    "@octokit/request": "^10.0.16",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.2",
     "@types/react": "^19.0.0",

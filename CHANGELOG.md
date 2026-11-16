@@ -3,6 +3,18 @@
 All notable changes to the 1SIX website are recorded here. Versions follow
 `MAJOR.MINOR.PATCH.MICRO`; `package.json` carries the first three.
 
+## [0.3.17.0] - 2026-11-16
+
+### Changed
+
+- Writing builds authenticate to the private article repository with the organization's read-only GitHub App. Production and Preview mint a short-lived, repository-restricted token for each build. Article Actions and local developers can supply their own repository token; the anonymous download path is removed.
+- Local production builds load writing credentials from `.env.local`. The publishing guide replaces the unimplemented public-repository proposal and records the owner's choice to allow Preview access without article branch protection.
+
+### Added
+
+- `/writing-revision.json` identifies the article commit only after the sync has saved every file. It is not cached or indexed, allowing the article workflow to verify the actual production content instead of only a queued build.
+- App authentication tests cover restricted permissions, signed requests, credential failures and secret-safe errors; sync tests verify the publication stamp and authenticated downloads.
+
 ## [0.3.16.1] - 2026-11-11
 
 ### Removed

@@ -25,11 +25,12 @@ pnpm test         # Unit tests (Node's built-in runner, src/**/*.test.mjs)
 
 Package manager: **pnpm** (`engine-strict=true` in `.npmrc`).
 
-On a fresh checkout, run `pnpm install`, then `node scripts/sync-writing.mjs` before
-`pnpm dev`. Writing content and assets are downloaded from GitHub and ignored by git;
-`pnpm build` runs that sync automatically. No environment variables are required.
+On a fresh checkout, run `pnpm install`, configure a repository-read token in `.env.local` using
+`.env.example`, then `node --env-file-if-exists=.env.local scripts/sync-writing.mjs` before `pnpm dev`.
+Writing content and assets are downloaded from the private article repository and ignored by git.
+`pnpm build` loads `.env.local` for the sync automatically. Vercel Production and Preview use the
+organization-owned GitHub App; article Actions uses `WRITING_GITHUB_TOKEN` (see Writing).
 `WRITING_GIT_REF` optionally selects a reviewed article commit or tag instead of `main`.
-`WRITING_GITHUB_TOKEN` optionally gives the sync a read-only GitHub token (see Writing).
 
 ## Project Structure
 
@@ -73,6 +74,7 @@ src/
     site.ts                   # CONTACT_EMAIL, COPYRIGHT, ICON_VERSION, NAV_ITEMS, isCurrentRoute(), isPlainLeftClick()
     favicon.ts                # The adaptive favicon href and each color scheme's fixed-copy href
     writing.ts                # Synced article loading, metadata, ordering, safe HTML rendering
+    writingAuth.mjs           # Build-only GitHub App or explicit repository-token authentication
     writingCatalog.ts         # Categories, confirmed writers, and URL filter selection
     writingAssets.mjs         # Article image types, shared by the site and the sync script
     writingDraft.mjs          # Draft marker rule, shared by the site and the sync script
@@ -106,12 +108,15 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
 
 ### Writing
 
-- `scripts/sync-writing.mjs` downloads numbered article folders from `1sixtech/1six-researchs` into
+- `scripts/sync-writing.mjs` downloads numbered article folders from private `1sixtech/1six-researchs` into
   `content/writing/` and their assets into `public/writing-assets/`. Every file is read at the one commit
-  `WRITING_GIT_REF` (default `main`) resolves to, because raw GitHub caches a branch URL for five minutes.
+  `WRITING_GIT_REF` (default `main`) resolves to, using authenticated REST API requests.
 - A push to that repository's `main` that changes a numbered folder deploys the site: its
   `.github/workflows/publish.yml` calls a Vercel Deploy Hook (the `VERCEL_DEPLOY_HOOK_URL` Actions secret).
-  Pinning `WRITING_GIT_REF` to a commit or tag stops new articles from appearing.
+  The job confirms `/writing-revision.json` on the production domain before reporting success and opens an
+  issue on failure. Pinning `WRITING_GIT_REF` to an older commit stops newer articles from appearing and their
+  jobs from reporting success. PRs run an advisory `Validate articles` build; branch protection is disabled
+  by owner decision (2026-11-16). Preview builds may read the entire private article repository.
 - Frontmatter accepts `title`, `author`, `date`, `summary`, and `category`. Category IDs are `research`,
   `op-ed`, and `announcements` (case-insensitive); omitted categories default to Research, and invalid
   explicit categories fail the build. Articles sort newest first, with article number as the tie-breaker.
@@ -135,9 +140,11 @@ vercel.json                   # Repository-owned buildCommand: pnpm build
   retries, so a lasting outage fails as fast however many files are queued. The sync has 10 minutes in all: past that
   the build fails before anything is written, naming what the sync was doing, where the time went (rate-limit holds,
   retry waits, slow or missing answers), and the requests still waiting for an answer, instead of running into Vercel's
-  45-minute build limit. With `WRITING_GITHUB_TOKEN` every request uses the REST API; without it files come from
-  `raw.githubusercontent.com`. A token GitHub rejects fails the build, and so does one with a space, line break, or
-  non-ASCII character inside it (surrounding whitespace is trimmed), before any request and without printing it.
+  45-minute build limit. `writingAuth.mjs` mints a Contents: read token restricted to the article repository
+  using `WRITING_GITHUB_APP_ID`, `WRITING_GITHUB_INSTALLATION_ID`, and `WRITING_GITHUB_PRIVATE_KEY`. An explicit
+  `WRITING_GITHUB_TOKEN` is used by article Actions and local developers. Missing credentials fail immediately;
+  there is no anonymous path. Token values and App signing errors are never printed. The revision stamp is
+  written only after all content is saved and served with `Cache-Control: no-store`.
 - Confirmed author profiles live in `writingCatalog.ts`. A bio is optional: without one, the profile
   omits that paragraph and its confirmed credentials supply the page and social-card descriptions.
   Article bylines resolve by author name; an unknown author remains plain text. Profiles list only
@@ -358,7 +365,7 @@ URL; `sitemap.ts` includes the root, Thesis, Writing, articles, and author profi
 - [docs/QA_CHECKLIST.md](docs/QA_CHECKLIST.md): what must pass before a release, for Thesis sections, capture, scroll locks, and page entry.
 - [docs/ABOUT_MOBILE_DESIGN.md](docs/ABOUT_MOBILE_DESIGN.md): mobile About composition, type roles, spacing, and review evidence.
 - [docs/PAGE_ENTRY.md](docs/PAGE_ENTRY.md): About loader readiness, Thesis entry, route cleanup, and regression checks.
-- [docs/ARTICLE_REPO_PROPOSAL.md](docs/ARTICLE_REPO_PROPOSAL.md): proposed required check and build-result alert for the article repository, awaiting the owner's approval.
+- [docs/WRITING_PUBLISHING.md](docs/WRITING_PUBLISHING.md): private source authentication, advisory PR checks, live publication verification, credential rotation and recovery.
 - [THESIS_SCROLL_HISTORY.md](THESIS_SCROLL_HISTORY.md): scroll decisions and regressions (April–November 2026), including the iOS 27 momentum fix and native simulator evidence.
 - [docs/PHASE5_GRID_PLAN.md](docs/PHASE5_GRID_PLAN.md): historical grid implementation plan, not the current backlog.
 - [security_best_practices_report.md](security_best_practices_report.md): historical security audit (2026-04-13; updated 2026-11-05), with paths and findings from those snapshots.

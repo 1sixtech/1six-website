@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Pull published articles from the public 1six-researchs repo.
+// Pull published articles from the private 1six-researchs repo.
 // The site CSP only allows images from this origin, so SVGs are copied into public/.
 
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -11,12 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { ASSET_EXTENSIONS } from '../src/lib/writingAssets.mjs';
 import { isDraftArticle } from '../src/lib/writingDraft.mjs';
 import { isArticleSlug } from '../src/lib/writingSlug.mjs';
+import { getWritingToken } from '../src/lib/writingAuth.mjs';
 
 const REPO = '1sixtech/1six-researchs';
 const REF = process.env.WRITING_GIT_REF || 'main';
-// Optional and read-only. Without one, GitHub allows 60 API requests an hour per
-// address, and a hosted build shares its address with other builds.
-const TOKEN = process.env.WRITING_GITHUB_TOKEN?.trim();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const contentRoot = path.join(root, 'content/writing');
 const publicRoot = path.join(root, 'public/writing-assets');
@@ -24,7 +22,6 @@ const publicRoot = path.join(root, 'public/writing-assets');
 const GITHUB_API_HEADERS = {
   'User-Agent': '1six-website',
   'X-GitHub-Api-Version': '2022-11-28',
-  ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
 };
 
 const NUMBERED_FOLDER = /^[0-9]{3}-/;
@@ -68,9 +65,6 @@ const SYNC_DEADLINE_MS = 10 * 60_000;
 // GitHub allows 100 concurrent REST requests, and a token build reads every file there. A fetch keeps
 // its slot through its retries and waits, so this bounds open requests too.
 const MAX_CONCURRENT_FETCHES = 8;
-// A GitHub token is printable ASCII, so a space or any other character inside one means a bad
-// copy. For a line break, fetch would also quote the whole header, token included, in its error.
-const TOKEN_CHARACTERS = /^[\x21-\x7E]+$/;
 
 const backoff = (retriesUsed) => BACKOFF_BASE_MS * 2 ** retriesUsed;
 const isRateLimit = (status) => status === 403 || status === 429;
@@ -268,17 +262,14 @@ function githubFetch(url, headers, expected) {
   });
 }
 
-// Only an anonymous build can raise its limit this way; a token is limited too.
-const RATE_LIMIT_ADVICE = TOKEN ? '' : ' Set WRITING_GITHUB_TOKEN to raise the GitHub rate limit.';
-
 function tokenHint(answer) {
-  if (TOKEN) return answer.status === 401 ? ' WRITING_GITHUB_TOKEN was rejected: replace or remove it.' : '';
-  return isRateLimit(answer.status) ? RATE_LIMIT_ADVICE : '';
+  return answer.status === 401 || answer.status === 404
+    ? ' Check WRITING_GITHUB_TOKEN or the writing GitHub App installation and repository access.'
+    : '';
 }
 
-// raw.githubusercontent.com caches a branch URL for five minutes, and a Deploy
-// Hook starts this build seconds after a push. Reading by commit SHA gets the
-// pushed files and keeps the listing and every download in one snapshot.
+// Resolve the ref once so the listing and every download share one snapshot,
+// even when another article is merged while the build runs.
 async function resolveCommit() {
   const answer = await githubFetch(`https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(REF)}`, {
     ...GITHUB_API_HEADERS,
@@ -307,16 +298,12 @@ async function listFiles(commit) {
   return tree.tree;
 }
 
-// Only the REST API documents a token and its rate limit, so an authenticated build
-// reads every file there. Without a token the API's 60 an hour is kept for the listing.
 function fileRequest(commit, file) {
   const encoded = file.split('/').map(encodeURIComponent).join('/');
-  return TOKEN
-    ? [
-        `https://api.github.com/repos/${REPO}/contents/${encoded}?ref=${commit}`,
-        { ...GITHUB_API_HEADERS, Accept: 'application/vnd.github.raw+json' },
-      ]
-    : [`https://raw.githubusercontent.com/${REPO}/${commit}/${encoded}`, { 'User-Agent': '1six-website' }];
+  return [
+    `https://api.github.com/repos/${REPO}/contents/${encoded}?ref=${commit}`,
+    { ...GITHUB_API_HEADERS, Accept: 'application/vnd.github.raw+json' },
+  ];
 }
 
 /** Downloads a listed file, which must arrive at exactly the size the listing gave it. */
@@ -452,8 +439,7 @@ function lateReport() {
   const rest = SYNC_DEADLINE_MS - held - waited;
   const lines = [];
   if (refusals > 0) {
-    const advice = held >= NOTABLE_SHARE_MS ? RATE_LIMIT_ADVICE : '';
-    lines.push(`GitHub's rate limit refused ${plural(refusals, 'request')} and held every request for ${duration(held)} in all.${advice}`);
+    lines.push(`GitHub's rate limit refused ${plural(refusals, 'request')} and held every request for ${duration(held)} in all.`);
   }
   if (waiting.length > 0) {
     const wait = waited > 0 ? `, and waiting to retry took ${duration(waited)}${held > 0 ? ' more' : ''}` : '';
@@ -537,9 +523,7 @@ async function download() {
 }
 
 async function main() {
-  if (TOKEN && !TOKEN_CHARACTERS.test(TOKEN)) {
-    throw new Error('WRITING_GITHUB_TOKEN has a space, line break, or non-ASCII character in it: copy the token again.');
-  }
+  GITHUB_API_HEADERS.Authorization = `Bearer ${await getWritingToken()}`;
   // Everything arrives before anything is removed, so a failed or late download leaves
   // the last good sync in place.
   const { commit, downloads, published, drafts } = await withinDeadline(download);
@@ -547,6 +531,9 @@ async function main() {
   await rm(contentRoot, { recursive: true, force: true });
   await rm(publicRoot, { recursive: true, force: true });
   await Promise.all(downloads.map(({ destination, bytes }) => save(bytes, destination)));
+  // Published only after every file is saved. The article workflow checks this
+  // on the production domain, so a queued or rolled-back build cannot look live.
+  await save(`${JSON.stringify({ commit })}\n`, path.join(root, 'public/writing-revision.json'));
 
   console.log(
     `Synced ${published} writing article(s) from ${REPO}@${REF} (${commit.slice(0, 7)})${drafts ? `, skipped ${drafts} draft(s)` : ''}`,
